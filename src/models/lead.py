@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 class Lead(Base):
     __tablename__ = "leads"
 
+    id = Column(Integer, primary_key=True, index=True)
     address = Column(String)
     annual_revenue = Column(Numeric(15, 2))
     assignment_date = Column(DateTime)

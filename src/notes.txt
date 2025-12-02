@@ -1,0 +1,3 @@
+sqlalchemy is ORM
+psychopg2-binary is helps to connect fastapi to postgres
+SQLAlchemy handles schema migrations via Alembic

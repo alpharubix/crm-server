@@ -1,33 +1,37 @@
 from sqlalchemy import Column, Integer, Numeric, String, DateTime
+from sqlalchemy.sql import func
 from ..database import Base
-from datetime import datetime, timezone
-
 
 class Lead(Base):
     __tablename__ = "leads"
 
     id = Column(Integer, primary_key=True, index=True)
-    address = Column(String)
-    annual_revenue = Column(Numeric(15, 2))
-    assignment_date = Column(DateTime)
-    average_time_spent_minutes = Column(Integer)
-    business_status = Column(String)
-    call_back_datetime = Column(DateTime)
-    city = Column(String)
-    company = Column(String)
-    country = Column(String)
-    created_by = Column(String)
-    days_visited = Column(Integer)
-    description = Column(String)
-    distributor_code = Column(String, index=True)
-    first_name = Column(String)
-    first_page_visited = Column(String)
-    first_visit = Column(DateTime)
-    full_name = Column(String)
-    industry = Column(String)
-    last_name = Column(String)
-    email = Column(String, unique=True, nullable=False)
 
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
-    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), nullable=False)
+    # --- Schema Required Fields (Critical for your Form) ---
+    # These match the 'LeadrCreate' schema requirements
+    full_name = Column(String)       # Maps to schema 'name'
+    phone_number = Column(String)    # Added (was missing in your list)
+    email = Column(String, unique=True, nullable=False)
+    pan = Column(String)             # Added (was missing in your list)
+    gstin = Column(String)           # Added (was missing in your list)
+
+    # --- Your Detailed Data Fields (from your list) ---
+    address = Column(String, nullable=True)
+    annual_revenue = Column(Numeric(15, 2), nullable=True)
+    assignment_date = Column(DateTime, nullable=True)
+    business_status = Column(String, default="New") # e.g. New, Contacted
+    city = Column(String, nullable=True)
+    company = Column(String, nullable=True)
+    country = Column(String, nullable=True)
+    created_by = Column(String, nullable=True)
+    description = Column(String, nullable=True)
+    distributor_code = Column(String, index=True, nullable=True)
+    first_name = Column(String, nullable=True) # Optional if using full_name
+    last_name = Column(String, nullable=True)  # Optional if using full_name
+    industry = Column(String, nullable=True)
+
+    # --- System Timestamps ---
+    # using func.now() is often safer for Postgres than python datetime
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now(), server_default=func.now())
 

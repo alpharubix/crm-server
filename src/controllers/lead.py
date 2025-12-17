@@ -54,7 +54,8 @@ def update_customer(db: Session, lead_id: int, data: LeadCreate) -> Lead:
     db.refresh(lead)
     return lead
 
-
+def get_lead_by_id(db: Session, lead_id: int):
+    return db.query(Lead).filter(Lead.id == lead_id).first()
 
 
 # def convert_lead_to_account(db: Session, lead_id: int):

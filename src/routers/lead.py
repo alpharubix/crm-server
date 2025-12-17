@@ -15,18 +15,21 @@ def create(data: LeadCreate, db: Session = Depends(get_db)):
 def list_all(db: Session = Depends(get_db)):
     return repo.get_all_leads(db)
 
+@router.get("/{lead_id}", response_model=LeadResponse)
+def get_by_id(lead_id: int, db: Session = Depends(get_db)):
+    return repo.get_lead_by_id(db, lead_id)
 
 @router.put("/{lead_id}", response_model=LeadResponse)
 def update(lead_id: int, data: LeadCreate, db: Session = Depends(get_db)):
     return repo.update_customer(db, lead_id, data)
 
 
-@router.post("/{lead_id}/convert")
-def convert_lead(lead_id: int, db: Session = Depends(get_db)):
-    """
-    Transactions: 
-    1. Creates Account
-    2. Creates Contact linked to Account
-    3. Marks Lead as 'Converted'
-    """
-    return repo.convert_lead_to_account(db, lead_id)
+# @router.post("/{lead_id}/convert")
+# def convert_lead(lead_id: int, db: Session = Depends(get_db)):
+#     """
+#     Transactions:
+#     1. Creates Account
+#     2. Creates Contact linked to Account
+#     3. Marks Lead as 'Converted'
+#     """
+#     return repo.convert_lead_to_account(db, lead_id)

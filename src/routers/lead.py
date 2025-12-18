@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 from ..database import get_db
-from ..schemas.lead import LeadCreate, LeadResponse
+from ..schemas.lead import LeadCreate, LeadResponse,GetLeadResponse
 from ..controllers import lead as repo
 
 router = APIRouter(prefix="/leads", tags=["leads"])
@@ -11,9 +11,9 @@ def create(data: LeadCreate, db: Session = Depends(get_db)):
     return repo.create_lead(db, data)
 
 
-@router.get("/", response_model=list[LeadResponse])
-def list_all(db: Session = Depends(get_db)):
-    return repo.get_all_leads(db)
+@router.get("/", response_model=GetLeadResponse)
+def list_all(page:int=1,name:str=None,phone:str=None,company_name:str=None,db: Session = Depends(get_db)):
+    return repo.get_all_leads(db,page,name,phone,company_name)
 
 @router.get("/{lead_id}", response_model=LeadResponse)
 def get_by_id(lead_id: int, db: Session = Depends(get_db)):

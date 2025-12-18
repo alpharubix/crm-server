@@ -1,5 +1,5 @@
 from pydantic import BaseModel, EmailStr, Field, field_validator, ConfigDict
-from typing import Optional
+from typing import Optional, Any
 from datetime import datetime
 from decimal import Decimal
 import re
@@ -57,3 +57,9 @@ class LeadResponse(LeadBase):
 
     # Config to read from SQLAlchemy Object
     model_config = ConfigDict(from_attributes=True)
+
+
+class GetLeadResponse(BaseModel):
+     data : list[LeadResponse]
+     page_info: dict[str, Any]
+

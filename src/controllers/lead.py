@@ -1,6 +1,9 @@
+import math
+
 from sqlalchemy.orm import Session
 from fastapi import HTTPException
-from ..models.lead import Lead
+from starlette.responses import JSONResponse
+
 from ..schemas.lead import LeadCreate
 from ..models.lead import Lead
 
@@ -13,13 +16,13 @@ def create_lead(db: Session, data: LeadCreate) -> Lead:
     new_lead = Lead(
         # Map Schema 'name' -> Model 'full_name'
         full_name=data.full_name,
-        
+
         # Direct Mappings
         phone_number=data.phone_number,
         email=data.email,
         pan=data.pan,
         gstin=data.gstin,
-        
+
         # Optional fields (will be None if not sent)
         company=data.company,
         annual_revenue=data.annual_revenue,
@@ -34,8 +37,29 @@ def create_lead(db: Session, data: LeadCreate) -> Lead:
     return new_lead
 
 
-def get_all_leads(db: Session):
-    return db.query(Lead).all()
+def get_all_leads(db: Session,page:int,name:str,phone:str,company_name:str):#responsible for getting all the leads with or without filter
+    print("Query parameters",page,name,phone,company_name)
+    limit = 10
+    offset = (page-1)*limit
+    query  =  db.query(Lead)
+    filter = []
+    if name:
+        filter.append(Lead.full_name==name)
+    if phone:
+        filter.append(Lead.phone_number==phone)
+    if company_name:
+        filter.append(Lead.company==company_name)
+    base_query = query.filter(*filter)
+    total_data_size = base_query.count()
+    print("total data length",total_data_size)
+    data = (
+        base_query
+        .offset(offset)
+        .limit(limit)
+        .all()
+    )
+    total_pages = math.ceil(total_data_size / limit)
+    return {"data":data,"page_info":{"page":page,"total_pages":total_pages,"data_size":total_data_size}}
 
 
 def update_customer(db: Session, lead_id: int, data: LeadCreate) -> Lead:

@@ -8,6 +8,10 @@ from fastapi.middleware.cors import CORSMiddleware
 LeadBase.metadata.create_all(bind=engine)
 
 app = FastAPI()
+@app.get('/')
+def test():
+    return {'message': 'Hello World'}
+
 
 app.add_middleware(
     CORSMiddleware,
@@ -18,7 +22,6 @@ app.add_middleware(
 )
 
 app.include_router(lead.router)
-
 
 if __name__ == "__main__":
     uvicorn.run("main:app", host="localhost", port=8080, reload=True)

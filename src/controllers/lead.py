@@ -1,9 +1,6 @@
 import math
-
 from sqlalchemy.orm import Session
 from fastapi import HTTPException
-from starlette.responses import JSONResponse
-
 from ..schemas.lead import LeadCreate
 from ..models.lead import Lead
 
@@ -44,11 +41,11 @@ def get_all_leads(db: Session,page:int,name:str,phone:str,company_name:str):#res
     query  =  db.query(Lead)
     filter = []
     if name:
-        filter.append(Lead.full_name==name)
+        filter.append(Lead.full_name.ilike(f"{name}%"))
     if phone:
-        filter.append(Lead.phone_number==phone)
+        filter.append(Lead.phone_number.ilike(f"{phone}%"))
     if company_name:
-        filter.append(Lead.company==company_name)
+        filter.append(Lead.company.ilike(f"{company_name}%"))
     base_query = query.filter(*filter)
     total_data_size = base_query.count()
     print("total data length",total_data_size)

@@ -1,11 +1,11 @@
 import uvicorn
 from fastapi import FastAPI
 from src.database import engine
-from src.models.lead import Base as LeadBase
-from src.routers import lead
+from src.models.account import Base as AccountBase 
+from src.routers import account 
 from fastapi.middleware.cors import CORSMiddleware
 
-LeadBase.metadata.create_all(bind=engine)
+AccountBase.metadata.create_all(bind=engine)
 
 app = FastAPI()
 @app.get('/')
@@ -21,7 +21,7 @@ app.add_middleware(
     allow_headers=["*"],  # Allows all headers (Authorization, Content-Type)
 )
 
-app.include_router(lead.router)
+app.include_router(account.router)
 
 if __name__ == "__main__":
     uvicorn.run("main:app", host="localhost", port=8080, reload=True)

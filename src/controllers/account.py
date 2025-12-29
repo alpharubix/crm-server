@@ -1,10 +1,12 @@
 import math
-from sqlalchemy import or_
-from sqlalchemy.orm import Session
-from fastapi import HTTPException
-from ..schemas.account import AccountCreate
-from ..models.account import Account
+from datetime import datetime
 
+from fastapi import HTTPException
+from sqlalchemy import func
+from sqlalchemy.orm import Session
+
+from ..models.account import Account
+from ..schemas.account import AccountCreate
 
 # def create_account(db: Session, data: AccountCreate) -> Account:
 #     if db.query(Account).filter(Account.email == data.email).first():
@@ -65,12 +67,12 @@ from ..models.account import Account
 #     account = db.query(Account).filter(Account.id == account_id).first()
 #     if not account:
 #         raise HTTPException(status_code=404, detail="Account not found")
-    
+
 #     # 2. Update fields safely
 #     account_data = data.model_dump(exclude_unset=True) # Only get sent fields
 #     for key, value in account_data.items():
 #         setattr(Account, key, value)
-        
+
 #     # 3. Save
 #     db.commit()
 #     db.refresh(Account)
@@ -79,14 +81,6 @@ from ..models.account import Account
 # def get_account_by_id(db: Session, account_id: int):
 #     return db.query(Account).filter(Account.id == account_id).first()
 
-
-
-
-import math
-from sqlalchemy.orm import Session
-from fastapi import HTTPException
-from ..models.account import Account
-from ..schemas.account import AccountCreate
 
 def create_account(db: Session, data: AccountCreate, created_by: str = "") -> Account:
     if db.query(Account).filter(Account.email == data.email).first():
@@ -111,7 +105,7 @@ def create_account(db: Session, data: AccountCreate, created_by: str = "") -> Ac
         waba_interested=data.waba_interested,
         call_back_date_time=data.call_back_date_time,
         custom_fields=data.custom_fields,
-        created_by=created_by
+        created_by=created_by,
     )
 
     db.add(new_account)
@@ -131,8 +125,9 @@ def get_all_accounts(
     city: str = "",
     state: str = "",
     pincode: str = "",
-    waba_interested: str = "",
-    business_status: str = ""
+    waba_interested: bool | None = None,
+    business_status: str = "",
+    call_back_date_time: str | datetime = ""
 ):
     limit = 10
     offset = (page - 1) * limit
@@ -159,34 +154,39 @@ def get_all_accounts(
         filters.append(Account.waba_interested == waba_interested)
     if business_status:
         filters.append(Account.business_status == business_status)
+    if call_back_date_time:
+        filters.append(
+            Account.call_back_date_time >= call_back_date_time
+        )  # Or use date range
 
     base_query = query.filter(*filters) if filters else query
-    total_data_size = base_query.count()
-    
+    total_data_size = base_query.with_entities(func.count(Account.id)).scalar()
     data = base_query.offset(offset).limit(limit).all()
     total_pages = math.ceil(total_data_size / limit)
-    
+
     return {
         "data": data,
         "page_info": {
             "page": page,
             "total_pages": total_pages,
-            "data_size": total_data_size
-        }
+            "data_size": total_data_size,
+        },
     }
 
 
-def update_account(db: Session, account_id: int, data: AccountCreate, modified_by: str = "") -> Account:
+def update_account(
+    db: Session, account_id: int, data: AccountCreate, modified_by: str = ""
+) -> Account:
     account = db.query(Account).filter(Account.id == account_id).first()
     if not account:
         raise HTTPException(status_code=404, detail="Account not found")
-    
+
     account_data = data.model_dump(exclude_unset=True)
     for key, value in account_data.items():
         setattr(account, key, value)
-    
-    account.modified_by = modified_by # type: ignore
-    
+
+    account.modified_by = modified_by  # type: ignore
+
     db.commit()
     db.refresh(account)
     return account
@@ -198,12 +198,12 @@ def get_account_by_id(db: Session, account_id: int) -> Account:
         raise HTTPException(status_code=404, detail="Account not found")
     return account
 
-# def convert_account_to_account(db: Session, lead_id: int):
+    # def convert_account_to_account(db: Session, lead_id: int):
     # 1. Validation: Does the Lead exist?
     lead = db.query(Account).filter(Account.id == lead_id).first()
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
-        
+
     if lead.business_status == "Converted":
         raise HTTPException(status_code=400, detail="Lead is already converted")
 
@@ -211,24 +211,20 @@ def get_account_by_id(db: Session, account_id: int) -> Account:
         # 2. Create ACCOUNT (The Business Entity)
         # Logic: If 'company' exists, use it. Otherwise, use the Person's Name.
         account_name = lead.company if lead.company else f"{lead.full_name}'s Account"
-        
-        new_account = Account(
-            name=account_name,
-            industry=lead.industry,
-            city=lead.city
-        )
+
+        new_account = Account(name=account_name, industry=lead.industry, city=lead.city)
         db.add(new_account)
-        db.flush() # CRITICAL: This generates the 'new_account.id' without finishing the transaction yet
+        db.flush()  # CRITICAL: This generates the 'new_account.id' without finishing the transaction yet
 
         # 3. Create CONTACT (The Person)
         # Link it to the new_account.id we just generated
         new_contact = Contact(
-            account_id=new_account.id, 
+            account_id=new_account.id,
             # first_name=lead.full_name.split(" ")[0] if lead.full_name else "",
             # last_name=lead.full_name.split(" ")[-1] if lead.full_name and " " in lead.full_name else "",
-            full_name = lead.full_name,
+            full_name=lead.full_name,
             email=lead.email,
-            phone=lead.phone_number
+            phone=lead.phone_number,
         )
         db.add(new_contact)
 
@@ -238,14 +234,14 @@ def get_account_by_id(db: Session, account_id: int) -> Account:
         # 5. Commit Everything
         db.commit()
         db.refresh(new_account)
-        
+
         return {
             "status": "success",
             "message": "Lead converted successfully",
             "account_id": new_account.id,
-            "contact_id": new_contact.id
+            "contact_id": new_contact.id,
         }
 
     except Exception as e:
-        db.rollback() # Safety Net: If Contact fails, undo the Account creation too
+        db.rollback()  # Safety Net: If Contact fails, undo the Account creation too
         raise HTTPException(status_code=500, detail=str(e))

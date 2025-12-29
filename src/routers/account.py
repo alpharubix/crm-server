@@ -19,9 +19,9 @@ def list_all(page:int=1,name:str='',phone:str='',company_name:str='',db: Session
 def get_by_id(account_id: int, db: Session = Depends(get_db)):
     return repo.get_account_by_id(db, account_id)
 
-@router.put("/{account_id}", response_model=AccountResponse)
-def update(account_id: int, data: AccountCreate, db: Session = Depends(get_db)):
-    return repo.update_customer(db, account_id, data)
+# @router.put("/{account_id}", response_model=AccountResponse)
+# def update(account_id: int, data: AccountCreate, db: Session = Depends(get_db)):
+#     return repo.update_customer(db, account_id, data)
 
 
 # @router.post("/{lead_id}/convert")

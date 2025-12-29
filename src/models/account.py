@@ -37,6 +37,7 @@
 
 
 from sqlalchemy import Column, Integer, String, DateTime, Boolean
+from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from sqlalchemy.dialects.postgresql import JSONB
 from ..database import Base
@@ -46,7 +47,7 @@ class Account(Base):
 
     # Primary Key
     id = Column(Integer, primary_key=True, index=True)
-    
+    contacts = relationship("Contact", back_populates="account")
     # Identity & Contact (Core)
     first_name = Column(String, nullable=False)
     last_name = Column(String, nullable=False)

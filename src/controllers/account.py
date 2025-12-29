@@ -3,7 +3,7 @@ from datetime import datetime
 
 from fastapi import HTTPException
 from sqlalchemy import func
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from ..models.account import Account
 from ..schemas.account import AccountCreate
@@ -87,11 +87,12 @@ def create_account(db: Session, data: AccountCreate, created_by: str = "") -> Ac
         raise HTTPException(status_code=400, detail="Email exists")
 
     new_account = Account(
+        id=data.id,
         first_name=data.first_name,
         last_name=data.last_name,
         email=data.email,
         phone=data.phone,
-        account_owner=data.account_owner,
+        account_owner_id=data.account_owner_id,
         account_status=data.account_status,
         account_stage=data.account_stage,
         source=data.source,
@@ -105,7 +106,9 @@ def create_account(db: Session, data: AccountCreate, created_by: str = "") -> Ac
         waba_interested=data.waba_interested,
         call_back_date_time=data.call_back_date_time,
         custom_fields=data.custom_fields,
-        created_by=created_by,
+        created_by_id=data.created_by_id,
+        created_time=data.created_time,
+        modified_time=data.modified_time,
     )
 
     db.add(new_account)
@@ -117,7 +120,7 @@ def create_account(db: Session, data: AccountCreate, created_by: str = "") -> Ac
 def get_all_accounts(
     db: Session,
     page: int,
-    account_owner: str = "",
+    account_id: int = "",
     account_status: str = "",
     source: str = "",
     type_of_business: str = "",
@@ -127,15 +130,15 @@ def get_all_accounts(
     pincode: str = "",
     waba_interested: bool | None = None,
     business_status: str = "",
-    call_back_date_time: str | datetime = ""
+    call_back_date_time: str | datetime = "",
 ):
     limit = 10
     offset = (page - 1) * limit
     query = db.query(Account)
     filters = []
 
-    if account_owner:
-        filters.append(Account.account_owner == account_owner)
+    if account_id is not None:
+        filters.append(Account.id == account_id)
     if account_status:
         filters.append(Account.account_status == account_status)
     if source:
@@ -158,10 +161,10 @@ def get_all_accounts(
         filters.append(
             Account.call_back_date_time >= call_back_date_time
         )  # Or use date range
-
+    print(filters)
     base_query = query.filter(*filters) if filters else query
     total_data_size = base_query.with_entities(func.count(Account.id)).scalar()
-    data = base_query.offset(offset).limit(limit).all()
+    data = base_query.offset(offset).options(joinedload(Account.owner),joinedload(Account.created_by)).limit(limit).all()
     total_pages = math.ceil(total_data_size / limit)
 
     return {

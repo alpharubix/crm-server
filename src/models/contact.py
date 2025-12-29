@@ -38,7 +38,6 @@ class Contact(Base):
     account_id = Column(Integer, ForeignKey("accounts.id"), index=True)
     
     # Relationship (Links to Account Object)
-    account = relationship("Account", back_populates="contacts") # Requires 'contacts' rel in Account model
     # Identity
     first_name = Column(String, nullable=False)
     last_name = Column(String, nullable=False)

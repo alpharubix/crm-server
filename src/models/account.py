@@ -36,7 +36,7 @@
 #     updated_at = Column(DateTime(timezone=True), onupdate=func.now(), server_default=func.now())
 
 
-from sqlalchemy import Column, Integer, String, DateTime, Boolean
+from sqlalchemy import Column, Integer, String, DateTime, Boolean, BIGINT, ForeignKey
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from sqlalchemy.dialects.postgresql import JSONB
@@ -46,8 +46,7 @@ class Account(Base):
     __tablename__ = "accounts"
 
     # Primary Key
-    id = Column(Integer, primary_key=True, index=True)
-    contacts = relationship("Contact", back_populates="account")
+    id = Column(BIGINT, primary_key=True,autoincrement=False)
     # Identity & Contact (Core)
     first_name = Column(String, nullable=False)
     last_name = Column(String, nullable=False)
@@ -55,7 +54,7 @@ class Account(Base):
     phone = Column(String, unique=True, nullable=False)
     
     # Workflow & Assignment (Core - Filtered)
-    account_owner = Column(String, nullable=True, index=True)
+    account_owner_id = Column(BIGINT, ForeignKey('users.id'), nullable=True, index=True)
     account_status = Column(String, nullable=True, index=True)
     account_stage = Column(String, nullable=True, index=True)
     source = Column(String, nullable=True, index=True)
@@ -79,7 +78,23 @@ class Account(Base):
     custom_fields = Column(JSONB, default={}, nullable=False)
     
     # System Audit (Core)
-    created_by = Column(String, nullable=True)
-    modified_by = Column(String, nullable=True)
-    created_time = Column(DateTime(timezone=True), server_default=func.now())
-    modified_time = Column(DateTime(timezone=True), onupdate=func.now(), server_default=func.now())
+    created_time = Column(DateTime(timezone=True), default=func.now(), nullable=False)
+    modified_time = Column(
+        DateTime(timezone=True),  # <--- Enables timezone storage
+        server_default=func.now(),  # <--- Uses the Database's clock (Safer)
+        onupdate=func.now(),
+        nullable=False
+    )
+    # Self-referencing Foreign Keys
+    created_by_id = Column(BIGINT, ForeignKey("users.id"), nullable=True)
+    created_by = relationship(
+        "User",
+        foreign_keys=[created_by_id],
+        backref="user_created_by_id"
+    )
+
+    owner = relationship(
+        "User",
+        foreign_keys=[account_owner_id],
+        backref="account_owner"
+    )

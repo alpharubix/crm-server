@@ -6,16 +6,16 @@ from ..controllers import account as repo
 
 router = APIRouter(prefix="/accounts", tags=["accounts"])
 
-@router.post("/", response_model=AccountResponse)
+@router.post("/",)
 def create(data: AccountCreate, db: Session = Depends(get_db)):
     return repo.create_account(db, data)
 
 
-@router.get("/", response_model=GetAccountResponse)
-def list_all(page:int=1,name:str='',phone:str='',company_name:str='',db: Session = Depends(get_db)):
-    return repo.get_all_accounts(db,page,name,phone,company_name)
+@router.get("/", )
+def list_all(page:int=1,phone:str='',company_name:str='',account_id:int=0,db: Session = Depends(get_db)):
+    return repo.get_all_accounts(db,page,account_id,phone,company_name,)
 
-@router.get("/{account_id}", response_model=AccountResponse)
+@router.get("/{account_id}")
 def get_by_id(account_id: int, db: Session = Depends(get_db)):
     return repo.get_account_by_id(db, account_id)
 

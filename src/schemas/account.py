@@ -62,7 +62,7 @@
 
 
 
-from pydantic import BaseModel, EmailStr, Field, ConfigDict
+from pydantic import BaseModel, EmailStr, Field, ConfigDict, field_validator
 from typing import Optional, Dict, Any, Literal
 from datetime import datetime
 
@@ -92,6 +92,7 @@ AccountStageType = Literal[
 ]
 
 class AccountBase(BaseModel):
+    id:str
     # Identity & Contact (Required)
     first_name: str = Field(..., min_length=1, max_length=100)
     last_name: str = Field(..., min_length=1, max_length=100)
@@ -99,7 +100,7 @@ class AccountBase(BaseModel):
     phone: str = Field(..., min_length=10, max_length=15)
     
     # Workflow & Assignment (Optional)
-    account_owner: Optional[str] = None
+    account_owner_id: Optional[str] = None
     account_status: Optional[AccountStatusType] = "Awareness"
     account_stage: Optional[AccountStageType] = "Initial Pitch"
     source: Optional[str] = None
@@ -121,6 +122,40 @@ class AccountBase(BaseModel):
     
     # Custom Fields (JSONB)
     custom_fields: Optional[Dict[str, Any]] = Field(default_factory=dict)
+    created_by_id: str
+    created_time: str
+    modified_time: str
+
+    @field_validator('created_time', mode='after')
+    @classmethod
+    def parse_created_time(cls, value):
+        if isinstance(value, str):
+            date = datetime.fromisoformat(value)
+            return datetime.fromisoformat(value)
+        raise ValueError('created_time must be in string format')
+
+    @field_validator('modified_time', mode='after')
+    @classmethod
+    def parse_modified_time(cls, value):
+        if isinstance(value, str):
+            dt = datetime.fromisoformat(value)
+            return dt
+        raise ValueError("modified_time must be in string format")
+
+
+    @field_validator('created_by_id', mode='after')
+    @classmethod
+    def parse_created_by(cls, value):
+        if isinstance(value, str):
+            return int(value)
+        raise ValueError("id must be in string format")
+
+    @field_validator('id', mode='after')
+    @classmethod
+    def parse_id(cls, value):
+        if isinstance(value, str):
+            return int(value)
+        raise ValueError("id must be in string format")
 
 class AccountCreate(AccountBase):
     pass

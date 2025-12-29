@@ -1,21 +1,19 @@
 import uvicorn
 from fastapi import FastAPI
+from src.database import engine
 from fastapi.middleware.cors import CORSMiddleware
-
 from src.database import Base, engine
-from src.models import account, contact  # type: ignore
+from src.models import account, contact, user #type: ignore - This is required
 from src.routers import account as account_router
 from src.routers import contact as contact_router
-
-app = FastAPI()
-
+from src.routers import user as user_router
 
 Base.metadata.create_all(bind=engine)
 
-
-@app.get("/")
+app = FastAPI()
+@app.get('/')
 def test():
-    return {"message": "Hello World"}
+    return {'message': 'Hello World'}
 
 
 app.add_middleware(
@@ -28,5 +26,8 @@ app.add_middleware(
 
 app.include_router(account_router.router)
 app.include_router(contact_router.router)
+app.include_router(user_router.router)
+
 if __name__ == "__main__":
     uvicorn.run("main:app", host="localhost", port=8080, reload=True)
+

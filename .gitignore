@@ -11,3 +11,4 @@ crm/
 .venv
 
 .env*
+zoho-crm-migration

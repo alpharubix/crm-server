@@ -11,8 +11,8 @@ def create(data: AccountCreate, db: Session = Depends(get_db)):
     return repo.create_account(db, data)
 
 
-@router.get("/", )
-def list_all(page:int=1,phone:str='',company_name:str='',account_id:int=0,db: Session = Depends(get_db)):
+@router.get("/")
+def list_all(account_id:int=None,page:int=1,phone:str='',company_name:str='',db: Session = Depends(get_db)):
     return repo.get_all_accounts(db,page,account_id,phone,company_name,)
 
 @router.get("/{account_id}")

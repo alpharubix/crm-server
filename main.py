@@ -2,7 +2,6 @@ import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from src.database import Base, engine
-from src.models import account, contact, user #type: ignore - This is required
 from src.routers import account as account_router
 from src.routers import contact as contact_router
 from src.routers import user as user_router

@@ -3,10 +3,12 @@ from datetime import datetime
 
 from fastapi import HTTPException
 from sqlalchemy import func
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session, joinedload, selectinload
 
 from ..models.account import Account
-from ..schemas.account import AccountCreate
+from ..models.contact import Contact
+from ..schemas.account import AccountCreate, AccountBase
+
 
 # def create_account(db: Session, data: AccountCreate) -> Account:
 #     if db.query(Account).filter(Account.email == data.email).first():
@@ -82,7 +84,7 @@ from ..schemas.account import AccountCreate
 #     return db.query(Account).filter(Account.id == account_id).first()
 
 
-def create_account(db: Session, data: AccountCreate, created_by: str = "") -> Account:
+def create_account(db: Session, data: AccountBase, created_by: str = "") -> Account:
     if db.query(Account).filter(Account.email == data.email).first():
         raise HTTPException(status_code=400, detail="Email exists")
 
@@ -164,7 +166,7 @@ def get_all_accounts(
     print(filters)
     base_query = query.filter(*filters) if filters else query
     total_data_size = base_query.with_entities(func.count(Account.id)).scalar()
-    data = base_query.offset(offset).options(joinedload(Account.owner),joinedload(Account.created_by)).limit(limit).all()
+    data = base_query.offset(offset).options(joinedload(Account.owner),joinedload(Account.created_by),selectinload(Account.account_linked_contact)).limit(limit).all()
     total_pages = math.ceil(total_data_size / limit)
 
     return {

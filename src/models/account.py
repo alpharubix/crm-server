@@ -54,7 +54,7 @@ class Account(Base):
     phone = Column(String, unique=True, nullable=False)
     
     # Workflow & Assignment (Core - Filtered)
-    account_owner_id = Column(BIGINT, ForeignKey('users.id'), nullable=True, index=True)
+    account_owner_id = Column(BIGINT, ForeignKey('users.id'), nullable=False, index=True)
     account_status = Column(String, nullable=True, index=True)
     account_stage = Column(String, nullable=True, index=True)
     source = Column(String, nullable=True, index=True)

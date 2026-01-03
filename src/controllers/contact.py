@@ -1,7 +1,7 @@
 # from sqlalchemy.orm import Session
 # from fastapi import HTTPException, status
 # from ..models.contact import 
-from ..schemas.contact import ContactCreate
+
 
 # def create_customer(db: Session, data: ContactCreate) -> Contact:
 #     # 1. Check Logic
@@ -25,21 +25,27 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func
 from fastapi import HTTPException
 from ..models.contact import Contact
-from ..models.account import Account
+from ..schemas.contact import ContactBase
 
-def create_contact(db: Session, data: ContactCreate, created_by: str = "") -> Contact:
+def create_contact(db: Session, data: ContactBase, created_by: str = "") -> Contact:
     # 1. Check if Email exists
     if db.query(Contact).filter(Contact.email == data.email).first():
         raise HTTPException(status_code=400, detail="Contact email already exists")
 
     # 2. Check if Account exists (Logic Check)
-    if data.account_id:
-        if not db.query(Account).filter(Account.id == data.account_id).first():
-            raise HTTPException(status_code=404, detail="Associated Account not found")
+    # if data.account_id:
+    #     if not db.query(Account).filter(Account.id == data.account_id).first():
+    #         raise HTTPException(status_code=404, detail="Associated Account not found")
 
     # 3. Create
     new_contact = Contact(
+        id=data.id,
         account_id=data.account_id,  # Link to Account
+        owner_id = data.owner_id,
+        modified_by_id=data.modified_by_id,
+        created_by_id=data.created_by_id,
+        created_time=data.created_time,
+        modified_time=data.modified_time,
         first_name=data.first_name,
         last_name=data.last_name,
         designation=data.designation,
@@ -53,8 +59,7 @@ def create_contact(db: Session, data: ContactCreate, created_by: str = "") -> Co
         state=data.state,
         country=data.country,
         pincode=data.pincode,
-        custom_fields=data.custom_fields,
-        created_by=created_by,
+        custom_fields=data.custom_fields
     )
 
     db.add(new_contact)

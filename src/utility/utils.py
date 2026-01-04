@@ -1,8 +1,9 @@
+import os
 import secrets
 import string
-
+import jwt
 import bcrypt
-
+from ..config import settings
 
 def generate_secure_password(length: int = 16, include_symbols: bool = True) -> str:
     """
@@ -34,3 +35,15 @@ def get_hashed_password(password: str) -> str:
     hashed_bytes = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt(rounds=7))
     hashed_password_str = hashed_bytes.decode('utf-8')
     return hashed_password_str
+
+
+def is_password_correct(password: str, hashed_password: str) -> bool:
+    return bcrypt.checkpw(password.encode('utf-8'),hashed_password.encode('utf-8'))
+
+
+def get_jwt_token(user_id:int,role:str):
+      token = jwt.encode({'user_id':user_id,'role':role},settings.JWT_SECRET_KEY,algorithm='HS256')
+      return token
+
+def get_decoded_jwt_token(token:str) -> dict:
+    return jwt.decode(token,settings.JWT_SECRET_KEY,algorithms=['HS256'])

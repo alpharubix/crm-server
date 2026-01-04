@@ -4,6 +4,7 @@ from datetime import datetime
 from fastapi import HTTPException
 from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload, selectinload
+from starlette.requests import Request
 
 from ..models.account import Account
 from ..models.contact import Contact
@@ -120,6 +121,7 @@ def create_account(db: Session, data: AccountBase, created_by: str = "") -> Acco
 
 
 def get_all_accounts(
+    request: Request,
     db: Session,
     page: int,
     account_id: int = "",
@@ -163,12 +165,14 @@ def get_all_accounts(
         filters.append(
             Account.call_back_date_time >= call_back_date_time
         )  # Or use date range
-    print(filters)
-    base_query = query.filter(*filters) if filters else query
-    total_data_size = base_query.with_entities(func.count(Account.id)).scalar()
-    data = base_query.offset(offset).options(joinedload(Account.owner),joinedload(Account.created_by),selectinload(Account.account_linked_contact)).limit(limit).all()
-    total_pages = math.ceil(total_data_size / limit)
-
+    read_scope = request.state.scope[0]
+    if read_scope == 'Read.ALL':
+        base_query = query.filter(*filters) if filters else query
+        total_data_size = base_query.with_entities(func.count(Account.id)).scalar()
+        data = base_query.offset(offset).options(joinedload(Account.owner),joinedload(Account.created_by),selectinload(Account.account_linked_contact)).limit(limit).all()
+        total_pages = math.ceil(total_data_size / limit)
+    elif read_scope == 'Read.OWN':
+       pass
     return {
         "data": data,
         "page_info": {

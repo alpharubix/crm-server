@@ -5,6 +5,8 @@ from src.database import Base, engine
 from src.routers import account as account_router
 from src.routers import contact as contact_router
 from src.routers import user as user_router
+from src.routers.authentication import authentication_router
+from src.middleware.auth import authorization
 
 Base.metadata.create_all(bind=engine)
 
@@ -13,7 +15,7 @@ app = FastAPI()
 def test():
     return {'message': 'Hello World'}
 
-
+app.middleware('http')(authorization)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -25,6 +27,7 @@ app.add_middleware(
 app.include_router(account_router.router)
 app.include_router(contact_router.router)
 app.include_router(user_router.router)
+app.include_router(authentication_router)
 
 if __name__ == "__main__":
     uvicorn.run("main:app", host="localhost", port=8080, reload=True)

@@ -1,5 +1,8 @@
+
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
+from starlette.requests import Request
+
 from ..database import get_db
 from ..schemas.account import  AccountCreate, AccountResponse, GetAccountResponse
 from ..controllers import account as repo
@@ -12,8 +15,8 @@ def create(data: AccountCreate, db: Session = Depends(get_db)):
 
 
 @router.get("/")
-def list_all(account_id:int=None,page:int=1,phone:str='',company_name:str='',db: Session = Depends(get_db)):
-    return repo.get_all_accounts(db,page,account_id,phone,company_name,)
+def list_all(request:Request,account_id:int=None,page:int=1,phone:str='',company_name:str='',db: Session = Depends(get_db)):
+    return repo.get_all_accounts(db,page,account_id,phone,company_name,request)
 
 @router.get("/{account_id}")
 def get_by_id(account_id: int, db: Session = Depends(get_db)):

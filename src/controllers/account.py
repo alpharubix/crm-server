@@ -6,6 +6,8 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload, selectinload
 from starlette.requests import Request
 from ..models.account import Account
+from ..schemas.account import AccountBase
+
 from ..schemas.account import  AccountBase
 
 def create_account(db: Session, data: AccountBase, created_by: str = "") -> Account:
@@ -61,10 +63,67 @@ def get_all_accounts(
     business_status: str = "",
     call_back_date_time: str | datetime = "",
 ):
+    # Temprorary
+    MANAGER_EXECUTIVES_MAP = {
+        # Namrata
+        3899927000000318361: [
+            3899927000005965018,  # Arjun
+            3899927000004429017,  # Sandeep
+            3899927000004808001,  # Ayush
+            3899927000007673012,  # Honappa
+            3899927000005114004,  # Manjunath
+            3899927000005114020,  # Digamber
+            3899927000005965050,  # Sahil
+        ],
+        # Sutapa Roy
+        3899927000005114050: [
+            3899927000005965018,  # Arjun
+            3899927000004429017,  # Sandeep
+            3899927000004808001,  # Ayush
+            3899927000007673012,  # Honappa
+            3899927000005114004,  # Manjunath
+            3899927000005114020,  # Digamber
+            3899927000005965050,  # Sahil
+        ],
+        # Manjunath
+        3899927000005114004: [
+            3899927000005965018,  # Arjun
+            3899927000004429017,  # Sandeep
+            3899927000007673012,  # Honappa
+        ],
+        # Digamber
+        3899927000005114020: [
+            3899927000004808001,  # Ayush
+            3899927000005965018,  # Arjun
+            3899927000007673012,  # Honappa
+            3899927000005114004,  # Manjunath
+            3899927000004429017,  # Sandeep
+            3899927000005965050,  # Sahil
+        ],
+        # manager_id: [executive_ids]
+    }
+
     limit = 10
     offset = (page - 1) * limit
     query = db.query(Account)
     filters = []
+    user_id = request.state.user_id
+    role = request.state.role
+
+    allowed_owner_ids = None
+
+    if role in ("super_admin", "admin"):
+        pass  # no restriction
+
+    elif role == "manager":
+        allowed_owner_ids = [user_id] + MANAGER_EXECUTIVES_MAP.get(user_id, [])
+
+    elif role == "executive":
+        allowed_owner_ids = [user_id]
+
+    # filters.append(Account.account_owner_id == request.state.user_id)
+    if allowed_owner_ids is not None:
+        filters.append(Account.account_owner_id.in_(allowed_owner_ids))
     notes=[]
 
     if account_id is not None:
@@ -91,8 +150,20 @@ def get_all_accounts(
         filters.append(
             Account.call_back_date_time >= call_back_date_time
         )  # Or use date rang
+
     base_query = query.filter(*filters) if filters else query
     total_data_size = base_query.with_entities(func.count(Account.id)).scalar()
+    data = (
+        base_query.offset(offset)
+        .options(
+            joinedload(Account.owner),
+            joinedload(Account.created_by),
+            selectinload(Account.account_linked_contact),
+        )
+        .limit(limit)
+        .all()
+    )
+
     data = base_query.offset(offset).options(joinedload(Account.owner),joinedload(Account.created_by),selectinload(Account.account_linked_contact)).limit(limit).all()
     for acc in data:
         acc_id = acc.id
@@ -112,3 +183,26 @@ def get_all_accounts(
     }
 
 
+def update_account(
+    db: Session, account_id: int, data: AccountBase, modified_by: str = ""
+) -> Account:
+    account = db.query(Account).filter(Account.id == account_id).first()
+    if not account:
+        raise HTTPException(status_code=404, detail="Account not found")
+
+    account_data = data.model_dump(exclude_unset=True)
+    for key, value in account_data.items():
+        setattr(account, key, value)
+
+    account.modified_by = modified_by  # type: ignore
+
+    db.commit()
+    db.refresh(account)
+    return account
+
+
+def get_account_by_id(db: Session, account_id: int) -> Account:
+    account = db.query(Account).filter(Account.id == account_id).first()
+    if not account:
+        raise HTTPException(status_code=404, detail="Account not found")
+    return account

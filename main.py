@@ -15,7 +15,7 @@ app = FastAPI()
 def test():
     return {'message': 'Hello World'}
 
-app.middleware('http')(authorization)
+# app.middleware('http')(authorization)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],

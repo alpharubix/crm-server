@@ -27,7 +27,7 @@ from fastapi import HTTPException
 from ..models.contact import Contact
 from ..schemas.contact import ContactBase
 
-def create_contact(db: Session, data: ContactBase, created_by: str = "") -> Contact:
+def create_contact(db: Session, data: ContactBase):
     # 1. Check if Email exists
     if db.query(Contact).filter(Contact.email == data.email).first():
         raise HTTPException(status_code=400, detail="Contact email already exists")

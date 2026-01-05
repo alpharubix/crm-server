@@ -10,8 +10,8 @@ class ExistingUser(BaseModel):
     zuid:str
     role:str
     profile:str
-    created_by_id:str = None
-    modified_by_id:str = None
+    created_by_id:str|int = None
+    modified_by_id:str|int = None
 
     @field_validator('created_time', mode='after')
     @classmethod
@@ -48,3 +48,13 @@ class ExistingUser(BaseModel):
         if isinstance(value, str):
             return int(value)
         raise ValueError("id must be in string format")
+
+class UserResponse(BaseModel):
+    id: int
+    full_name: str
+    email: str
+
+    @field_validator('id')
+    @classmethod
+    def parse_id(cls, value):
+        return str(value)

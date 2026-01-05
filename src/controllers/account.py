@@ -8,7 +8,7 @@ from starlette.requests import Request
 
 from ..models.account import Account
 from ..models.contact import Contact
-from ..schemas.account import AccountCreate, AccountBase
+from ..schemas.account import  AccountBase
 
 
 # def create_account(db: Session, data: AccountCreate) -> Account:
@@ -95,6 +95,7 @@ def create_account(db: Session, data: AccountBase, created_by: str = "") -> Acco
         last_name=data.last_name,
         email=data.email,
         phone=data.phone,
+        account_name=data.account_name,
         account_owner_id=data.account_owner_id,
         account_status=data.account_status,
         account_stage=data.account_stage,
@@ -164,15 +165,12 @@ def get_all_accounts(
     if call_back_date_time:
         filters.append(
             Account.call_back_date_time >= call_back_date_time
-        )  # Or use date range
-    read_scope = request.state.scope[0]
-    if read_scope == 'Read.ALL':
-        base_query = query.filter(*filters) if filters else query
-        total_data_size = base_query.with_entities(func.count(Account.id)).scalar()
-        data = base_query.offset(offset).options(joinedload(Account.owner),joinedload(Account.created_by),selectinload(Account.account_linked_contact)).limit(limit).all()
-        total_pages = math.ceil(total_data_size / limit)
-    elif read_scope == 'Read.OWN':
-       pass
+        )  # Or use date rang
+    base_query = query.filter(*filters) if filters else query
+    total_data_size = base_query.with_entities(func.count(Account.id)).scalar()
+    data = base_query.offset(offset).options(joinedload(Account.owner),joinedload(Account.created_by),selectinload(Account.account_linked_contact)).limit(limit).all()
+
+    total_pages = math.ceil(total_data_size / limit)
     return {
         "data": data,
         "page_info": {
@@ -184,7 +182,7 @@ def get_all_accounts(
 
 
 def update_account(
-    db: Session, account_id: int, data: AccountCreate, modified_by: str = ""
+    db: Session, account_id: int, data: AccountBase, modified_by: str = ""
 ) -> Account:
     account = db.query(Account).filter(Account.id == account_id).first()
     if not account:

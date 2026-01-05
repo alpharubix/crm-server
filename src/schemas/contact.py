@@ -93,21 +93,16 @@ class ContactBase(BaseModel):
             return int(value)
         raise ValueError("owner_id must be in string format")
 
-# Input (Create)
-# class ContactCreate(ContactBase):
-#     # CRITICAL: We need to know who this person belongs to
-#     account_id: int
-#     account_owner: int
 
-# Output (Read)
-class ContactResponse(ContactBase):
+class ContactResponse(BaseModel):
     id: int
-    account_id: int
-    
-    # System Audit
-    created_by: Optional[str] = None
-    modified_by: Optional[str] = None
-    created_time: datetime
-    modified_time: Optional[datetime] = None
-    
+    last_name : str
+    email: EmailStr
     model_config = ConfigDict(from_attributes=True)
+
+    @field_validator('id')
+    @classmethod
+    def parse_id(cls, value):
+        if isinstance(value, int):
+            return str(value)
+        return value

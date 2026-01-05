@@ -2,21 +2,20 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 from starlette.requests import Request
-
 from ..database import get_db
-from ..schemas.account import  AccountCreate, AccountResponse, GetAccountResponse
+from ..schemas.account import  GetlistAccountResponse,AccountBase
 from ..controllers import account as repo
 
 router = APIRouter(prefix="/accounts", tags=["accounts"])
 
 @router.post("/",)
-def create(data: AccountCreate, db: Session = Depends(get_db)):
+def create(data: AccountBase, db: Session = Depends(get_db)):
     return repo.create_account(db, data)
 
 
-@router.get("/")
+@router.get("/",response_model=GetlistAccountResponse)
 def list_all(request:Request,account_id:int=None,page:int=1,phone:str='',company_name:str='',db: Session = Depends(get_db)):
-    return repo.get_all_accounts(db,page,account_id,phone,company_name,request)
+    return repo.get_all_accounts(request,db,page,account_id,phone,company_name)
 
 @router.get("/{account_id}")
 def get_by_id(account_id: int, db: Session = Depends(get_db)):

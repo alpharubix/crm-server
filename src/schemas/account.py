@@ -1,70 +1,8 @@
-# from pydantic import BaseModel, EmailStr, Field, field_validator, ConfigDict
-# from typing import Optional, Any
-# from datetime import datetime
-# from decimal import Decimal
-# import re
-
-# # --- SHARED PROPERTIES ---
-# # Fields that can exist in both Input (Create) and Output (Read)
-# class AccountBase(BaseModel):
-#     # Critical Fields (Required in your flow)
-#     full_name: str = Field(..., min_length=1, max_length=100, description="full_name of the account")
-#     phone_number: str = Field(..., min_length=10, max_length=15)
-#     email: EmailStr
-#     pan: str
-#     gstin: str
-    
-#     # Optional Fields (Matches your DB Model nullable fields)
-#     company: Optional[str] = None
-#     annual_revenue: Optional[Decimal] = Field(None, max_digits=15, decimal_places=2)
-#     address: Optional[str] = None
-#     city: Optional[str] = None
-#     country: Optional[str] = None
-#     industry: Optional[str] = None
-#     description: Optional[str] = None
-#     distributor_code: Optional[str] = None
-#     business_status: Optional[str] = "New"
-
-#     # Validators
-#     @field_validator('full_name', 'phone_number', 'pan', 'gstin', 'company', 'city')
-#     @classmethod
-#     def clean_strings(cls, v):
-#         if v:
-#             return v.strip()
-#         return v
-
-#     @field_validator('phone_number')
-#     @classmethod
-#     def validate_phone(cls, v):
-#         # Basic Regex for generic phone validation
-#         if not re.match(r'^\+?1?\d{9,15}$', v):
-#              raise ValueError('Invalid phone number format')
-#         return v
-
-# # --- INPUT MODEL (Client -> Server) ---
-# class AccountCreate(AccountBase):
-#     pass
-
-# # --- OUTPUT MODEL (Server -> Client) ---
-# class AccountResponse(AccountBase):
-#     id: int
-#     # DB uses 'full_name', but Schema uses 'name'. 
-#     # We add full_name here so Pydantic can read the DB column directly.
-#     full_name: str 
-    
-#     created_at: datetime
-#     updated_at: datetime
-
-#     # Config to read from SQLAlchemy Object
-#     model_config = ConfigDict(from_attributes=True)
-
-
-
-
-
-from pydantic import BaseModel, EmailStr, Field, ConfigDict, field_validator
-from typing import Optional, Dict, Any, Literal
+from pydantic import BaseModel, EmailStr, Field, ConfigDict, field_validator, field_serializer
+from typing import Optional, Dict, Any, Literal, List
 from datetime import datetime
+from src.schemas.user import UserResponse
+from src.schemas.contact import ContactResponse
 
 # Account Status Options
 AccountStatusType = Literal[
@@ -94,11 +32,11 @@ AccountStageType = Literal[
 class AccountBase(BaseModel):
     id:str
     # Identity & Contact (Required)
-    first_name: str = Field(..., min_length=1, max_length=100)
-    last_name: str = Field(..., min_length=1, max_length=100)
+    first_name: str
+    last_name: str
     email: EmailStr
     phone: str = Field(..., min_length=10, max_length=15)
-    
+    account_name: str
     # Workflow & Assignment (Optional)
     account_owner_id: Optional[str] = None
     account_status: Optional[AccountStatusType] = "Awareness"
@@ -123,8 +61,8 @@ class AccountBase(BaseModel):
     # Custom Fields (JSONB)
     custom_fields: Optional[Dict[str, Any]] = Field(default_factory=dict)
     created_by_id: str
-    created_time: str
-    modified_time: str
+    created_time: str|datetime
+    modified_time: str|datetime
 
     @field_validator('created_time', mode='after')
     @classmethod
@@ -157,18 +95,47 @@ class AccountBase(BaseModel):
             return int(value)
         raise ValueError("id must be in string format")
 
-class AccountCreate(AccountBase):
-    pass
-
-class AccountResponse(AccountBase):
+class AccountResponse(BaseModel):
     id: int
-    created_by: Optional[str]
-    modified_by: Optional[str]
+    first_name: str
+    last_name: str
+    account_name: str|None
+    email: EmailStr
+    phone: str
+    business_status: str|None
+    distributor_code: str|None
+    pincode: str|None
+    call_back_date_time: datetime|None
+    type_of_business: str|None
+    industry: str|None
+    account_status:Any
+    city: str | None
+    state: str | None
+    pincode: str | None
+    source: str | None
+    account_stage:Any
+    created_by_id: int
     created_time: datetime
     modified_time: datetime
-    
+    created_by: UserResponse|None
+    owner: UserResponse|None
+    account_linked_contact: List[ContactResponse] = []
     model_config = ConfigDict(from_attributes=True)
 
-class GetAccountResponse(BaseModel):
-    data: list[AccountResponse]
-    page_info: Dict[str, Any]
+    @field_serializer("id")
+    @classmethod
+    def parse_id(cls, value):
+        if isinstance(value, int):
+         return str(value)
+        else:
+            return value
+    @field_serializer("created_by_id")
+    @classmethod
+    def serialize_bigint(cls, value):
+        if isinstance(value, int):
+            return str(value)
+        return value
+
+class GetlistAccountResponse(BaseModel):
+    data:List[AccountResponse]
+    page_info:dict[str, Any]

@@ -13,7 +13,7 @@ class Account(Base):
     first_name = Column(String, nullable=False)
     last_name = Column(String, nullable=False)
     email = Column(String, unique=True, nullable=False, index=True)
-    phone = Column(String, unique=True, nullable=False)
+    phone = Column(String, unique=False, nullable=False)
     account_name = Column(String, nullable=True,index=True)
     # Workflow & Assignment (Core - Filtered)
     account_owner_id = Column(BIGINT, ForeignKey('users.id'), nullable=False, index=True)

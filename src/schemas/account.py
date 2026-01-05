@@ -1,8 +1,8 @@
 from pydantic import BaseModel, EmailStr, Field, ConfigDict, field_validator, field_serializer
-from typing import Optional, Dict, Any, Literal, List
+from typing import Optional, Dict, Any, Literal, List, TYPE_CHECKING, Union
 from datetime import datetime
 from src.schemas.user import UserResponse
-from src.schemas.contact import ContactResponse
+
 
 # Account Status Options
 AccountStatusType = Literal[
@@ -96,6 +96,7 @@ class AccountBase(BaseModel):
         raise ValueError("id must be in string format")
 
 class AccountResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
     id: int
     first_name: str
     last_name: str
@@ -119,7 +120,7 @@ class AccountResponse(BaseModel):
     modified_time: datetime
     created_by: UserResponse|None
     owner: UserResponse|None
-    account_linked_contact: List[ContactResponse] = []
+    account_linked_contact: Any
     notes: Any
     model_config = ConfigDict(from_attributes=True)
 
@@ -140,3 +141,18 @@ class AccountResponse(BaseModel):
 class GetlistAccountResponse(BaseModel):
     data:List[AccountResponse]
     page_info:dict[str, Any]
+
+
+class GetAssociatedAccountResponse(BaseModel):
+    id : int
+    account_name: str|Any
+    phone: str|Any=None
+    email: EmailStr|Any=None
+
+    @field_serializer("id")
+    @classmethod
+    def parse_id(cls, value):
+        if isinstance(value, int):
+            return str(value)
+        else:
+            return value

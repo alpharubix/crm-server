@@ -1,6 +1,7 @@
-from pydantic import BaseModel, ConfigDict, EmailStr,field_validator
-from typing import Optional, Dict, Any
+from pydantic import BaseModel, ConfigDict, EmailStr, field_validator, field_serializer
+from typing import Optional, Dict, Any, TYPE_CHECKING, Union, List
 from datetime import datetime
+from src.schemas.user import UserResponse
 
 class ContactBase(BaseModel):
     #primary key
@@ -93,16 +94,64 @@ class ContactBase(BaseModel):
             return int(value)
         raise ValueError("owner_id must be in string format")
 
-
 class ContactResponse(BaseModel):
-    id: int
-    last_name : str
-    email: EmailStr
     model_config = ConfigDict(from_attributes=True)
+    id: int
+    # Identity
+    first_name: str
+    last_name: str
+    designation: Optional[str] = None
 
+    # time-capturing-fields
+    modified_time: datetime
+    created_time: datetime
+
+    email: EmailStr
+
+    # Communication
+    email: EmailStr
+    secondary_email: Optional[EmailStr] = None
+    mobile: Optional[str] = None
+    phone: Optional[str] = None
+
+    # Business
+    lead_source: Optional[str] = None
+
+    # Address
+    street: Optional[str] = None
+    city: Optional[str] = None
+    state: Optional[str] = None
+    country: Optional[str] = None
+    pincode: Optional[str] = None
+
+    created_by:UserResponse|Any
+    modified_by:UserResponse|Any
+    contact_owner:UserResponse|Any
+    parent_account:Any
+    # Flexible Fields (JSONB)
+    custom_fields: Dict[str, Any] = {}
     @field_validator('id')
     @classmethod
     def parse_id(cls, value):
         if isinstance(value, int):
             return str(value)
         return value
+
+    @field_serializer('parent_account',)
+    def serialize_models(self, value):
+        if value is None:
+            return None
+        # If it's a SQLAlchemy model, convert it to a dict manually
+        if hasattr(value, "__dict__"):
+            # This extracts the data from the Account model so JSON can read it
+            return {
+                "id": str(value.id) if hasattr(value, "id") else None,
+                "name": getattr(value, "account_name", getattr(value, "name", None)),
+                "email": getattr(value, "email", None),
+            }
+        return value
+
+
+class ContactResponseList(BaseModel):
+    data:List[ContactResponse]
+    page_info:dict[str, Any]

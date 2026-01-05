@@ -1,5 +1,5 @@
 import math
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import func
 from fastapi import HTTPException
 from ..models.contact import Contact
@@ -48,28 +48,41 @@ def create_contact(db: Session, data: ContactBase):
 def get_all_contacts(
     db: Session,
     page: int,
-    account_id: int | None = None, # Filter by Account ID
-    lead_source: str = "",
+    contact_id: int | None = None, # Filter by Account ID
     city: str = "",
-    email: str = ""
+    email: str = "",
+    first_name: str = "",
+    last_name: str = ""
 ):
-    limit = 10
+    limit = 20
     offset = (page - 1) * limit
     query = db.query(Contact)
     filters = []
 
-    if account_id:
-        filters.append(Contact.account_id == account_id)
-    if lead_source:
-        filters.append(Contact.lead_source == lead_source)
+    if contact_id:
+        filters.append(Contact.id == contact_id)
     if city:
         filters.append(Contact.city.ilike(f"{city}%"))
     if email:
         filters.append(Contact.email.ilike(f"{email}%"))
-
+    if first_name:
+        filters.append(Contact.first_name.startswith(f"{first_name}%"))
+    if last_name:
+        filters.append(Contact.last_name.startswith(f"{last_name}%"))
     base_query = query.filter(*filters) if filters else query
     total_data_size = base_query.with_entities(func.count(Contact.id)).scalar()
-    data = base_query.offset(offset).limit(limit).all()
+    data = (
+        base_query
+        .offset(offset)
+        .options(
+            joinedload(Contact.parent_account),
+            joinedload(Contact.contact_owner),
+            joinedload(Contact.created_by),
+            joinedload(Contact.modified_by)
+        )
+        .limit(limit)
+        .all()
+    )
     total_pages = math.ceil(total_data_size / limit)
 
     return {

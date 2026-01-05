@@ -39,8 +39,8 @@ class AccountBase(BaseModel):
     account_name: str
     # Workflow & Assignment (Optional)
     account_owner_id: Optional[str] = None
-    account_status: Optional[AccountStatusType] = "Awareness"
-    account_stage: Optional[AccountStageType] = "Initial Pitch"
+    account_status: Any
+    account_stage: Any
     source: Optional[str] = None
     business_status: Optional[str] = None
     distributor_code: Optional[str] = None
@@ -120,6 +120,7 @@ class AccountResponse(BaseModel):
     created_by: UserResponse|None
     owner: UserResponse|None
     account_linked_contact: List[ContactResponse] = []
+    notes: Any
     model_config = ConfigDict(from_attributes=True)
 
     @field_serializer("id")

@@ -13,4 +13,5 @@ dependencies = [
     "sqlalchemy>=2.0.44",
     "tzdata>=2025.2",
     "uvicorn>=0.38.0",
+    "pymongo>=4.15.5",
 ]

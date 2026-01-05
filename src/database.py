@@ -1,5 +1,7 @@
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, DeclarativeBase
+from sqlalchemy.sql.coercions import expect
+
 from .config import settings
 
 # Format: postgresql://username:password@host:port/database_name
@@ -30,3 +32,16 @@ def get_db():
 # This approach is recommended over manual session management.
 
 ####################################################
+
+from pymongo import MongoClient
+
+monogodb = MongoClient(settings.MONGODB_URI)
+
+
+def get_mongodb():
+    db = monogodb["crm_dev"]
+    collection = db['live_notes']
+    try:
+       yield collection
+    finally:
+       pass

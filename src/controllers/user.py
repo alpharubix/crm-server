@@ -1,4 +1,5 @@
 from fastapi import HTTPException
+from starlette.requests import Request
 from starlette.responses import JSONResponse
 from ..models.user import User
 from ..schemas.user import ExistingUser
@@ -34,3 +35,18 @@ def insert_already_existing_user(data:ExistingUser,db):
     except Exception as e:
         print(e)
         raise HTTPException(status_code=500, detail="internal server error")
+
+
+def get_me(request:Request,db):
+    role = request.state.role
+    user_id = request.state.user_id
+    try:
+        user = db.query(User).filter(User.id == user_id).one()
+        response = {'user_id':str(user_id),'role':role,'user_name':user.full_name,'email':user.email,'is_logged_in':True}
+        return JSONResponse(status_code=200,content=response)
+    except Exception as e:
+        print(e)
+        raise HTTPException(status_code=500, detail="internal server error")
+
+
+

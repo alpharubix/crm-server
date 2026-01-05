@@ -2,7 +2,7 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 from starlette.requests import Request
-from ..database import get_db
+from ..database import get_db,get_mongodb
 from ..schemas.account import  GetlistAccountResponse,AccountBase
 from ..controllers import account as repo
 
@@ -14,24 +14,5 @@ def create(data: AccountBase, db: Session = Depends(get_db)):
 
 
 @router.get("/",response_model=GetlistAccountResponse)
-def list_all(request:Request,account_id:int=None,page:int=1,phone:str='',company_name:str='',db: Session = Depends(get_db)):
-    return repo.get_all_accounts(request,db,page,account_id,phone,company_name)
-
-@router.get("/{account_id}")
-def get_by_id(account_id: int, db: Session = Depends(get_db)):
-    return repo.get_account_by_id(db, account_id)
-
-# @router.put("/{account_id}", response_model=AccountResponse)
-# def update(account_id: int, data: AccountCreate, db: Session = Depends(get_db)):
-#     return repo.update_customer(db, account_id, data)
-
-
-# @router.post("/{lead_id}/convert")
-# def convert_lead(lead_id: int, db: Session = Depends(get_db)):
-#     """
-#     Transactions:
-#     1. Creates Account
-#     2. Creates Contact linked to Account
-#     3. Marks Lead as 'Converted'
-#     """
-#     return repo.convert_lead_to_account(db, lead_id)
+def list_all(request:Request,account_id:int=None,page:int=1,phone:str='',company_name:str='',db: Session = Depends(get_db),mongodb = Depends(get_mongodb)):
+    return repo.get_all_accounts(request,db,mongodb,page,account_id,phone,company_name)

@@ -1,7 +1,8 @@
 from pydantic import BaseModel, EmailStr, Field, ConfigDict, field_validator, field_serializer
-from typing import Optional, Dict, Any, Literal, List, TYPE_CHECKING, Union
+from typing import Optional, Dict, Any, Literal, List
 from datetime import datetime
 from src.schemas.user import UserResponse
+from src.schemas.contact import ContactResponse
 
 
 # Account Status Options
@@ -105,7 +106,6 @@ class AccountResponse(BaseModel):
     phone: str
     business_status: str|None
     distributor_code: str|None
-    pincode: str|None
     call_back_date_time: datetime|None
     type_of_business: str|None
     industry: str|None
@@ -120,7 +120,7 @@ class AccountResponse(BaseModel):
     modified_time: datetime
     created_by: UserResponse|None
     owner: UserResponse|None
-    account_linked_contact: Any
+    account_linked_contact: list[ContactResponse] = []
     notes: Any
     model_config = ConfigDict(from_attributes=True)
 

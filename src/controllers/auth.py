@@ -30,6 +30,7 @@ def validate_login(body:Login,db:Session):
                     value=token,
                     httponly=True,
                     secure=True,
+                    samesite="none",
                 )
                 return response
     except HTTPException as error:

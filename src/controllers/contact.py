@@ -61,16 +61,22 @@ def get_all_contacts(
 
     if contact_id:
         filters.append(Contact.id == contact_id)
-    if city:
-        filters.append(Contact.city.ilike(f"{city}%"))
-    if email:
-        filters.append(Contact.email.ilike(f"{email}%"))
-    if first_name:
-        filters.append(Contact.first_name.startswith(f"{first_name}%"))
-    if last_name:
-        filters.append(Contact.last_name.startswith(f"{last_name}%"))
+
+    if city and city.strip():
+        filters.append(Contact.city.ilike(f"{city.strip()}%"))
+
+    if email and email.strip():
+        filters.append(Contact.email.ilike(f"{email.strip()}%"))
+
+    if first_name and first_name.strip():
+        filters.append(Contact.first_name.ilike(f"{first_name.strip()}%"))
+
+    if last_name and last_name.strip():
+        filters.append(Contact.last_name.ilike(f"{last_name.strip()}%"))
+
     base_query = query.filter(*filters) if filters else query
-    total_data_size = base_query.with_entities(func.count(Contact.id)).scalar()
+
+    total_data_size = base_query.count()
     data = (
         base_query
         .offset(offset)

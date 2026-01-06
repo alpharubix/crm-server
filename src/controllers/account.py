@@ -1,9 +1,10 @@
 import math
 from datetime import datetime
+from typing import Optional
 
 from fastapi import HTTPException
 from pymongo.synchronous.collection import Collection
-from sqlalchemy import func
+from sqlalchemy import func, and_, String
 from sqlalchemy.orm import Session, joinedload, selectinload
 from starlette.requests import Request
 
@@ -52,17 +53,19 @@ def get_all_accounts(
     db: Session,
     mongodb: Collection,
     page: int,
-    account_id: int,
-    account_status: str = "",
-    source: str = "",
-    type_of_business: str = "",
-    industry: str = "",
-    city: str = "",
-    state: str = "",
-    pincode: str = "",
-    waba_interested: bool | None = None,
-    business_status: str = "",
-    call_back_date_time: str | datetime = "",
+    account_name: Optional[str] = None,
+    account_id: Optional[int] = None,
+    account_status: Optional[str] = None,
+    account_stage: Optional[str] = None,
+    source: Optional[str] = None,
+    type_of_business: Optional[str] = None,
+    industry: Optional[str] = None,
+    city: Optional[str] = None,
+    state: Optional[str] = None,
+    pincode: Optional[str] = None,
+    waba_interested: Optional[bool] = None,
+    business_status: Optional[str] = None,
+    call_back_date_time: Optional[datetime] = None,
 ):
     # Temprorary
     MANAGER_EXECUTIVES_MAP = {
@@ -125,24 +128,27 @@ def get_all_accounts(
     # filters.append(Account.account_owner_id == request.state.user_id)
     if allowed_owner_ids is not None:
         filters.append(Account.account_owner_id.in_(allowed_owner_ids))
-    
-    # This might go in the accounts loop
-    notes = []
 
     if account_id is not None:
         filters.append(Account.id == account_id)
+    if account_name:
+        filters.append(Account.account_name.ilike(f"{account_name.strip()}%"))
     if account_status:
-        filters.append(Account.account_status == account_status)
+        filters.append(Account.account_status.ilike(f"{account_status.strip()}%"))
+    if account_stage:
+        filters.append(Account.account_stage.ilike(f"{account_stage.strip()}%"))
     if source:
         filters.append(Account.source == source)
     if type_of_business:
         filters.append(Account.type_of_business == type_of_business)
     if industry:
         filters.append(Account.industry == industry)
-    if city:
-        filters.append(Account.city.ilike(f"{city}%"))
+    if city :
+        print('im executing')
+        filters.append(Account.city.ilike(f"{city.strip()}%"))
     if state:
-        filters.append(Account.state.ilike(f"{state}%"))
+        print('im state')
+        filters.append(Account.state.ilike(f"{state.strip()}%"))
     if pincode:
         filters.append(Account.pincode == pincode)
     if waba_interested is not None:
@@ -153,38 +159,30 @@ def get_all_accounts(
         filters.append(
             Account.call_back_date_time >= call_back_date_time
         )  # Or use date rang
+    print(filters)
+    base_query = query.filter(and_(*filters)) if filters else query
+    print(base_query)
+    total_data_size = base_query.count()
+    data = base_query.offset(offset).options(joinedload(Account.owner),joinedload(Account.created_by),selectinload(Account.account_linked_contact)).limit(limit).all()
 
-    base_query = query.filter(*filters) if filters else query
-    total_data_size = base_query.with_entities(func.count(Account.id)).scalar()
-    data = (
-        base_query.offset(offset)
-        .options(
-            joinedload(Account.owner),
-            joinedload(Account.created_by),
-            selectinload(Account.account_linked_contact),
-        )
-        .limit(limit)
-        .all()
-    )
     for acc in data:
+        # 2. Fetch and attach MongoDB notes
+        notes = []
         acc_id = acc.id
         coll_notes = mongodb.find(
-            {"parent_id": acc_id},
-            {
-                "_id": 0,
-                "note": 1,
-                "parent_id": 1,
-                "created_time": 1,
-                "modified_time": 1,
-            },
+            {'parent_id': acc_id},
+            {'_id': 0, 'note': 1, 'parent_id': 1, "created_time": 1, "modified_time": 1}
         )
         for note in coll_notes:
             note["parent_id"] = str(note["parent_id"])
             notes.append(note)
+
         acc.notes = notes
+
     total_pages = math.ceil(total_data_size / limit)
+
     return {
-        "data": data,
+        "data": data,  # Return the clean dictionaries
         "page_info": {
             "page": page,
             "total_pages": total_pages,

@@ -1,3 +1,4 @@
+from typing import Optional
 
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
@@ -8,11 +9,34 @@ from ..controllers import account as repo
 
 router = APIRouter(prefix="/accounts", tags=["accounts"])
 
-@router.post("/",)
+@router.post("/")
 def create(data: AccountBase, db: Session = Depends(get_db)):
     return repo.create_account(db, data)
 
 
 @router.get("/",response_model=GetlistAccountResponse)
-def list_all(request:Request,account_id:int=None,page:int=1,phone:str='',company_name:str='',db: Session = Depends(get_db),mongodb = Depends(get_mongodb)):
-    return repo.get_all_accounts(request,db,mongodb,page,account_id,phone,company_name)
+def list_all(
+    request: Request,
+    account_id: int | None = None,
+    city: str | None = None,
+    page: int = 1,
+    state: str | None = None,
+    db: Session = Depends(get_db),
+    mongodb = Depends(get_mongodb),
+    account_stage:str|None = None,
+    account_status:str|None = None,
+    account_name:Optional[str] = None
+):
+    return repo.get_all_accounts(
+        request=request,
+        db=db,
+        mongodb=mongodb,
+        page=page,
+        account_id=account_id,
+        city=city,
+        state=state,
+        account_stage=account_stage,
+        account_status=account_status,
+        account_name=account_name
+        # map others only if they exist in repo
+    )

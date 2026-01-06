@@ -122,16 +122,15 @@ class AccountResponse(BaseModel):
     owner: UserResponse|None
     account_linked_contact: list[ContactResponse] = []
     notes: Any
-    model_config = ConfigDict(from_attributes=True)
 
-    @field_serializer("id")
+    @field_validator("id")
     @classmethod
     def parse_id(cls, value):
         if isinstance(value, int):
          return str(value)
         else:
             return value
-    @field_serializer("created_by_id")
+    @field_validator("created_by_id")
     @classmethod
     def serialize_bigint(cls, value):
         if isinstance(value, int):

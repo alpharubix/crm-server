@@ -1,14 +1,15 @@
 import math
 from datetime import datetime
+
 from fastapi import HTTPException
 from pymongo.synchronous.collection import Collection
 from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload, selectinload
 from starlette.requests import Request
+
 from ..models.account import Account
 from ..schemas.account import AccountBase
 
-from ..schemas.account import  AccountBase
 
 def create_account(db: Session, data: AccountBase, created_by: str = "") -> Account:
     if db.query(Account).filter(Account.email == data.email).first():
@@ -49,9 +50,9 @@ def create_account(db: Session, data: AccountBase, created_by: str = "") -> Acco
 def get_all_accounts(
     request: Request,
     db: Session,
-    mongodb:Collection,
+    mongodb: Collection,
     page: int,
-    account_id: int = "",
+    account_id: int,
     account_status: str = "",
     source: str = "",
     type_of_business: str = "",
@@ -103,7 +104,7 @@ def get_all_accounts(
         # manager_id: [executive_ids]
     }
 
-    limit = 10
+    limit = 30
     offset = (page - 1) * limit
     query = db.query(Account)
     filters = []
@@ -124,7 +125,9 @@ def get_all_accounts(
     # filters.append(Account.account_owner_id == request.state.user_id)
     if allowed_owner_ids is not None:
         filters.append(Account.account_owner_id.in_(allowed_owner_ids))
-    notes=[]
+    
+    # This might go in the accounts loop
+    notes = []
 
     if account_id is not None:
         filters.append(Account.id == account_id)
@@ -163,13 +166,20 @@ def get_all_accounts(
         .limit(limit)
         .all()
     )
-
-    data = base_query.offset(offset).options(joinedload(Account.owner),joinedload(Account.created_by),selectinload(Account.account_linked_contact)).limit(limit).all()
     for acc in data:
         acc_id = acc.id
-        coll_notes = mongodb.find({'parent_id':acc_id},{'_id':0,'note':1,'parent_id':1,"created_time":1,"modified_time":1})
+        coll_notes = mongodb.find(
+            {"parent_id": acc_id},
+            {
+                "_id": 0,
+                "note": 1,
+                "parent_id": 1,
+                "created_time": 1,
+                "modified_time": 1,
+            },
+        )
         for note in coll_notes:
-            note['parent_id'] = str(note['parent_id'])
+            note["parent_id"] = str(note["parent_id"])
             notes.append(note)
         acc.notes = notes
     total_pages = math.ceil(total_data_size / limit)

@@ -18,8 +18,9 @@ def login(body:Login,db: Session = Depends(get_db)):
 def logout(response: Response):
     response.delete_cookie(
         key="token",
-        httponly=True,
-        secure=True,  # must match how it was set
+        path="/",
+        secure=True,
+        samesite="none",
     )
     return {"message": "Logout successful"}
 

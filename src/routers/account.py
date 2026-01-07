@@ -18,8 +18,8 @@ def create(data: AccountBase, db: Session = Depends(get_db)):
     return repo.create_account(db, data)
 
 
-@router.get("/",response_model=GetlistAccountResponse)
-@router.get("",response_model=GetlistAccountResponse)
+@router.get("/")
+@router.get("")
 def list_all(
     request: Request,
     account_id: int | None = None,

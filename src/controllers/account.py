@@ -1,10 +1,9 @@
 import math
 from datetime import datetime
 from typing import Optional
-
+from sqlalchemy import and_
 from fastapi import HTTPException
 from pymongo.synchronous.collection import Collection
-from sqlalchemy import func, and_, String
 from sqlalchemy.orm import Session, joinedload, selectinload
 from starlette.requests import Request
 
@@ -143,11 +142,11 @@ def get_all_accounts(
         filters.append(Account.type_of_business == type_of_business)
     if industry:
         filters.append(Account.industry == industry)
-    if city :
-        print('im executing')
+    if city:
+        print("im executing")
         filters.append(Account.city.ilike(f"{city.strip()}%"))
     if state:
-        print('im state')
+        print("im state")
         filters.append(Account.state.ilike(f"{state.strip()}%"))
     if pincode:
         filters.append(Account.pincode == pincode)
@@ -163,15 +162,30 @@ def get_all_accounts(
     base_query = query.filter(and_(*filters)) if filters else query
     print(base_query)
     total_data_size = base_query.count()
-    data = base_query.offset(offset).options(joinedload(Account.owner),joinedload(Account.created_by),selectinload(Account.account_linked_contact)).limit(limit).all()
+    data = (
+        base_query.offset(offset)
+        .options(
+            joinedload(Account.owner),
+            joinedload(Account.created_by),
+            selectinload(Account.account_linked_contact),
+        )
+        .limit(limit)
+        .all()
+    )
 
     for acc in data:
         # 2. Fetch and attach MongoDB notes
         notes = []
         acc_id = acc.id
         coll_notes = mongodb.find(
-            {'parent_id': acc_id},
-            {'_id': 0, 'note': 1, 'parent_id': 1, "created_time": 1, "modified_time": 1}
+            {"parent_id": acc_id},
+            {
+                "_id": 0,
+                "note": 1,
+                "parent_id": 1,
+                "created_time": 1,
+                "modified_time": 1,
+            },
         )
         for note in coll_notes:
             note["parent_id"] = str(note["parent_id"])

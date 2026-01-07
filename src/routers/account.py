@@ -1,16 +1,18 @@
 from datetime import datetime
-from typing import Optional, Dict, Any
+from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.params import Body
 from sqlalchemy.orm import Session
 from starlette.requests import Request
-from ..database import get_db,get_mongodb
-from ..schemas.account import  GetlistAccountResponse,AccountBase
+
 from ..controllers import account as repo
+from ..database import get_db, get_mongodb
 from ..models.account import Account
+from ..schemas.account import AccountBase, GetlistAccountResponse
 
 router = APIRouter(prefix="/accounts", tags=["accounts"])
+
 
 @router.post("/")
 @router.post("")
@@ -18,8 +20,8 @@ def create(data: AccountBase, db: Session = Depends(get_db)):
     return repo.create_account(db, data)
 
 
-@router.get("/")
-@router.get("")
+@router.get("/", response_model=GetlistAccountResponse)
+@router.get("", response_model=GetlistAccountResponse)
 def list_all(
     request: Request,
     account_id: int | None = None,
@@ -27,10 +29,10 @@ def list_all(
     page: int = 1,
     state: str | None = None,
     db: Session = Depends(get_db),
-    mongodb = Depends(get_mongodb),
-    account_stage:str|None = None,
-    account_status:str|None = None,
-    account_name:Optional[str] = None
+    mongodb=Depends(get_mongodb),
+    account_stage: str | None = None,
+    account_status: str | None = None,
+    account_name: Optional[str] = None,
 ):
     return repo.get_all_accounts(
         request=request,
@@ -42,21 +44,23 @@ def list_all(
         state=state,
         account_stage=account_stage,
         account_status=account_status,
-        account_name=account_name
+        account_name=account_name,
         # map others only if they exist in repo
     )
+
+
 @router.put("{account_id}")
 @router.put("/{account_id}")
 async def update_account(
-        account_id: int,
-        payload: Dict[str, Any] = Body(...),  # Takes the raw JSON as a dict
-        db: Session = Depends(get_db)
+    account_id: int,
+    payload: Dict[str, Any] = Body(...),  # Takes the raw JSON as a dict
+    db: Session = Depends(get_db),
 ):
     # 1. Locate the record in PostgreSQL
     db_account = db.query(Account).filter(Account.id == account_id).first()
 
     if not db_account:
-        raise HTTPException(status_code=404, detail=({'msg':"Account not found"}))
+        raise HTTPException(status_code=404, detail=({"msg": "Account not found"}))
 
     # 2. Iterate and Update
     # This dynamically sets attributes on your SQLAlchemy model

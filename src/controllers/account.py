@@ -1,11 +1,15 @@
 import math
 from datetime import datetime
 from typing import Optional
-from sqlalchemy import and_
+
 from fastapi import HTTPException
 from pymongo.synchronous.collection import Collection
+from sqlalchemy import and_
 from sqlalchemy.orm import Session, joinedload, selectinload
 from starlette.requests import Request
+
+from src.controllers.auth import MANAGERID
+from src.controllers.notes import get_notes
 
 from ..models.account import Account
 from ..schemas.account import AccountBase
@@ -65,46 +69,11 @@ def get_all_accounts(
     waba_interested: Optional[bool] = None,
     business_status: Optional[str] = None,
     call_back_date_time: Optional[datetime] = None,
+    account_owner_id: Optional[int] = None,
 ):
-    # Temprorary
-    MANAGER_EXECUTIVES_MAP = {
-        # Namrata
-        3899927000000318361: [
-            3899927000005965018,  # Arjun
-            3899927000004429017,  # Sandeep
-            3899927000004808001,  # Ayush
-            3899927000007673012,  # Honappa
-            3899927000005114004,  # Manjunath
-            3899927000005114020,  # Digamber
-            3899927000005965050,  # Sahil
-        ],
-        # Sutapa Roy
-        3899927000005114050: [
-            3899927000005965018,  # Arjun
-            3899927000004429017,  # Sandeep
-            3899927000004808001,  # Ayush
-            3899927000007673012,  # Honappa
-            3899927000005114004,  # Manjunath
-            3899927000005114020,  # Digamber
-            3899927000005965050,  # Sahil
-        ],
-        # Manjunath
-        3899927000005114004: [
-            3899927000005965018,  # Arjun
-            3899927000004429017,  # Sandeep
-            3899927000007673012,  # Honappa
-        ],
-        # Digamber
-        3899927000005114020: [
-            3899927000004808001,  # Ayush
-            3899927000005965018,  # Arjun
-            3899927000007673012,  # Honappa
-            3899927000005114004,  # Manjunath
-            3899927000004429017,  # Sandeep
-            3899927000005965050,  # Sahil
-        ],
-        # manager_id: [executive_ids]
-    }
+    MANAGER_EXECUTIVES_MAP = (
+        MANAGERID().MANAGER_EXECUTIVES_MAP
+    )  # manager is mapping object
 
     limit = 30
     offset = (page - 1) * limit
@@ -137,7 +106,7 @@ def get_all_accounts(
     if account_stage:
         filters.append(Account.account_stage.ilike(f"{account_stage.strip()}%"))
     if source:
-        filters.append(Account.source == source)
+        filters.append(Account.source.ilike(f"{source.strip()}%"))
     if type_of_business:
         filters.append(Account.type_of_business == type_of_business)
     if industry:
@@ -155,44 +124,46 @@ def get_all_accounts(
     if business_status:
         filters.append(Account.business_status == business_status)
     if call_back_date_time:
-        filters.append(
-            Account.call_back_date_time >= call_back_date_time
-        )  # Or use date rang
+        filters.append(Account.call_back_date_time >= call_back_date_time)
+    if account_owner_id:
+        if user_id not in MANAGER_EXECUTIVES_MAP:
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "message": "You do not have permission to access records for this account owner",
+                    "success": False,
+                },
+            )
+        elif account_owner_id in MANAGER_EXECUTIVES_MAP.get(user_id):
+            filters.append(Account.account_owner_id == int(account_owner_id))
+        else:
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "message": "You do not have permission to access records for this account owner",
+                    "success": False,
+
+                },
+            )
     print(filters)
     base_query = query.filter(and_(*filters)) if filters else query
-    print(base_query)
     total_data_size = base_query.count()
     data = (
-        base_query.offset(offset)
+        base_query.offset(offset)  # query performance optimization
         .options(
-            joinedload(Account.owner),
-            joinedload(Account.created_by),
+            selectinload(Account.owner),
+            selectinload(Account.created_by),
             selectinload(Account.account_linked_contact),
         )
         .limit(limit)
         .all()
     )
+    if len(data) != 0:
+        account_ids = [acc.id for acc in data]
+        accounts_notes = get_notes(acc_ids=account_ids, live_notes_collection=mongodb)
 
-    for acc in data:
-        # 2. Fetch and attach MongoDB notes
-        notes = []
-        acc_id = acc.id
-        coll_notes = mongodb.find(
-            {"parent_id": acc_id},
-            {
-                "_id": 0,
-                "note": 1,
-                "parent_id": 1,
-                "created_time": 1,
-                "modified_time": 1,
-            },
-        )
-        for note in coll_notes:
-            note["parent_id"] = str(note["parent_id"])
-            notes.append(note)
-
-        acc.notes = notes
-
+        for acc in data:
+            acc.notes = accounts_notes.get(acc.id)
     total_pages = math.ceil(total_data_size / limit)
 
     return {

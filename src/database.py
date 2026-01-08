@@ -1,12 +1,12 @@
 from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker, DeclarativeBase
-from sqlalchemy.sql.coercions import expect
+from sqlalchemy.orm import DeclarativeBase, sessionmaker
 
 from .config import settings
 
 # Format: postgresql://username:password@host:port/database_name
 engine = create_engine(settings.database_url)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
 
 class Base(DeclarativeBase):
     pass
@@ -19,6 +19,7 @@ def get_db():
         yield db
     finally:
         db.close()
+
 
 ####################################################
 
@@ -40,8 +41,8 @@ monogodb = MongoClient(settings.MONGODB_URI)
 
 def get_mongodb():
     db = monogodb["crm_dev"]
-    collection = db['live_notes']
+    collection = db["live_notes"]
     try:
-       yield collection
+        yield collection
     finally:
-       pass
+        pass

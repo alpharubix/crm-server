@@ -33,6 +33,8 @@ def list_all(
     account_stage: str | None = None,
     account_status: str | None = None,
     account_name: Optional[str] = None,
+    account_owner_id: Optional[int] = None,
+    source: Optional[str] = None,
 ):
     return repo.get_all_accounts(
         request=request,
@@ -45,6 +47,8 @@ def list_all(
         account_stage=account_stage,
         account_status=account_status,
         account_name=account_name,
+        account_owner_id=account_owner_id,
+        source=source,
         # map others only if they exist in repo
     )
 

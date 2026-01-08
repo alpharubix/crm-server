@@ -56,8 +56,7 @@ def get_all_contacts(
     contact_id: int | None = None,
     city: str = "",
     email: str = "",
-    first_name: str = "",
-    last_name: str = "",
+    full_name: str = "",
 ):
     # Same Map as in get_all_accounts
     MANAGER_EXECUTIVES_MAP = {
@@ -124,10 +123,8 @@ def get_all_contacts(
         filters.append(Contact.city.ilike(f"{city.strip()}%"))
     if email and email.strip():
         filters.append(Contact.email.ilike(f"{email.strip()}%"))
-    if first_name and first_name.strip():
-        filters.append(Contact.first_name.ilike(f"{first_name.strip()}%"))
-    if last_name and last_name.strip():
-        filters.append(Contact.last_name.ilike(f"{last_name.strip()}%"))
+    if full_name and full_name.strip():
+        filters.append(Contact.last_name.ilike(f"{full_name.strip()}%"))
 
     base_query = query.filter(and_(*filters)) if filters else query
 

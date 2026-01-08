@@ -20,12 +20,11 @@ def list_all(
     request: Request,
     contact_id: int = None,
     page: int = 1,
-    first_name: str = None,
-    last_name: str = None,
+    full_name: str = None,
     email: str = None,
     city: str = None,
     db: Session = Depends(get_db),
 ):
     return get_all_contacts(
-        request, db, page, contact_id, city, email, first_name, last_name
+        request, db, page, contact_id, city, email,full_name
     )

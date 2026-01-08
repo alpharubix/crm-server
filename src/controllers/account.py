@@ -8,6 +8,7 @@ from sqlalchemy import and_
 from sqlalchemy.orm import Session, joinedload, selectinload
 from starlette.requests import Request
 
+from src.controllers.auth import MANAGERID
 from src.controllers.notes import get_notes
 
 from ..models.account import Account
@@ -70,45 +71,9 @@ def get_all_accounts(
     call_back_date_time: Optional[datetime] = None,
     account_owner_id: Optional[int] = None,
 ):
-    # Temprorary
-    MANAGER_EXECUTIVES_MAP = {
-        # Namrata
-        3899927000000318361: [
-            3899927000005965018,  # Arjun
-            3899927000004429017,  # Sandeep
-            3899927000004808001,  # Ayush
-            3899927000007673012,  # Honappa
-            3899927000005114004,  # Manjunath
-            3899927000005114020,  # Digamber
-            3899927000005965050,  # Sahil
-        ],
-        # Sutapa Roy
-        3899927000005114050: [
-            3899927000005965018,  # Arjun
-            3899927000004429017,  # Sandeep
-            3899927000004808001,  # Ayush
-            3899927000007673012,  # Honappa
-            3899927000005114004,  # Manjunath
-            3899927000005114020,  # Digamber
-            3899927000005965050,  # Sahil
-        ],
-        # Manjunath
-        3899927000005114004: [
-            3899927000005965018,  # Arjun
-            3899927000004429017,  # Sandeep
-            3899927000007673012,  # Honappa
-        ],
-        # Digamber
-        3899927000005114020: [
-            3899927000004808001,  # Ayush
-            3899927000005965018,  # Arjun
-            3899927000007673012,  # Honappa
-            3899927000005114004,  # Manjunath
-            3899927000004429017,  # Sandeep
-            3899927000005965050,  # Sahil
-        ],
-        # manager_id: [executive_ids]
-    }
+    MANAGER_EXECUTIVES_MAP = (
+        MANAGERID().MANAGER_EXECUTIVES_MAP
+    )  # manager is mapping object
 
     limit = 30
     offset = (page - 1) * limit
@@ -162,17 +127,32 @@ def get_all_accounts(
         filters.append(Account.call_back_date_time >= call_back_date_time)
     if account_owner_id:
         if user_id not in MANAGER_EXECUTIVES_MAP:
-            raise HTTPException(status_code=401, detail={"msg": "ACCESS DENIED"})
-        else:
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "message": "You do not have permission to access records for this account owner",
+                    "success": False,
+                },
+            )
+        elif account_owner_id in MANAGER_EXECUTIVES_MAP.get(user_id):
             filters.append(Account.account_owner_id == int(account_owner_id))
+        else:
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "message": "You do not have permission to access records for this account owner",
+                    "success": False,
+
+                },
+            )
     print(filters)
     base_query = query.filter(and_(*filters)) if filters else query
     total_data_size = base_query.count()
     data = (
-        base_query.offset(offset)
+        base_query.offset(offset)  # query performance optimization
         .options(
-            joinedload(Account.owner),
-            joinedload(Account.created_by),
+            selectinload(Account.owner),
+            selectinload(Account.created_by),
             selectinload(Account.account_linked_contact),
         )
         .limit(limit)

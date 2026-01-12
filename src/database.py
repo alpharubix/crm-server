@@ -41,8 +41,7 @@ monogodb = MongoClient(settings.MONGODB_URI)
 
 def get_mongodb():
     db = monogodb["crm_dev"]
-    collection = db["live_notes"]
     try:
-        yield collection
+        yield db
     finally:
         pass

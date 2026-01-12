@@ -160,10 +160,10 @@ def get_all_accounts(
     )
     if len(data) != 0:
         account_ids = [acc.id for acc in data]
-        accounts_notes = get_notes(acc_ids=account_ids, live_notes_collection=mongodb)
+        accounts_notes = get_notes(acc_ids=account_ids, notes_collection=mongodb['Notes'])
 
         for acc in data:
-            acc.notes = accounts_notes.get(acc.id)
+            acc.notes = accounts_notes.get(str(acc.id))
     total_pages = math.ceil(total_data_size / limit)
 
     return {

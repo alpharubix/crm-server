@@ -100,7 +100,7 @@ def get_all_accounts(
     if account_id is not None:
         filters.append(Account.id == account_id)
     if account_name:
-        filters.append(Account.account_name.ilike(f"{account_name.strip()}%"))
+        filters.append(Account.account_name.contains(f"{account_name.strip()}%"))
     if account_status:
         filters.append(Account.account_status.ilike(f"{account_status.strip()}%"))
     if account_stage:

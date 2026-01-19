@@ -27,15 +27,16 @@ def insert_notes(user_id, note, parent_id, db):
             {"_id": 0, "id": 1, "first_name": 1, "email": 1}
         )
 
-        notes_coll.insert_one({
+        result = notes_coll.insert_one({
             "Owner": Owner,
             "Created_By": Created_By,
             "Modified_By": Modified_By,
             "Note_Content": note,
             "Parent_Id": Parent_Id,
-            "created_time": datetime.now(),
-            "modified_time": datetime.now(),
+            "Created_Time": datetime.now().isoformat(),
+            "Modified_Time": datetime.now().isoformat(),
         })
+        print("Insertion result",result)
 
         return JSONResponse(
             status_code=201,

@@ -9,16 +9,6 @@ from ..schemas.contact import ContactBase
 
 
 def create_contact(db: Session, data: ContactBase):
-    # 1. Check if Email exists
-    if db.query(Contact).filter(Contact.email == data.email).first():
-        raise HTTPException(status_code=400, detail="Contact email already exists")
-
-    # 2. Check if Account exists (Logic Check)
-    # if data.account_id:
-    #     if not db.query(Account).filter(Account.id == data.account_id).first():
-    #         raise HTTPException(status_code=404, detail="Associated Account not found")
-
-    # 3. Create
     new_contact = Contact(
         id=data.id,
         account_id=data.account_id,  # Link to Account
@@ -120,11 +110,11 @@ def get_all_contacts(
     if contact_id:
         filters.append(Contact.id == contact_id)
     if city and city.strip():
-        filters.append(Contact.city.ilike(f"{city.strip()}%"))
+        filters.append(Contact.city.ilike(f"%{city.strip()}%"))
     if email and email.strip():
-        filters.append(Contact.email.ilike(f"{email.strip()}%"))
+        filters.append(Contact.email.ilike(f"%{email.strip()}%"))
     if full_name and full_name.strip():
-        filters.append(Contact.last_name.ilike(f"{full_name.strip()}%"))
+        filters.append(Contact.last_name.ilike(f"%{full_name.strip()}%"))
 
     base_query = query.filter(and_(*filters)) if filters else query
 

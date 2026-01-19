@@ -25,7 +25,7 @@ class Contact(Base):
     designation = Column(String, nullable=True)
 
     # Communication
-    email = Column(String, unique=True, nullable=False, index=True)
+    email = Column(String, nullable=True, index=True)
     secondary_email = Column(String, nullable=True)
     mobile = Column(String, nullable=True)
     phone = Column(String, nullable=True)

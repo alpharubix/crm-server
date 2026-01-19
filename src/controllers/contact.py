@@ -44,6 +44,7 @@ def get_all_contacts(
     db: Session,
     page: int,
     contact_id: int | None = None,
+    phone: str = None,
     city: str = "",
     email: str = "",
     full_name: str = "",
@@ -115,7 +116,8 @@ def get_all_contacts(
         filters.append(Contact.email.ilike(f"%{email.strip()}%"))
     if full_name and full_name.strip():
         filters.append(Contact.last_name.ilike(f"%{full_name.strip()}%"))
-
+    if phone and phone.strip():
+        filters.append(Contact.phone.ilike(f"{phone}%"))
     base_query = query.filter(and_(*filters)) if filters else query
 
     total_data_size = base_query.count()

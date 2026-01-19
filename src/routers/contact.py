@@ -25,11 +25,12 @@ def list_all(
     page: int = 1,
     full_name: str = None,
     email: str = None,
+    phone: str = None,
     city: str = None,
     db: Session = Depends(get_db),
 ):
     return get_all_contacts(
-        request, db, page, contact_id, city, email,full_name
+        request, db, page, contact_id,phone,city, email,full_name
     )
 
 # @router.put("/{contact_id}")

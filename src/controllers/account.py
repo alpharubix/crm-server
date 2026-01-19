@@ -100,7 +100,7 @@ def get_all_accounts(
     if account_id is not None:
         filters.append(Account.id == account_id)
     if account_name:
-        filters.append(Account.account_name.contains(f"{account_name.strip()}%"))
+        filters.append(Account.account_name.ilike(f"%{account_name.strip()}%"))
     if account_status:
         filters.append(Account.account_status.ilike(f"{account_status.strip()}%"))
     if account_stage:
@@ -112,11 +112,9 @@ def get_all_accounts(
     if industry:
         filters.append(Account.industry == industry)
     if city:
-        print("im executing")
-        filters.append(Account.city.ilike(f"{city.strip()}%"))
+        filters.append(Account.city.ilike(f"%{city.strip()}%"))
     if state:
-        print("im state")
-        filters.append(Account.state.ilike(f"{state.strip()}%"))
+        filters.append(Account.state.ilike(f"%{state.strip()}%"))
     if pincode:
         filters.append(Account.pincode == pincode)
     if waba_interested is not None:

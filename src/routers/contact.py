@@ -1,4 +1,7 @@
+from typing import Dict, Any
+
 from fastapi import APIRouter, Depends, Request
+from fastapi.params import Body
 from sqlalchemy.orm import Session
 
 from ..controllers.contact import create_contact, get_all_contacts
@@ -28,3 +31,7 @@ def list_all(
     return get_all_contacts(
         request, db, page, contact_id, city, email,full_name
     )
+
+# @router.put("/{contact_id}")
+# @router.put("{contact_id}")
+# def update_contact(body:Dict[str, Any] = Body(...), db: Session = Depends(get_db)):

@@ -9,9 +9,9 @@ from src.routers import contact as contact_router
 from src.routers import user as user_router
 from src.routers.authentication import authentication_router
 from src.routers.notes import notes_router
-
-Base.metadata.create_all(bind=engine)
-
+from src.models.contact import Contact
+Base.metadata.clear()
+Base.metadata.reflect(bind=engine)
 app = FastAPI()
 
 

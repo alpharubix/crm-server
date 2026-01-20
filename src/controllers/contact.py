@@ -1,8 +1,9 @@
 import math
-
 from fastapi import HTTPException
 from sqlalchemy import and_
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.orm import Session, joinedload, session
+from starlette.requests import Request
 
 from ..models.contact import Contact
 from ..schemas.contact import ContactBase
@@ -45,6 +46,7 @@ def get_all_contacts(
     page: int,
     contact_id: int | None = None,
     phone: str = None,
+    mobile: str = None,
     city: str = "",
     email: str = "",
     full_name: str = "",
@@ -118,6 +120,8 @@ def get_all_contacts(
         filters.append(Contact.last_name.ilike(f"%{full_name.strip()}%"))
     if phone and phone.strip():
         filters.append(Contact.phone.ilike(f"{phone}%"))
+    if mobile and mobile.strip():
+        filters.append(Contact.mobile.ilike(f"%{mobile.strip()}%"))
     base_query = query.filter(and_(*filters)) if filters else query
 
     total_data_size = base_query.count()
@@ -142,3 +146,25 @@ def get_all_contacts(
             "data_size": total_data_size,
         },
     }
+
+def update_contacts(request:Request,contact_id:int,body:dict,db:session):
+    try:
+        contact = db.query(Contact).filter(Contact.id == contact_id).first()
+
+        if not contact:
+            raise HTTPException(status_code=404, detail=({"msg":"No Contact found"}))
+        else:
+            for key,value in body.items():
+                if hasattr(contact,key):
+                    setattr(contact, key, value)
+            user_id = request.state.user_id
+            setattr(contact,"modified_by_id",int(user_id))
+            db.commit()
+            db.refresh(contact)
+            return {"message": "update-success", "updated_contact":contact}
+    except HTTPException as e:
+        raise e
+    except Exception as e:
+        print(e)
+        db.rollback()
+        raise HTTPException(status_code=500, detail=({"msg":"Internal server error"}))

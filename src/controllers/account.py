@@ -70,6 +70,7 @@ def get_all_accounts(
     business_status: Optional[str] = None,
     call_back_date_time: Optional[datetime] = None,
     account_owner_id: Optional[int] = None,
+    phone_number: Optional[str] = None,
 ):
     MANAGER_EXECUTIVES_MAP = (
         MANAGERID().MANAGER_EXECUTIVES_MAP
@@ -123,6 +124,8 @@ def get_all_accounts(
         filters.append(Account.business_status == business_status)
     if call_back_date_time:
         filters.append(Account.call_back_date_time >= call_back_date_time)
+    if phone_number:
+        filters.append(Account.phone == phone_number)
     if account_owner_id:
         if user_id not in MANAGER_EXECUTIVES_MAP:
             raise HTTPException(

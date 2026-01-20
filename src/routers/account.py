@@ -35,6 +35,7 @@ def list_all(
     account_name: Optional[str] = None,
     account_owner_id: Optional[int] = None,
     source: Optional[str] = None,
+    phone: str | None = None,
 ):
     return repo.get_all_accounts(
         request=request,

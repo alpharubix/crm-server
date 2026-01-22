@@ -1,6 +1,6 @@
 import math
 from fastapi import HTTPException
-from sqlalchemy import and_
+from sqlalchemy import and_,or_
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, joinedload, session
 from starlette.requests import Request
@@ -119,9 +119,9 @@ def get_all_contacts(
     if full_name and full_name.strip():
         filters.append(Contact.last_name.ilike(f"%{full_name.strip()}%"))
     if phone and phone.strip():
-        filters.append(Contact.phone.ilike(f"{phone}%"))
+        filters.append(or_(Contact.mobile.startswith(phone), Contact.mobile.startswith(f'+91{phone}')))
     if mobile and mobile.strip():
-        filters.append(Contact.mobile.ilike(f"%{mobile.strip()}%"))
+        filters.append(or_(Contact.mobile.startswith(mobile),Contact.mobile.startswith(f'+91{mobile}')))
     base_query = query.filter(and_(*filters)) if filters else query
 
     total_data_size = base_query.count()
@@ -155,7 +155,9 @@ def update_contacts(request:Request,contact_id:int,body:dict,db:session):
             raise HTTPException(status_code=404, detail=({"msg":"No Contact found"}))
         else:
             for key,value in body.items():
-                if hasattr(contact,key):
+                if value == '' or None:
+                    setattr(contact, key, None)
+                elif hasattr(contact,key):
                     setattr(contact, key, value)
             user_id = request.state.user_id
             setattr(contact,"modified_by_id",int(user_id))

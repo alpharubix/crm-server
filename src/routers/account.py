@@ -50,6 +50,7 @@ def list_all(
         account_name=account_name,
         account_owner_id=account_owner_id,
         source=source,
+        phone_number=phone
         # map others only if they exist in repo
     )
 
@@ -72,14 +73,17 @@ async def update_account(
     for key, value in payload.items():
         if hasattr(db_account, key):
             # Special handling for datetime strings if they come as strings
-            if "time" in key or "date" in key:
+            if value == '' or None: #if input is empty string store it as empty string in db
+                setattr(db_account, key, None)
+            elif "time" in key or "date" in key:
                 if isinstance(value, str):
                     try:
                         value = datetime.fromisoformat(value)
+                        setattr(db_account, key, value)
                     except ValueError:
                         pass  # Or handle specific date formatting errors
-
-            setattr(db_account, key, value)
+            else:
+                setattr(db_account, key, value)
 
     # 3. Save changes
     try:

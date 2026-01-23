@@ -67,12 +67,17 @@ def get_me(request:Request,db):
 
 def get_user_filter(request: Request, db):
     user_id = request.state.user_id
+    role = request.state.role
+    print(role)
     MANAGER_EXECUTIVE_MAP = MANAGERID().MANAGER_EXECUTIVES_MAP
     try:
         if user_id in MANAGER_EXECUTIVE_MAP:
             executive_id = MANAGER_EXECUTIVE_MAP.get(user_id)
             users = db.query(User.id,User.full_name).filter(User.id.in_(executive_id)).all()
             return {'data':users}
+        elif role in ("super_admin", "admin") :
+            users = db.query(User.id,User.full_name).all()
+            return {'data': users}
         else:
             raise HTTPException(status_code=403,detail={"message" :"You do not have permission to access this content","success": False})
     except HTTPException as e:

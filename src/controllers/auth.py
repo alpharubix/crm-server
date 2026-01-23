@@ -49,6 +49,7 @@ class MANAGERID:
     MANAGER_EXECUTIVES_MAP = {
         # Namrata
         3899927000000318361: [
+            3899927000000318361,  #Namrata
             3899927000005965018,  # Arjun
             3899927000004429017,  # Sandeep
             3899927000004808001,  # Ayush
@@ -59,6 +60,7 @@ class MANAGERID:
         ],
         # Sutapa Roy
         3899927000005114050: [
+            3899927000005114050,  #sutapa
             3899927000005965018,  # Arjun
             3899927000004429017,  # Sandeep
             3899927000004808001,  # Ayush
@@ -69,12 +71,14 @@ class MANAGERID:
         ],
         # Manjunath
         3899927000005114004: [
+            3899927000005114004,  #manjunath
             3899927000005965018,  # Arjun
             3899927000004429017,  # Sandeep
             3899927000007673012,  # Honappa
         ],
         # Digamber
         3899927000005114020: [
+            3899927000005114020,   #digambar
             3899927000004808001,  # Ayush
             3899927000005965018,  # Arjun
             3899927000007673012,  # Honappa
@@ -84,3 +88,4 @@ class MANAGERID:
         ],
         # manager_id: [executive_ids]
     }
+

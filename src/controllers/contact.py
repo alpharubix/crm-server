@@ -5,6 +5,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, joinedload, session
 from starlette.requests import Request
 
+from .auth import MANAGERID
 from ..models.contact import Contact
 from ..schemas.contact import ContactBase
 
@@ -52,39 +53,9 @@ def get_all_contacts(
     full_name: str = "",
 ):
     # Same Map as in get_all_accounts
-    MANAGER_EXECUTIVES_MAP = {
-        3899927000000318361: [
-            3899927000005965018,
-            3899927000004429017,
-            3899927000004808001,
-            3899927000007673012,
-            3899927000005114004,
-            3899927000005114020,
-            3899927000005965050,
-        ],
-        3899927000005114050: [
-            3899927000005965018,
-            3899927000004429017,
-            3899927000004808001,
-            3899927000007673012,
-            3899927000005114004,
-            3899927000005114020,
-            3899927000005965050,
-        ],
-        3899927000005114004: [
-            3899927000005965018,
-            3899927000004429017,
-            3899927000007673012,
-        ],
-        3899927000005114020: [
-            3899927000004808001,
-            3899927000005965018,
-            3899927000007673012,
-            3899927000005114004,
-            3899927000004429017,
-            3899927000005965050,
-        ],
-    }
+    MANAGER_EXECUTIVES_MAP = (
+        MANAGERID().MANAGER_EXECUTIVES_MAP
+    )  # manager is mapping object
 
     limit = 20
     offset = (page - 1) * limit

@@ -127,7 +127,10 @@ def get_all_accounts(
     if phone_number and phone_number.strip():
         filters.append(or_(Account.phone.startswith(phone_number), Account.phone.startswith(f'91{phone_number}')))
     if account_owner_id:
-        if user_id not in MANAGER_EXECUTIVES_MAP:
+
+        if role in ('super_admin', 'admin'):
+            filters.append(Account.account_owner_id==int(account_owner_id))
+        elif user_id not in MANAGER_EXECUTIVES_MAP:
             raise HTTPException(
                 status_code=403,
                 detail={

@@ -4,6 +4,7 @@ from typing import Any, Dict, Optional
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.params import Body
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.attributes import flag_modified
 from starlette.requests import Request
 
 from ..controllers import account as repo
@@ -35,6 +36,7 @@ def list_all(
     account_name: Optional[str] = None,
     account_owner_id: Optional[int] = None,
     source: Optional[str] = None,
+    phone: str | None = None,
 ):
     return repo.get_all_accounts(
         request=request,
@@ -49,42 +51,63 @@ def list_all(
         account_name=account_name,
         account_owner_id=account_owner_id,
         source=source,
+        phone_number=phone
         # map others only if they exist in repo
     )
 
-
-@router.put("{account_id}")
 @router.put("/{account_id}")
 async def update_account(
     account_id: int,
-    payload: Dict[str, Any] = Body(...),  # Takes the raw JSON as a dict
+    payload: Dict[str, Any] = Body(...),
     db: Session = Depends(get_db),
 ):
-    # 1. Locate the record in PostgreSQL
     db_account = db.query(Account).filter(Account.id == account_id).first()
 
     if not db_account:
-        raise HTTPException(status_code=404, detail=({"msg": "Account not found"}))
+        raise HTTPException(status_code=404, detail={"msg": "Account not found"})
 
-    # 2. Iterate and Update
-    # This dynamically sets attributes on your SQLAlchemy model
+    # Copy existing JSON safely
+    custom_fields_dict = dict(db_account.custom_fields or {})
+
     for key, value in payload.items():
+
         if hasattr(db_account, key):
-            # Special handling for datetime strings if they come as strings
-            if "time" in key or "date" in key:
+
+            if value == '' or value is None:
+                setattr(db_account, key, None)
+
+            elif "time" in key or "date" in key:
                 if isinstance(value, str):
                     try:
                         value = datetime.fromisoformat(value)
                     except ValueError:
-                        pass  # Or handle specific date formatting errors
+                        pass
+                setattr(db_account, key, value)
 
-            setattr(db_account, key, value)
+            else:
+                setattr(db_account, key, value)
 
-    # 3. Save changes
+        else:
+            if value == '' or value is None:
+                custom_fields_dict[key] = None
+            else:
+                custom_fields_dict[key] = value
+
+    # Assign + mark JSON dirty
+    db_account.custom_fields = custom_fields_dict
+    flag_modified(db_account, "custom_fields")
+
+    # Save changes
     try:
         db.commit()
         db.refresh(db_account)
-        return {"message": "update-success", "updated_account": db_account}
+        return {
+            "message": "update-success",
+            "updated_account": db_account
+        }
     except Exception as e:
         db.rollback()
-        raise HTTPException(status_code=400, detail=f"Database error: {str(e)}")
+        raise HTTPException(
+            status_code=400,
+            detail=f"Database error: {str(e)}"
+        )

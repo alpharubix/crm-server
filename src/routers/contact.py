@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from ..controllers.contact import create_contact, get_all_contacts
 from ..database import get_db
 from ..schemas.contact import ContactBase, ContactResponseList
-
+from ..controllers.contact import update_contacts
 router = APIRouter(prefix="/contacts", tags=["contacts"])
 
 
@@ -25,13 +25,15 @@ def list_all(
     page: int = 1,
     full_name: str = None,
     email: str = None,
+    phone: str = None,
+    mobile: str = None,
     city: str = None,
     db: Session = Depends(get_db),
 ):
     return get_all_contacts(
-        request, db, page, contact_id, city, email,full_name
+        request, db, page, contact_id,phone,mobile,city, email,full_name
     )
 
-# @router.put("/{contact_id}")
-# @router.put("{contact_id}")
-# def update_contact(body:Dict[str, Any] = Body(...), db: Session = Depends(get_db)):
+@router.put("/{contact_id}")
+def contact(request:Request,contact_id,body:Dict[str, Any] = Body(...), db: Session = Depends(get_db)):
+    return update_contacts(request,int(contact_id),body, db)

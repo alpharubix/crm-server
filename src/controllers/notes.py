@@ -15,6 +15,7 @@ def insert_notes(user_id, note, parent_id, db):
             {"_id": 0, "id": 1, "first_name": 1, "email": 1}
         )
 
+
         Parent_Id = acc_coll.find_one(
             {"id": parent_id},
             {"_id": 0, "id": 1, "Account_Name": 1}
@@ -26,6 +27,8 @@ def insert_notes(user_id, note, parent_id, db):
             {'id': str(user_id)},
             {"_id": 0, "id": 1, "first_name": 1, "email": 1}
         )
+        if Created_By and "first_name" in Created_By:
+            Created_By["name"] = Created_By.pop("first_name")
 
         result = notes_coll.insert_one({
             "Owner": Owner,

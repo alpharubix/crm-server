@@ -106,7 +106,6 @@ class AccountBase(BaseModel):
 
 
 class AccountResponse(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
     id: str
     first_name: str
     last_name: str
@@ -131,6 +130,7 @@ class AccountResponse(BaseModel):
     owner: UserResponse | None
     account_linked_contact: list[ContactResponse] = []
     notes: Any
+    custom_fields: Dict[str, Any]
 
     @field_validator("id", mode="before")
     @classmethod

@@ -115,7 +115,7 @@ class ContactResponse(BaseModel):
 
     # Communication
     email: EmailStr
-    secondary_email: Optional[EmailStr] = None
+    secondary_email: Any = None
     mobile: Optional[str] = None
     phone: Optional[str] = None
 

@@ -67,7 +67,7 @@ async def update_account(
 
     if not db_account:
         raise HTTPException(status_code=404, detail=({"msg": "Account not found"}))
-
+    custom_fields_dict = dict() #it stores all the custom fields
     # 2. Iterate and Update
     # This dynamically sets attributes on your SQLAlchemy model
     for key, value in payload.items():
@@ -84,6 +84,17 @@ async def update_account(
                         pass  # Or handle specific date formatting errors
             else:
                 setattr(db_account, key, value)
+
+        else:
+            if value == '' or None:
+                custom_fields_dict[key] = None
+            else:
+                custom_fields_dict[key]=value
+
+    setattr(db_account, 'custom_fields', custom_fields_dict)
+
+
+
 
     # 3. Save changes
     try:

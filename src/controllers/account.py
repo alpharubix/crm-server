@@ -125,7 +125,13 @@ def get_all_accounts(
     if call_back_date_time:
         filters.append(Account.call_back_date_time >= call_back_date_time)
     if phone_number and phone_number.strip():
-        filters.append(or_(Account.phone.startswith(phone_number), Account.phone.startswith(f'91{phone_number}')))
+        filters.append(
+            or_(
+                Account.phone.like(f"%{phone_number}%"),
+                Account.phone.like(f"%91{phone_number}%"),
+                Account.phone.like(f"%+91{phone_number}%")
+            )
+        )
     if account_owner_id:
 
         if role in ('super_admin', 'admin'):
@@ -149,9 +155,9 @@ def get_all_accounts(
 
                 },
             )
-    print(filters)
     base_query = query.filter(and_(*filters)) if filters else query
     total_data_size = base_query.count()
+    print(base_query)
     data = (
         base_query.offset(offset)  # query performance optimization
         .options(

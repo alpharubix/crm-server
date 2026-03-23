@@ -63,3 +63,24 @@ def export_deals(
         type_of_case_login=type_of_case_login,
         deal_owner_id=deal_owner_id,
     )
+
+@export_csv_router.get("/contacts")
+def export_contacts(
+    request: Request,
+    db: Session = Depends(get_db),
+    phone: Optional[str] = None,
+    mobile: Optional[str] = None,
+    city: Optional[str] = None,
+    email: Optional[str] = None,
+    full_name: Optional[str] = None,
+):
+    return repo.export_contacts_csv(
+        request=request,
+        db=db,
+        phone=phone,
+        mobile=mobile,
+        city=city,
+        email=email,
+        full_name=full_name,
+       
+    )

@@ -12,6 +12,7 @@ from starlette.requests import Request
 from ..models.account import Account
 from src.models.deal import Deal
 from src.models.user import User
+from src.models.contact import Contact
 from ..controllers.auth import MANAGERID
 from src.controllers.Background_threads import BackgroundThreadPool
 from src.controllers.mail import send_general_email
@@ -486,4 +487,150 @@ def intimate_user_via_mail(to:str,body:str,subject:str):
     except Exception as e:
         print(e)
 
+
+
+def export_contacts_csv(
+    request,
+    db: Session,
+    # contact_id: int | None = None,
+    phone: str = None,
+    mobile: str = None,
+    city: str = "",
+    email: str = "",
+    full_name: str = "",
+):
+     # 1. RBAC first
+    MANAGER_EXECUTIVES_MAP = MANAGERID.MANAGER_EXECUTIVES_MAP  # class-level, matches deals controller
+    user_id = int(request.state.user_id)
+    role = request.state.role
+
+    filters = []
+
+    if role in ("super_admin", "admin"):
+        pass
+    elif role == "manager":
+        allowed_owner_ids = [user_id] + MANAGER_EXECUTIVES_MAP.get(user_id, [])
+        filters.append(Contact.owner_id.in_(allowed_owner_ids))
+    elif role == "executive":
+        filters.append(Contact.owner_id == user_id)
+
+    # 2. Block bulk export
+    no_filters_applied = not any([
+       phone, mobile, city, email, full_name,
+    ])
+    if no_filters_applied:
+        raise HTTPException(
+            status_code=403,
+            detail="Bulk export is not available yet. Please apply at least one filter."
+        )
+    if city and city.strip():
+        filters.append(Contact.city.ilike(f"%{city.strip()}%"))
+    if email and email.strip():
+        filters.append(Contact.email.ilike(f"%{email.strip()}%"))
+    if full_name and full_name.strip():
+        filters.append(Contact.full_name.ilike(f"%{full_name.strip()}%"))
+    if phone and phone.strip():
+        filters.append(
+            or_(
+                Contact.mobile.startswith(phone),
+                Contact.mobile.startswith(f"+91{phone}"),
+            )
+        )
+    if mobile and mobile.strip():
+        filters.append(
+            or_(
+                Contact.mobile.startswith(mobile),
+                Contact.mobile.startswith(f"+91{mobile}"),
+            )
+        )
+
+    #4. countgate
+    count=db.query(Contact.id).filter(*filters).count()
+    if count == 0:
+        raise HTTPException(
+            status_code=404,
+            detail="No deals found for the applied filters."
+        )
+    if count > 5000:
+        raise HTTPException(
+            status_code=403,
+            detail=f"Your filter matches {count} records. Maximum allowed is 5000. Apply more specific filters."
+        )
+
+    #5. fetch all the rows
+    rows=(
+        db.query(
+            Contact.id,
+            Contact.account_id,
+            Contact.owner_id,
+            Contact.first_name,
+            Contact.last_name,
+            Contact.designation,
+            Contact.email,
+            Contact.secondary_email,
+            Contact.mobile,
+            Contact.phone,
+            Contact.lead_source,
+            Contact.street,
+            Contact.city,
+            Contact.state,
+            Contact.country,
+            Contact.pincode,
+            Contact.created_by_id,
+            Contact.modified_by_id,
+            Contact.created_time,
+            Contact.modified_time,
+        ).filter(and_(*filters) if filters else True)
+        .all()
+    )
+
+    # 6. Stream
+    filename = f"contacts_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+
+    def generate():
+        output = io.StringIO()
+        writer = csv.writer(output)
+
+        writer.writerow([
+            "ID", "Account ID", "Owner ID",
+            "First Name", "Last Name", "Designation",
+            "Email", "Secondary Email", "Mobile", "Phone",
+            "Lead Source", "Street", "City", "State", "Country", "Pincode",
+            "Created By ID", "Modified By ID",
+            "Created Time", "Modified Time",
+        ])
+        yield output.getvalue()
+        output.seek(0); output.truncate(0)
+
+        for row in rows:
+            writer.writerow([
+                str(row.id) if row.id else "",
+                str(row.account_id) if row.account_id else "",
+                str(row.owner_id) if row.owner_id else "",
+                row.first_name or "",
+                row.last_name or "",
+                row.designation or "",
+                row.email or "",
+                row.secondary_email or "",
+                row.mobile or "",
+                row.phone or "",
+                row.lead_source or "",
+                row.street or "",
+                row.city or "",
+                row.state or "",
+                row.country or "",
+                row.pincode or "",
+                str(row.created_by_id) if row.created_by_id else "",
+                str(row.modified_by_id) if row.modified_by_id else "",
+                row.created_time.strftime("%Y-%m-%d %H:%M:%S") if row.created_time else "",
+                row.modified_time.strftime("%Y-%m-%d %H:%M:%S") if row.modified_time else "",
+            ])
+            yield output.getvalue()
+            output.seek(0); output.truncate(0)
+
+    return StreamingResponse(
+        generate(),
+        media_type="text/csv",
+    )
+    
 

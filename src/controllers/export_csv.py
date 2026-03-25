@@ -1,5 +1,6 @@
 import csv
 import io
+import re
 from datetime import datetime
 from typing import Optional
 
@@ -16,6 +17,15 @@ from src.models.contact import Contact
 from ..controllers.auth import MANAGERID
 from src.controllers.Background_threads import BackgroundThreadPool
 from src.controllers.mail import send_general_email
+
+
+
+def intimate_user_via_mail(to:str,body:str,subject:str):
+    try:
+           send_general_email(to,subject,body)
+           print("Email sent successfully")
+    except Exception as e:
+        print(e)
 
 def export_accounts_csv(
     request: Request,
@@ -188,7 +198,9 @@ def export_accounts_csv(
             ])
             yield output.getvalue()
             output.seek(0); output.truncate(0)
+
     #start a background thread for sending a mail in the background
+    from src.controllers.Background_threads import BackgroundThreadPool
     BackgroundThreadPool.execute_task(
         intimate_user_via_mail,
         to="prathap@r1xchange.com",
@@ -434,6 +446,7 @@ def export_deals_csv(
             yield output.getvalue()
             output.seek(0); output.truncate(0)
 
+    from src.controllers.Background_threads import BackgroundThreadPool
     BackgroundThreadPool.execute_task(
         intimate_user_via_mail,
         to="prathap@r1xchange.com",
@@ -480,12 +493,7 @@ def export_deals_csv(
         headers={"Content-Disposition": f"attachment; filename={filename}"},
     )
 
-def intimate_user_via_mail(to:str,body:str,subject:str):
-    try:
-           send_general_email(to,subject,body)
-           print("Email sent successfully")
-    except Exception as e:
-        print(e)
+
 
 
 
@@ -632,5 +640,175 @@ def export_contacts_csv(
         generate(),
         media_type="text/csv",
     )
-    
+
+
+def export_notes_csv(
+    request: Request,
+    mongodb,
+    module: Optional[str] = None,
+    parent_id: Optional[str] = None,
+    owner_id: Optional[str] = None,
+    created_from: Optional[str] = None,
+    created_to: Optional[str] = None,
+):
+    # 1. RBAC
+    user_id = str(request.state.user_id)
+    role = request.state.role
+    print("role =",role)
+
+    # 2. Block bulk export
+    no_filters_applied = not any([
+        module, parent_id, owner_id, created_from, created_to,
+    ])
+    if no_filters_applied:
+        raise HTTPException(
+            status_code=403,
+            detail="Bulk export is not available yet. Please apply at least one filter."
+        )
+
+    # 3. Build MongoDB query
+    query = {}
+
+    # RBAC — executive sees only their own notes
+    if owner_id:
+        if role in ("super_admin", "admin"):
+            query["Owner.id"] = str(owner_id)
+        elif role == "manager":
+            MANAGER_EXECUTIVES_MAP = MANAGERID().MANAGER_EXECUTIVES_MAP
+            allowed_ids = [str(user_id)] + [str(i) for i in MANAGER_EXECUTIVES_MAP.get(int(user_id), [])]
+            if str(owner_id) not in allowed_ids:
+                raise HTTPException(status_code=403, detail="No permission for this owner")
+            query["Owner.id"] = str(owner_id)
+        else:
+            raise HTTPException(status_code=403, detail="No permission for this owner")
+
+    if module:
+        query["module"] = module  # exact match — "Accounts", "Deals", "Contacts", "Tasks"
+
+    if parent_id:
+        query["Parent_Id.id"] = str(parent_id)
+
+    if owner_id:
+        if role in ("super_admin", "admin"):
+            query["Owner.id"] = str(owner_id)
+
+        elif role == "manager":
+            MANAGER_EXECUTIVES_MAP = MANAGERID().MANAGER_EXECUTIVES_MAP
+            allowed_ids = [str(user_id)] + [str(i) for i in MANAGER_EXECUTIVES_MAP.get(int(user_id), [])]
+
+            if str(owner_id) not in allowed_ids:
+                raise HTTPException(status_code=403, detail="No permission for this owner")
+            query["Owner.id"] = str(owner_id)  # OK because validated
+        else:
+            raise HTTPException(status_code=403, detail="No permission for this owner")
+    if created_from or created_to:
+        date_filter = {}
+        try:
+            if created_from:
+                # parse and re-format with IST offset to match stored format
+                dt = datetime.fromisoformat(created_from)
+                date_filter["$gte"] = dt.strftime("%Y-%m-%dT%H:%M:%S+05:30")
+            if created_to:
+                dt = datetime.fromisoformat(created_to)
+                date_filter["$lte"] = dt.strftime("%Y-%m-%dT%H:%M:%S+05:30")
+        except ValueError:
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid date format. Use ISO format e.g. 2024-01-31T00:00:00"
+            )
+        query["Created_Time"] = date_filter
+    # 4. Count gate
+    notes_collection = mongodb["Notes"]
+    count = notes_collection.count_documents(query)
+
+    if count == 0:
+        raise HTTPException(
+            status_code=404,
+            detail="No notes found for the applied filters."
+        )
+    if count > 5000:
+        raise HTTPException(
+            status_code=403,
+            detail=f"Your filter matches {count} records. Maximum allowed is 5000. Apply more specific filters."
+        )
+    # 5. Fetch rows — only needed fields, skip all $ Zoho metadata
+    projection = {
+        "_id": 0,
+        "id": 1,
+        "Note_Title": 1,
+        "Note_Content": 1,
+        "module": 1,
+        "Parent_Id.id": 1,
+        "Parent_Id.name": 1,
+        "Owner.id": 1,
+        "Owner.name": 1,
+        "Owner.email": 1,
+        "Created_By.id": 1,
+        "Created_By.name": 1,
+        "Modified_By.id": 1,
+        "Modified_By.name": 1,
+        "Created_Time": 1,
+        "Modified_Time": 1,
+    }
+
+    notes = list(notes_collection.find(query, projection))  # execute immediately
+    print("COUNT:", count)
+    print("FETCHED:", len(notes))
+
+    # 6. Stream
+    filename = f"notes_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+
+    def generate():
+        output = io.StringIO()
+        writer = csv.writer(output)
+
+        writer.writerow([
+            "Note ID", "Note Title", "Note Content", "Module",
+            "Parent ID", "Parent Name",
+            "Owner ID", "Owner Name", "Owner Email",
+            "Created By ID", "Created By Name",
+            "Modified By ID", "Modified By Name",
+            "Created Time", "Modified Time",
+        ])
+        yield output.getvalue()
+        output.seek(0); output.truncate(0)
+
+        for note in notes:
+            parent = note.get("Parent_Id") or {}
+            owner = note.get("Owner") or {}
+            created_by = note.get("Created_By") or {}
+            modified_by = note.get("Modified_By") or {}
+
+           # fix — also strip newlines and carriage returns
+            content = re.sub(r"<[^>]+>", " ", note.get("Note_Content") or "")
+            content = content.replace("\n", " ").replace("\r", " ").strip()
+            # collapse multiple spaces
+            content = re.sub(r"\s+", " ", content)
+
+            writer.writerow([
+                note.get("id") or "",
+                note.get("Note_Title") or "",
+                content,
+                note.get("module") or "",
+                parent.get("id") or "",
+                parent.get("name") or "",
+                owner.get("id") or "",
+                owner.get("name") or "",
+                owner.get("email") or "",
+                created_by.get("id") or "",
+                created_by.get("name") or "",
+                modified_by.get("id") or "",
+                modified_by.get("name") or "",
+                note.get("Created_Time") or "",
+                note.get("Modified_Time") or "",
+            ])
+            yield output.getvalue()
+            output.seek(0); output.truncate(0)
+
+    return StreamingResponse(
+        generate(),
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )  
+
 

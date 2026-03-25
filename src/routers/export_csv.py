@@ -4,6 +4,7 @@ from typing import Optional
 from ..database import get_db
 from ..controllers import export_csv as repo
 from ..models.deal import Deal  
+from ..database import get_mongodb
 
 export_csv_router = APIRouter(prefix="/export", tags=["export"])
 
@@ -83,4 +84,25 @@ def export_contacts(
         email=email,
         full_name=full_name,
        
+    )
+
+
+@export_csv_router.get("/notes")
+def export_notes(
+    request: Request,
+    mongodb=Depends(get_mongodb),
+    module: Optional[str] = None,
+    parent_id: Optional[str] = None,
+    owner_id: Optional[str] = None,
+    created_from: Optional[str] = None,
+    created_to: Optional[str] = None,
+):
+    return repo.export_notes_csv(
+        request=request,
+        mongodb=mongodb,
+        module=module,
+        parent_id=parent_id,
+        owner_id=owner_id,
+        created_from=created_from,
+        created_to=created_to,
     )

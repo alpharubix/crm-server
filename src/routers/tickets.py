@@ -1,23 +1,21 @@
-from fastapi import APIRouter, Depends, HTTPException, Request
-from sqlalchemy.orm import Session
-from src.database import get_db
-from src.models.ticket import Ticket
-from src.database import get_mongodb
-from src.controllers.notes import get_notes
 from datetime import datetime, timedelta, timezone
-from sqlalchemy import and_
-from sqlalchemy.orm import selectinload
+
 from fastapi import APIRouter, Depends, HTTPException, Request
-from sqlalchemy.orm import Session
-# Ensure Deal is imported
-from src.models.deal import Deal 
-from src.models.ticket import Ticket
-from src.database import get_db
-from src.controllers.auth import MANAGERID
-from src.controllers.audit_log import log_action
 from fastapi.encoders import jsonable_encoder
+from sqlalchemy import and_
+from sqlalchemy.orm import Session, selectinload
+
+from src.controllers.audit_log import log_action
+from src.controllers.auth import MANAGERID
+from src.controllers.notes import get_notes
+from src.database import get_db, get_mongodb
+
+# Ensure Deal is imported
+from src.models.deal import Deal
+from src.models.ticket import Ticket
 
 tickets_router = APIRouter(prefix="/tickets", tags=["tickets"])
+
 
 # Helper function to format the database model into a dictionary
 def format_ticket(t: Ticket) -> dict:
@@ -26,6 +24,7 @@ def format_ticket(t: Ticket) -> dict:
         if data.get(key) is not None:
             data[key] = str(data[key])
     return data
+
 
 @tickets_router.get("")
 @tickets_router.get("/")
@@ -40,6 +39,9 @@ def get_tickets_list(
     ticket_status: str | None = None,
     type_of_loan: str | None = None,
     account_name: str | None = None,
+    lender_login_from: str | None = None,
+    lender_login_to: str | None = None,
+    deal_owner_id: int | None = None,
 ):
 
     MANAGER_EXECUTIVES_MAP = MANAGERID.MANAGER_EXECUTIVES_MAP
@@ -72,10 +74,31 @@ def get_tickets_list(
             if created_to
             else datetime.now(timezone.utc)
         )
+        if lender_login_from:
+            try:
+                # Assuming format YYYY-MM-DD
+                low_date = datetime.strptime(lender_login_from, "%Y-%m-%d").date()
+                filters.append(Ticket.lender_login_date >= low_date)
+            except ValueError:
+                pass  # Or handle error for invalid date format
+
+        if lender_login_to:
+            try:
+                high_date = datetime.strptime(lender_login_to, "%Y-%m-%d").date()
+                filters.append(Ticket.lender_login_date <= high_date)
+            except ValueError:
+                pass
+        if deal_owner_id:
+          filters.append(Deal.deal_owner_id == deal_owner_id)
+
         filters.append(Ticket.created_at >= date_from)
         filters.append(Ticket.created_at <= date_to)
 
-        query = db.query(Ticket).join(Deal, Ticket.deal_id == Deal.id).filter(and_(*filters))
+        query = (
+            db.query(Ticket)
+            .join(Deal, Ticket.deal_id == Deal.id)
+            .filter(and_(*filters))
+        )
 
         if allowed_owner_ids is not None:
             query = query.filter(Deal.deal_owner_id.in_(allowed_owner_ids))
@@ -89,16 +112,20 @@ def get_tickets_list(
             status = t.ticket_status or "No Status"
             ticket_dict = format_ticket(t)
             ticket_dict["account_name"] = t.deal.account_name if t.deal else "-"
-            ticket_dict["deal_owner_id"] = str(t.deal.deal_owner_id) if t.deal and t.deal.deal_owner_id else None
+            ticket_dict["deal_owner_id"] = (
+                str(t.deal.deal_owner_id) if t.deal and t.deal.deal_owner_id else None
+            )
             grouped_data.setdefault(status, []).append(ticket_dict)
 
         return {"data": grouped_data, "page_info": None}
 
     # Standard list view
-    limit = 50
+    limit = 100
     offset = (page - 1) * limit
 
-    query = db.query(Ticket).join(Deal, Ticket.deal_id == Deal.id).filter(and_(*filters))
+    query = (
+        db.query(Ticket).join(Deal, Ticket.deal_id == Deal.id).filter(and_(*filters))
+    )
 
     if allowed_owner_ids is not None:
         query = query.filter(Deal.deal_owner_id.in_(allowed_owner_ids))
@@ -110,25 +137,45 @@ def get_tickets_list(
 
     return {
         "data": [format_ticket(t) for t in tickets],
-        "page_info": {"page": page, "total": total}
+        "page_info": {"page": page, "total": total},
     }
+
 
 @tickets_router.post("")
 @tickets_router.post("/")
 async def create_ticket(request: Request, db: Session = Depends(get_db)):
     body = await request.json()
-    
+
     if "deal_id" not in body:
         raise HTTPException(status_code=400, detail="deal_id is required")
 
     allowed_fields = {
-        "deal_id", "loan_account_status", "ticket_login", "lender_name",
-        "potential", "lender_login_type", "lender_login_date", "partner_code",
-        "targeted_disbursement_date", "type_of_loan", "disbursement_date",
-        "ticket_status", "ticket_stage", "approved_amount", "sanction_amount",
-        "processing_fees", "disbursed_amount", "pf_percentage", "tenure",
-        "insurance_amount", "loan_start_date", "rate_of_interest", "loan_end_date",
-        "interest_type", "lender_rejection_reason", "lender_rejection_status_explanation",
+        "deal_id",
+        "loan_account_status",
+        "ticket_login",
+        "lender_name",
+        "potential",
+        "lender_login_type",
+        "lender_login_date",
+        "partner_code",
+        "targeted_disbursement_date",
+        "type_of_loan",
+        "disbursement_date",
+        "ticket_status",
+        "ticket_stage",
+        "approved_amount",
+        "sanction_amount",
+        "processing_fees",
+        "disbursed_amount",
+        "pf_percentage",
+        "tenure",
+        "insurance_amount",
+        "loan_start_date",
+        "rate_of_interest",
+        "loan_end_date",
+        "interest_type",
+        "lender_rejection_reason",
+        "lender_rejection_status_explanation",
     }
 
     filtered_body = {k: v for k, v in body.items() if k in allowed_fields}
@@ -140,25 +187,27 @@ async def create_ticket(request: Request, db: Session = Depends(get_db)):
     db.add(ticket)
     db.commit()
     db.refresh(ticket)
-    
+
     ticket_dict = format_ticket(ticket)
     safe_payload = jsonable_encoder(ticket_dict)
 
     log_action(db, user_id, user_role, "CREATED", "Ticket", ticket.id, safe_payload)
-    
+
     return ticket_dict
 
 
 @tickets_router.patch("/{ticket_id}")
 @tickets_router.put("/{ticket_id}")
-async def update_ticket(ticket_id: int, request: Request, db: Session = Depends(get_db)):
+async def update_ticket(
+    ticket_id: int, request: Request, db: Session = Depends(get_db)
+):
     ticket = db.query(Ticket).filter(Ticket.id == ticket_id).first()
-    
+
     if not ticket:
         raise HTTPException(status_code=404, detail="Ticket not found")
 
     body = await request.json()
-    
+
     body.pop("id", None)
     body.pop("deal_id", None)
     body.pop("created_at", None)
@@ -167,39 +216,46 @@ async def update_ticket(ticket_id: int, request: Request, db: Session = Depends(
     for key, value in body.items():
         if hasattr(ticket, key):
             setattr(ticket, key, value)
-            
+
     user_id = request.state.user_id
     user_role = request.state.role
     ticket.modified_by = user_id
 
     db.commit()
     db.refresh(ticket)
-    
+
     log_action(db, user_id, user_role, "UPDATED", "Ticket", ticket.id, body)
-    
+
     return format_ticket(ticket)
 
+
 @tickets_router.get("/{ticket_id}")
-def get_ticket(ticket_id: int, request: Request, db: Session = Depends(get_db), mongodb_conn=Depends(get_mongodb)):
+def get_ticket(
+    ticket_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    mongodb_conn=Depends(get_mongodb),
+):
     ticket = db.query(Ticket).filter(Ticket.id == ticket_id).first()
     if not ticket:
         raise HTTPException(status_code=404, detail="Ticket not found")
-    
+
     result = format_ticket(ticket)
     result["notes"] = get_notes(
         id_list=[str(ticket_id)],
         notes_collection=mongodb_conn["Notes"],
-        module_name="Tickets"
+        module_name="Tickets",
     )
     return result
+
 
 @tickets_router.delete("/{ticket_id}")
 def delete_ticket(ticket_id: int, request: Request, db: Session = Depends(get_db)):
     ticket = db.query(Ticket).filter(Ticket.id == ticket_id).first()
-    
+
     if not ticket:
         raise HTTPException(status_code=404, detail="Ticket not found")
-        
+
     db.delete(ticket)
     db.commit()
     return {"message": "Ticket deleted"}

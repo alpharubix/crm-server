@@ -117,3 +117,4 @@ class Candidate(Base):
     assignee = relationship("User", foreign_keys=[assignee_id])
     created_by = relationship("User", foreign_keys=[created_by_id])
     # job_requirement = relationship("JobRequirement", back_populates="candidates")
+# Test

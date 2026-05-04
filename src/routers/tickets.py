@@ -42,6 +42,10 @@ def get_tickets_list(
     lender_login_from: str | None = None,
     lender_login_to: str | None = None,
     deal_owner_id: int | None = None,
+    targeted_disbursement_from: str | None = None,
+    targeted_disbursement_to: str | None = None,
+    disbursement_from: str | None = None,
+    disbursement_to: str | None = None,
 ):
 
     MANAGER_EXECUTIVES_MAP = MANAGERID.MANAGER_EXECUTIVES_MAP
@@ -88,8 +92,40 @@ def get_tickets_list(
                 filters.append(Ticket.lender_login_date <= high_date)
             except ValueError:
                 pass
+
+        if targeted_disbursement_from:
+            try:
+                low_date = datetime.strptime(
+                    targeted_disbursement_from, "%Y-%m-%d"
+                ).date()
+                filters.append(Ticket.targeted_disbursement_date >= low_date)
+            except ValueError:
+                pass
+
+        if targeted_disbursement_to:
+            try:
+                high_date = datetime.strptime(
+                    targeted_disbursement_to, "%Y-%m-%d"
+                ).date()
+                filters.append(Ticket.targeted_disbursement_date <= high_date)
+            except ValueError:
+                pass
+        if disbursement_from:
+            try:
+                low_date = datetime.strptime(disbursement_from, "%Y-%m-%d").date()
+                filters.append(Ticket.disbursement_date >= low_date)
+            except ValueError:
+                pass
+
+        if disbursement_to:
+            try:
+                high_date = datetime.strptime(disbursement_to, "%Y-%m-%d").date()
+                filters.append(Ticket.disbursement_date <= high_date)
+            except ValueError:
+                pass
+
         if deal_owner_id:
-          filters.append(Deal.deal_owner_id == deal_owner_id)
+            filters.append(Deal.deal_owner_id == deal_owner_id)
 
         filters.append(Ticket.created_at >= date_from)
         filters.append(Ticket.created_at <= date_to)
@@ -99,6 +135,9 @@ def get_tickets_list(
             .join(Deal, Ticket.deal_id == Deal.id)
             .filter(and_(*filters))
         )
+        total_count = query.count()
+
+        tickets = query.options(selectinload(Ticket.deal)).all()
 
         if allowed_owner_ids is not None:
             query = query.filter(Deal.deal_owner_id.in_(allowed_owner_ids))
@@ -117,7 +156,7 @@ def get_tickets_list(
             )
             grouped_data.setdefault(status, []).append(ticket_dict)
 
-        return {"data": grouped_data, "page_info": None}
+        return {"data": grouped_data, "page_info": {"total": total_count}}
 
     # Standard list view
     limit = 100

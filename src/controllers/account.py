@@ -56,10 +56,8 @@ def create_account(
     )
 
     db.add(new_account)
-    db.flush()  # gets the id without committing
-    
+    db.flush()
 
-    # insertion initial status to Account_Status_hstory
     history = AccountStatusHistory(
         account_id=new_account.id,
         old_status=None,
@@ -74,10 +72,7 @@ def create_account(
         db, user_id, user_role, "CREATED", "Account", new_account.id, data.model_dump(mode="json")
     )
 
-
-    db.refresh(new_account)
-    return new_account 
-
+    return new_account
 
 def get_all_accounts(
     request: Request,

@@ -21,7 +21,8 @@ router = APIRouter(prefix="/accounts", tags=["accounts"])
 def create(request: Request, data: AccountBase, db: Session = Depends(get_db)):
     user_id = int(request.state.user_id)
     user_role = request.state.role
-    return repo.create_account(db, data, user_id=user_id, user_role=user_role)
+    account = repo.create_account(db, data, user_id=user_id, user_role=user_role)
+    return {"id": account.id, "message": "Account created successfully"}
 
 
 @router.get("/", response_model=GetlistAccountResponse,response_model_exclude_none=True)

@@ -298,11 +298,9 @@ def create_deal(deal, db: Session, user_id, user_role):
         db.add(created_deal)
         db.commit()
         db.refresh(created_deal)
-        safe_payload = jsonable_encoder(deal)
 
         log_action(
-            db, user_id, user_role, "CREATED", "Deal", created_deal.id, safe_payload
-        )
+            db, user_id, user_role, "CREATED", "Deal", created_deal.id,created_deal)
 
         return created_deal
     except Exception as e:

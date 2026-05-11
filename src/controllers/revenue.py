@@ -1,6 +1,7 @@
 import math
 from datetime import datetime, timezone
 from fastapi import HTTPException
+from fastapi.encoders import jsonable_encoder
 from sqlalchemy import and_, true
 from sqlalchemy.orm import Session, selectinload
 from starlette import status
@@ -29,13 +30,31 @@ def insert_revenue(user_id, user_role,data, db: Session):
         db.add(revenue)
         db.commit()
         db.refresh(revenue)
+        # convert SQLAlchemy object to dict
+        updated_revenue = {
+            column.name: getattr(revenue, column.name)
+            for column in revenue.__table__.columns
+        }
 
+        # convert dates/datetime to JSON serializable format
+        updated_revenue = jsonable_encoder(updated_revenue)
+
+        # audit log
         log_action(
-            db, user_id, user_role, "CREATED", "Revenue", revenue.id, data.model_dump(mode="json")
+            db,
+            user_id,
+            user_role,
+            "CREATED",
+            "Revenue",
+            revenue.id,
+            updated_revenue
         )
-        return {"success":True,
-                "message":"Revenue created successfully",
-                "data:":vars(revenue)}
+
+        return {
+            "success": True,
+            "message": "Revenue created successfully",
+            "data": updated_revenue
+        }
 
     except Exception as e:
         print(e)

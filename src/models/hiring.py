@@ -71,7 +71,7 @@ class Candidate(Base):
 
     # Parent FK
     job_requirement_id = Column(
-        BIGINT, ForeignKey("job_requirements.id"), nullable=False, index=True
+        BIGINT, ForeignKey("job_requirements.id"), nullable=True, index=True
     )
 
     # Core fields

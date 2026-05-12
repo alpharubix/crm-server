@@ -19,7 +19,12 @@ class Deal(Base):
     account = relationship("Account", back_populates="deals")
     owner = relationship("User", foreign_keys=[deal_owner_id], backref="deals")
     tickets = relationship("Ticket", back_populates="deal", cascade="all, delete-orphan")
-
+    revenue = relationship(
+        "Revenue",
+        back_populates="deal",
+        foreign_keys="Revenue.deal_id",
+        cascade="all, delete-orphan"
+    )
     # Deal & Ticket Info
     ticket_id = Column(BIGINT, index=True)
     ticket_number = Column(BIGINT)

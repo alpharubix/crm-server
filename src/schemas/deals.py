@@ -95,6 +95,7 @@ class DealSchema(BaseModel):
     notes: Any | None = None
 
     tickets: list[dict] | None = None
+    revenue:list[dict] | None = None
 
     @model_validator(mode="before")
     @classmethod

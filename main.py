@@ -1,11 +1,8 @@
 from contextlib import asynccontextmanager
-
 from fastapi.middleware.cors import CORSMiddleware
+from src.routers.revenue import revenue_router
 from src.database import Base, engine
 from src.middleware.auth import authorization
-from src.models.audit_log import AuditLog  # so Base picks it up
-from src.models.contact import Contact
-from src.models.project import Project, Task
 from src.routers import account as account_router
 from src.routers import audit_log as audit_log_router
 from src.routers import contact as contact_router
@@ -32,9 +29,7 @@ These functions runs synchronously at the module level. It queries the database 
 
 Do not reflect or create tables on application startup. Use alembic (which is already in dependencies) to manage database migrations offline.
 '''
-# Base.metadata.clear()
-# Base.metadata.reflect(bind=engine)
-# Base.metadata.create_all(bind=engine)
+Base.metadata.create_all(bind=engine)
 
 app = FastAPI()
 
@@ -78,6 +73,7 @@ app.include_router(tickets_router)
 app.include_router(deal_docs_router)
 app.include_router(candidate_router)
 app.include_router(jr_router)
+app.include_router(revenue_router)
 
 if __name__ == "__main__":
     # Cloud Run provides PORT as an env var; default to 8080 if not found

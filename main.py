@@ -18,8 +18,11 @@ from src.routers.tickets import tickets_router
 from src.routers.export_csv import export_csv_router
 from src.routers.deal_documents import deal_docs_router
 from src.routers.hiring import candidate_router, jr_router
+from src.jobs.project_overdue import check_overdue_projects
+from src.database import SessionLocal
+from apscheduler.schedulers.background import BackgroundScheduler
 import os
-
+import logging
 import uvicorn
 from dotenv import load_dotenv
 from fastapi import FastAPI
@@ -36,14 +39,51 @@ Do not reflect or create tables on application startup. Use alembic (which is al
 # Base.metadata.reflect(bind=engine)
 # Base.metadata.create_all(bind=engine)
 
-app = FastAPI()
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(name)s - %(message)s"
+)
+logger = logging.getLogger(__name__)
+
+scheduler = BackgroundScheduler()
+
+
+
+def run_overdue_check():
+    db = SessionLocal()
+
+    try:
+        check_overdue_projects(db)
+    finally:
+        db.close()
+
+# app = FastAPI()
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     BackgroundThreadPool.initialize_thread_pool()
+
+    # Start scheduler
+    scheduler.add_job(
+    run_overdue_check,
+    trigger='cron',
+    hour=9,
+    minute=0,
+    id="project_overdue_job",
+    replace_existing=True
+    )
+    if not scheduler.running:
+        scheduler.start()
+        logger.info("Overdue project scheduler started")
+
     yield
+
+    scheduler.shutdown()
     BackgroundThreadPool.shutdown()
+    
+    logger.info("Scheduler shutdown complete")
 
 app = FastAPI(lifespan=lifespan)
 

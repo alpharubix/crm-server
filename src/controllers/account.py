@@ -17,6 +17,10 @@ from src.controllers.auth import MANAGERID
 from src.controllers.notes import get_notes
 from src.utility.utils import get_account_headers
 from src.models.ticket import Ticket
+from src.controllers.mail import notify_account_created
+from src.controllers.Background_threads import BackgroundThreadPool
+from ..models.user import User
+
 
 from ..models.account import Account, AccountStatusHistory
 from ..schemas.account import AccountBase, ListAccountsResponse
@@ -71,6 +75,23 @@ def create_account(
     log_action(
         db, user_id, user_role, "CREATED", "Account", new_account.id, data.model_dump(mode="json")
     )
+    # send email to account owner in background
+    owner = new_account.owner  # lazy-loads from the same session
+    if owner and owner.email:
+
+        creator = db.query(User).filter(User.id == user_id).first()
+        print("creator details", creator)
+        BackgroundThreadPool.execute_task(
+            notify_account_created,
+            owner.email,
+            owner.full_name,
+            new_account.account_name,
+            new_account.id,
+            new_account.account_status,
+            new_account.account_stage,
+            creator.full_name if creator else "CRM System",
+        )
+
 
     return new_account
 

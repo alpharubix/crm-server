@@ -1,16 +1,24 @@
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 from zoneinfo import ZoneInfo
+
+from ..jobs.project_overdue import check_overdue_projects
+
+from ..controllers.mail import notify_project_created,notify_project_approved,notify_project_pending_review
+from ..models.user import User
 from ..database import get_db
-from ..models.project import Project, Task, TaskComment
+from ..models.project import Project, Task, TaskComment, StatusEnum
 from ..models.project_log import ProjectLog
 from ..controllers.project_log import log_project_action
 from typing import Optional
 from datetime import datetime
+import logging
 
 IST = ZoneInfo("Asia/Kolkata")
 router = APIRouter(prefix="/projects", tags=["projects"])
 
+
+logger = logging.getLogger(__name__)
 
 def format_project(p) -> dict:
     return {
@@ -30,6 +38,15 @@ def format_project(p) -> dict:
         "project_type": p.project_type,
         "attachment_links": p.attachment_links or []
     }
+
+
+# manually trigger overdue check for testing
+# @router.get("/test-overdue")
+# def test_overdue(db: Session = Depends(get_db)):
+
+#     check_overdue_projects(db)
+
+#     return {"message": "Overdue check completed"}
 
 
 @router.post("")
@@ -67,6 +84,18 @@ async def create_project(request: Request, db: Session = Depends(get_db)):
     db.add(project)
     db.commit()
     db.refresh(project)
+    approver = db.query(User).filter(
+    User.id == project.approver_id
+    ).first()
+
+    if approver and approver.email:
+        notify_project_created(
+            approver_email=approver.email,
+            approver_name=approver.full_name,
+            project_name=project.name,
+            project_id=project.id
+        )
+
     log_project_action(db, request.state.user_id, request.state.role, "CREATED", "PROJECT", project.id, None, changes=body)
     return format_project(project)
 
@@ -166,6 +195,35 @@ async def update_project(project_id: int, request: Request, db: Session = Depend
     project.modified_by = request.state.user_id
     db.commit()
     db.refresh(project)
+    if project.status == StatusEnum.planning:
+        logger.info("statusenum: %s %s", project.status, StatusEnum.planning)
+        actioners = db.query(User).filter(
+            User.id.in_(project.actioner_ids)
+        ).all()
+
+        emails = [user.email for user in actioners if user.email]
+
+        if emails:
+            notify_project_approved(
+                emails=emails,
+                project_name=project.name,
+                project_id=project.id
+            )
+
+    if project.status == StatusEnum.pending_for_review:
+        approver = db.query(User).filter(
+            User.id == project.approver_id
+        ).first()
+
+        if approver and approver.email:
+
+            notify_project_pending_review(
+                approver_email=approver.email,
+                approver_name=approver.full_name,
+                project_name=project.name,
+                project_id=project.id
+            )
+
     log_project_action(db, request.state.user_id, request.state.role, "UPDATED", "PROJECT", project.id, None, body)
     return format_project(project)
 
@@ -455,3 +513,6 @@ def get_task_logs(project_id: int, task_id: int, request: Request, db: Session =
         for log in logs
     ]
     return {"data": formatted_logs}
+
+
+

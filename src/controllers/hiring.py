@@ -48,7 +48,7 @@ def get_all_job_requirements(
     request: Request,
     db: Session,
     mongodb,
-    page: int,
+    page: int = 1, # Added default
     jr_id: Optional[int] = None,
     hiring_position: Optional[str] = None,
     department: Optional[str] = None,
@@ -59,6 +59,7 @@ def get_all_job_requirements(
     offset = (page - 1) * limit
     filters = []
 
+    # 1. Single ID Fetch (This is what your Frontend is calling)
     if jr_id is not None:
         jr = (
             db.query(JobRequirement)
@@ -67,44 +68,44 @@ def get_all_job_requirements(
                 selectinload(JobRequirement.approver),
                 selectinload(JobRequirement.assignee),
                 selectinload(JobRequirement.created_by),
-                selectinload(JobRequirement.candidates),
+                # selectinload(JobRequirement.candidates), # Ensure this exists in model or remove
             )
             .first()
         )
+        
         if not jr:
             raise HTTPException(status_code=404, detail="Job Requirement not found")
 
-        notes = get_notes(
-            id_list=[str(jr.id)],
-            notes_collection=mongodb["Notes"],
-            module_name=["JobRequirement"],
-        )
-        jr.notes = notes
+        # Fetch notes from MongoDB for this specific JR
+        try:
+            notes = get_notes(
+                id_list=[str(jr.id)],
+                notes_collection=mongodb["Notes"],
+                module_name=["JobRequirement"],
+            )
+            jr.notes = notes
+        except Exception:
+            jr.notes = [] # Fallback if Mongo fails
+
+        # IMPORTANT: Return in the exact same structure as the list view 
+        # so the frontend data?.data?.[0] works correctly.
         return {
-            "data": stringify_ids([jr]),
-            "page_info": {"page": page, "total_pages": 1, "data_size": 1},
+            "data": stringify_ids([jr]), # Wrap in a list
+            "page_info": {"page": 1, "total_pages": 1, "data_size": 1},
         }
 
+    # 2. List Fetch with Filters
     if hiring_position:
-        filters.append(
-            JobRequirement.hiring_position.ilike(f"%{hiring_position.strip()}%")
-        )
+        filters.append(JobRequirement.hiring_position.ilike(f"%{hiring_position.strip()}%"))
     if department:
         filters.append(JobRequirement.department.ilike(f"%{department.strip()}%"))
     if hiring_location_city:
-        filters.append(
-            JobRequirement.hiring_location_city.ilike(
-                f"%{hiring_location_city.strip()}%"
-            )
-        )
+        filters.append(JobRequirement.hiring_location_city.ilike(f"%{hiring_location_city.strip()}%"))
     if tentative_joining_date:
         filters.append(JobRequirement.tentative_joining_date <= tentative_joining_date)
 
-    base_query = (
-        db.query(JobRequirement).filter(and_(*filters))
-        if filters
-        else db.query(JobRequirement)
-    )
+    base_query = db.query(JobRequirement).filter(and_(*filters)) if filters else db.query(JobRequirement)
+    
     total = base_query.count()
     data = base_query.offset(offset).limit(limit).all()
 
@@ -116,7 +117,6 @@ def get_all_job_requirements(
             "data_size": total,
         },
     }
-
 
 def update_job_requirement(
     db: Session, jr_id: int, payload: Dict[str, Any], user_id: int, user_role: str
@@ -154,7 +154,7 @@ def delete_job_requirement(db: Session, jr_id: int, user_id: int, user_role: str
 
 def create_candidate(db: Session, data: Dict[str, Any], user_id: int, user_role: str):
     # Remove job_requirement_id from the data if it accidentally comes from frontend
-    data.pop("job_requirement_id", None)
+    # data.pop("job_requirement_id", None)
 
     # Create the candidate instance
     candidate = Candidate(**data, created_by_id=user_id)
@@ -231,6 +231,8 @@ def get_all_candidates(
         filters.append(Candidate.industry == industry)
     if assignee_id:
         filters.append(Candidate.assignee_id == assignee_id)
+    if job_requirement_id:
+        filters.append(Candidate.job_requirement_id == job_requirement_id)
 
     base_query = (
         db.query(Candidate).filter(and_(*filters)) if filters else db.query(Candidate)

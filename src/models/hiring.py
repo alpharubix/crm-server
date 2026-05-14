@@ -23,16 +23,16 @@ class JobRequirement(Base):
     position_open_date = Column(DateTime(timezone=True), nullable=True)
     no_of_vacancies = Column(Integer, nullable=True)
     tentative_joining_date = Column(DateTime(timezone=True), nullable=True)
-    tat = Column(Integer, nullable=True)  # Duration in days
+    tat = Column(Integer, nullable=True) 
     age_limit = Column(Integer, nullable=True)
     gender = Column(String, nullable=True)
     reporting_manager = Column(String, nullable=True)
-    qualification = Column(String, nullable=True)
+    qualification = Column(String, nullable=True) # Single line from Excel
     hiring_location_city = Column(String, nullable=True, index=True)
     language_proficiency = Column(ARRAY(String), nullable=True)
     job_description = Column(Text, nullable=True)
 
-    # Education
+    # Education (Multi-select in Excel)
     educational_qualification_ug = Column(ARRAY(String), nullable=True)
     educational_qualification_pg = Column(ARRAY(String), nullable=True)
 
@@ -47,32 +47,21 @@ class JobRequirement(Base):
     created_by_id = Column(BIGINT, ForeignKey("users.id"), nullable=True)
 
     # Audit
-    created_time = Column(
-        DateTime(timezone=True), server_default=func.now(), nullable=False
-    )
-    modified_time = Column(
-        DateTime(timezone=True),
-        server_default=func.now(),
-        onupdate=func.now(),
-        nullable=False,
-    )
+    created_time = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    modified_time = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
     # Relationships
     approver = relationship("User", foreign_keys=[approver_id])
     assignee = relationship("User", foreign_keys=[assignee_id])
     created_by = relationship("User", foreign_keys=[created_by_id])
-    # candidates = relationship("Candidate", back_populates="job_requirement")
+    candidates = relationship("Candidate", back_populates="job_requirement")
 
 
 class Candidate(Base):
     __tablename__ = "candidates"
 
     id = Column(BIGINT, primary_key=True, autoincrement=True)
-
-    # Parent FK
-    job_requirement_id = Column(
-        BIGINT, ForeignKey("job_requirements.id"), nullable=True, index=True
-    )
+    job_requirement_id = Column(BIGINT, ForeignKey("job_requirements.id"), nullable=True, index=True)
 
     # Core fields
     candidate_name = Column(String, nullable=False)
@@ -82,7 +71,7 @@ class Candidate(Base):
     phone_no = Column(String, nullable=True)
     email = Column(String, nullable=True, index=True)
     location_city = Column(String, nullable=True)
-    resume = Column(String, nullable=True)  # Drive link
+    resume = Column(String, nullable=True)
 
     # Education
     educational_qualification_ug = Column(String, nullable=True)
@@ -91,30 +80,26 @@ class Candidate(Base):
     year_of_passing_pg = Column(String, nullable=True)
 
     # Work experience
-    work_experience = Column(String, nullable=True)  # e.g. "2y 8m"
+    work_experience = Column(String, nullable=True) 
     industry = Column(String, nullable=True)
 
     # Skills
     skills = Column(String, nullable=True)
     language_proficiency = Column(ARRAY(String), nullable=True)
 
+    # Candidate Rating (New from Excel)
+    rating = Column(Float, nullable=True) 
+    feedback_status = Column(String, nullable=True) # "Submitted" etc.
+
     # Assignment
     assignee_id = Column(BIGINT, ForeignKey("users.id"), nullable=True)
     created_by_id = Column(BIGINT, ForeignKey("users.id"), nullable=True)
 
     # Audit
-    created_time = Column(
-        DateTime(timezone=True), server_default=func.now(), nullable=False
-    )
-    modified_time = Column(
-        DateTime(timezone=True),
-        server_default=func.now(),
-        onupdate=func.now(),
-        nullable=False,
-    )
+    created_time = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    modified_time = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
     # Relationships
+    job_requirement = relationship("JobRequirement", back_populates="candidates")
     assignee = relationship("User", foreign_keys=[assignee_id])
     created_by = relationship("User", foreign_keys=[created_by_id])
-    # job_requirement = relationship("JobRequirement", back_populates="candidates")
-# Test

@@ -47,6 +47,7 @@ def create_account(
         industry=data.industry,
         city=data.city,
         state=data.state,
+        assignment_date=datetime.now(timezone.utc),
         pincode=data.pincode,
         waba_interested=data.waba_interested,
         call_back_date_time=data.call_back_date_time,
@@ -106,6 +107,7 @@ def get_all_accounts(
     single_id_request = False
     allowed_owner_ids = None
 
+    # Role Permissions
     if role in ("super_admin", "admin"):
         pass
     elif role == "manager":
@@ -116,6 +118,7 @@ def get_all_accounts(
     if allowed_owner_ids is not None:
         filters.append(Account.account_owner_id.in_(allowed_owner_ids))
 
+    # Apply all optional filters
     if account_id is not None:
         filters.append(Account.id == account_id)
         single_id_request = True
@@ -158,14 +161,14 @@ def get_all_accounts(
         elif user_id not in MANAGER_EXECUTIVES_MAP:
             raise HTTPException(
                 status_code=403,
-                detail={"message": "You do not have permission to access records for this account owner", "success": False},
+                detail={"message": "You do not have permission to access records for this owner", "success": False},
             )
         elif account_owner_id in MANAGER_EXECUTIVES_MAP.get(user_id):
             filters.append(Account.account_owner_id == int(account_owner_id))
         else:
             raise HTTPException(
                 status_code=403,
-                detail={"message": "You do not have permission to access records for this account owner", "success": False},
+                detail={"message": "You do not have permission to access records for this owner", "success": False},
             )
 
     if single_id_request:
@@ -184,23 +187,25 @@ def get_all_accounts(
         )
 
         if len(data) != 0:
-            ids_list = []
+            note_pairs = []
             acc: Account = data[0]
-            ids_list.append(str(acc.id))
+            
+            # Step 1: Add Parent Account to filter
+            note_pairs.append({"Parent_Id.id": str(acc.id), "module": "Accounts"})
 
-            # 1. Collect contact IDs
+            # Step 2: Collect contact pairs
             for contact in acc.account_linked_contact:
-                ids_list.append(str(contact.id))
+                note_pairs.append({"Parent_Id.id": str(contact.id), "module": "Contacts"})
 
-            # 2. Collect deal IDs
+            # Step 3: Collect deal IDs and pairs
             deal_ids_for_tickets = []
             for deal in acc.deals:
-                ids_list.append(str(deal.id))
+                note_pairs.append({"Parent_Id.id": str(deal.id), "module": "Deals"})
                 deal_ids_for_tickets.append(deal.id)
                 if deal.crm_deal_id:
-                    ids_list.append(str(deal.crm_deal_id))
+                    note_pairs.append({"Parent_Id.id": str(deal.crm_deal_id), "module": "Deals"})
 
-            # 3. Query tickets and build lookup dict
+            # Step 4: Query tickets and add to pairs
             tickets_by_deal: dict[int, list] = {}
             if deal_ids_for_tickets:
                 ticket_records = (
@@ -209,7 +214,9 @@ def get_all_accounts(
                     .all()
                 )
                 for ticket in ticket_records:
-                    ids_list.append(str(ticket.id))
+                    # STRICTLY PAIR TICKET ID WITH TICKET MODULE
+                    note_pairs.append({"Parent_Id.id": str(ticket.id), "module": "Tickets"})
+                    
                     ticket_dict = {
                         c.name: getattr(ticket, c.name)
                         for c in ticket.__table__.columns
@@ -218,17 +225,15 @@ def get_all_accounts(
                     ticket_dict["deal_id"] = str(ticket_dict["deal_id"])
                     tickets_by_deal.setdefault(ticket.deal_id, []).append(ticket_dict)
 
-            # 4. Attach tickets to deals AFTER tickets_by_deal is fully built
+            # Step 5: Attach tickets to deals
             for deal in acc.deals:
                 deal._tickets_list = tickets_by_deal.get(deal.id, [])
 
-            # 5. Fetch notes
-            notes = get_notes(
-                id_list=ids_list,
-                notes_collection=mongodb["Notes"],
-                module_name=["Accounts", "Contacts", "Deals", "Tickets"],
+            # Step 6: Fetch notes with paired filters (This fixes your bug)
+            acc.notes = get_notes(
+                pair_filters=note_pairs,
+                notes_collection=mongodb["Notes"]
             )
-            acc.notes = notes
 
         total_pages = math.ceil(total_data_size / limit)
         return {
@@ -241,19 +246,13 @@ def get_all_accounts(
         }
 
     else:
+        # Standard list view query
         data = (
             db.query(
-                Account.id,
-                Account.account_name,
-                Account.account_owner_id,
-                Account.account_status,
-                Account.source,
-                Account.type_of_business,
-                Account.industry,
-                Account.state,
-                Account.city,
-                Account.call_back_date_time,
-                Account.phone,
+                Account.id, Account.account_name, Account.account_owner_id,
+                Account.account_status, Account.source, Account.type_of_business,
+                Account.industry, Account.state, Account.city,
+                Account.call_back_date_time, Account.phone,
             )
             .filter(and_(*filters))
             .offset(offset)
@@ -270,6 +269,7 @@ def get_all_accounts(
                 "data_size": total_data_size,
             },
         }
+
 def update_account(
     db: Session, account_id: int, payload: Dict[str, Any], user_id: int, user_role: str
 ):
@@ -277,10 +277,12 @@ def update_account(
     if not db_account:
         raise HTTPException(status_code=404, detail={"msg": "Account not found"})
 
-    # capture old status BEFORE any changes
+    # 1. Capture old values before changes
     old_status = db_account.account_status
+    old_owner_id = db_account.account_owner_id
 
     custom_fields_dict = dict(db_account.custom_fields or {})
+    
     for key, value in payload.items():
         if hasattr(db_account, key):
             if value == "" or value is None:
@@ -289,7 +291,12 @@ def update_account(
                 if isinstance(value, str):
                     try:
                         value = datetime.fromisoformat(value)
-                        if value < datetime.now(timezone.utc):
+                        
+                        # Fix: Ensure timezone awareness for comparison to avoid TypeError
+                        if value.tzinfo is None:
+                            value = value.replace(tzinfo=timezone.utc)
+
+                        if key == "call_back_date_time" and value < datetime.now(timezone.utc):
                             raise HTTPException(
                                 status_code=400,
                                 detail={"message": "Date should not be in the past"},
@@ -305,11 +312,17 @@ def update_account(
             else:
                 custom_fields_dict[key] = value
 
+    # 2. Assignment Date Logic: Trigger only if owner ID in payload differs from DB
+    if "account_owner_id" in payload:
+        new_owner_val = payload["account_owner_id"]
+        if new_owner_val is not None and str(new_owner_val) != str(old_owner_id):
+            db_account.assignment_date = datetime.now(timezone.utc)
+
     db_account.custom_fields = custom_fields_dict
     flag_modified(db_account, "custom_fields")
     db_account.modified_by_id = user_id
 
-    # write history only if status actually changed
+    # 3. Status History
     new_status = db_account.account_status
     if new_status != old_status:
         history = AccountStatusHistory(
@@ -330,6 +343,7 @@ def update_account(
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=400, detail=f"Database error: {str(e)}")
+
 def get_account_by_id(db: Session, account_id: int) -> Account:
     account = db.query(Account).filter(Account.id == account_id).first()
     if not account:

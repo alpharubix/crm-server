@@ -48,7 +48,7 @@ def get_all_job_requirements(
     request: Request,
     db: Session,
     mongodb,
-    page: int = 1, # Added default
+    page: int = 1,
     jr_id: Optional[int] = None,
     hiring_position: Optional[str] = None,
     department: Optional[str] = None,
@@ -59,55 +59,38 @@ def get_all_job_requirements(
     offset = (page - 1) * limit
     filters = []
 
-    # 1. Single ID Fetch (This is what your Frontend is calling)
+    # 1. Detail View (Fetch by ID)
     if jr_id is not None:
-        jr = (
-            db.query(JobRequirement)
-            .filter(JobRequirement.id == jr_id)
-            .options(
-                selectinload(JobRequirement.approver),
-                selectinload(JobRequirement.assignee),
-                selectinload(JobRequirement.created_by),
-                # selectinload(JobRequirement.candidates), # Ensure this exists in model or remove
-            )
-            .first()
-        )
+        jr = db.query(JobRequirement).filter(JobRequirement.id == jr_id).options(
+            selectinload(JobRequirement.approver),
+            selectinload(JobRequirement.assignee),
+            selectinload(JobRequirement.created_by)
+        ).first()
         
         if not jr:
-            raise HTTPException(status_code=404, detail="Job Requirement not found")
+            raise HTTPException(status_code=404, detail="JR not found")
 
-        # Fetch notes from MongoDB for this specific JR
-        try:
-            notes = get_notes(
-                id_list=[str(jr.id)],
-                notes_collection=mongodb["Notes"],
-                module_name=["JobRequirement"],
-            )
-            jr.notes = notes
-        except Exception:
-            jr.notes = [] # Fallback if Mongo fails
+        # Fetch Notes from MongoDB (Matches "Notes" section in Excel)
+        jr.notes = get_notes(
+            id_list=[str(jr.id)],
+            notes_collection=mongodb["Notes"],
+            module_name=["JobRequirement"]
+        )
+        return {"data": stringify_ids([jr]), "page_info": {"page": 1, "total_pages": 1, "data_size": 1}}
 
-        # IMPORTANT: Return in the exact same structure as the list view 
-        # so the frontend data?.data?.[0] works correctly.
-        return {
-            "data": stringify_ids([jr]), # Wrap in a list
-            "page_info": {"page": 1, "total_pages": 1, "data_size": 1},
-        }
-
-    # 2. List Fetch with Filters
+    # 2. Kanban/Summary View Filters (Matches Excel Summary Filter row)
     if hiring_position:
-        filters.append(JobRequirement.hiring_position.ilike(f"%{hiring_position.strip()}%"))
+        filters.append(JobRequirement.hiring_position == hiring_position)
     if department:
-        filters.append(JobRequirement.department.ilike(f"%{department.strip()}%"))
+        filters.append(JobRequirement.department == department)
     if hiring_location_city:
-        filters.append(JobRequirement.hiring_location_city.ilike(f"%{hiring_location_city.strip()}%"))
+        filters.append(JobRequirement.hiring_location_city == hiring_location_city)
     if tentative_joining_date:
         filters.append(JobRequirement.tentative_joining_date <= tentative_joining_date)
 
-    base_query = db.query(JobRequirement).filter(and_(*filters)) if filters else db.query(JobRequirement)
-    
-    total = base_query.count()
-    data = base_query.offset(offset).limit(limit).all()
+    query = db.query(JobRequirement).filter(and_(*filters)) if filters else db.query(JobRequirement)
+    total = query.count()
+    data = query.order_by(JobRequirement.created_time.desc()).offset(offset).limit(limit).all()
 
     return {
         "data": stringify_ids(data),
@@ -117,7 +100,6 @@ def get_all_job_requirements(
             "data_size": total,
         },
     }
-
 def update_job_requirement(
     db: Session, jr_id: int, payload: Dict[str, Any], user_id: int, user_role: str
 ):

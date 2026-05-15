@@ -298,9 +298,13 @@ def create_deal(deal, db: Session, user_id, user_role):
         db.add(created_deal)
         db.commit()
         db.refresh(created_deal)
+        # 1. Convert the Pydantic model to a dict
+        deal_dict = deal.model_dump() 
 
-        log_action(
-            db, user_id, user_role, "CREATED", "Deal", created_deal.id,created_deal)
+        # 2. Sanitize it with jsonable_encoder to safely convert Decimals/Dates to JSON strings/numbers
+        sanitized_payload = jsonable_encoder(deal_dict)
+        # Converts the incoming Pydantic schema to a clean JSON dict
+        log_action(db, user_id, user_role, "CREATED", "Deal", created_deal.id, sanitized_payload)
 
         return created_deal
     except Exception as e:

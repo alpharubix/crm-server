@@ -1,15 +1,15 @@
 import logging
 import math
-from datetime import datetime,timezone
+from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
+from src.controllers.notes import get_notes
 from fastapi import HTTPException
+from fastapi.encoders import jsonable_encoder
 from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session, selectinload
 from starlette.requests import Request
 
-# from src.controllers.audit_log import log_action
-from src.controllers.notes import get_notes
 from src.models.hiring import Candidate, JobRequirement
 
 # ── ID Precision Fix Helper ──────────────────────────────────────
@@ -68,7 +68,7 @@ def update_job_requirement(db: Session, jr_id: int, payload: Dict[str, Any], use
 
     # Workflow Gate: Ensure only the designated Approver can shift status to approved
     if "status" in payload and payload["status"] == "approved":
-    # ALLOW EITHER: The assigned approver OR the original creator to approve it
+        # ALLOW EITHER: The assigned approver OR the original creator to approve it
         is_approver = str(user_id) == str(jr.approver_id)
         is_creator = str(user_id) == str(jr.created_by_id)
         if not (is_approver or is_creator) and user_role not in ["admin", "manager"]:
@@ -146,20 +146,35 @@ def get_all_job_requirements(
             .all()
         )
         
+        serialized_data = []
         if len(data) != 0:
             jr: JobRequirement = data[0]
             note_pairs = []
             
-            # Match the pair_filters system from get_all_accounts
-            note_pairs.append({"Parent_Id.id": str(jr.id), "module": "JobRequirement"})
+            # ── FIX: SUPPORT BOTH STRUCTURAL BLUEPRINTS FOR JR NOTES ──
+            # Look for notes stored cleanly as a flat string AND notes saved inside an object mapping wrapper
+            note_pairs.append({"Parent_Id": str(jr.id), "module": "Job_Requirements"})
+            note_pairs.append({"Parent_Id.id": str(jr.id), "module": "Job_Requirements"})
             
-            # Fetch paired notes dictionary from MongoDB
-            jr.notes = get_notes(
+            # Bubble-up System: Query child candidate records linked to this JR
+            child_candidates = db.query(Candidate.id).filter(Candidate.job_requirement_id == jr.id).all()
+            for candidate in child_candidates:
+                # ── FIX: SUPPORT BOTH STRUCTURAL BLUEPRINTS FOR CANDIDATE BUBBLE UP ──
+                note_pairs.append({"Parent_Id": str(candidate.id), "module": "Candidates"})
+                note_pairs.append({"Parent_Id.id": str(candidate.id), "module": "Candidates"})
+            
+            # Fetch combined notes array from MongoDB Notes collection system
+            notes = get_notes(
                 pair_filters=note_pairs,
                 notes_collection=mongodb["Notes"]
             )
             
-        return {"data": stringify_ids(data), "page_info": {"page": page, "total_pages": 1, "data_size": total_data_size}}
+            # Manually append the MongoDB notes list right into the base entity dict layout
+            jr_dict = stringify_ids(jr)
+            jr_dict["notes"] = notes
+            serialized_data.append(jr_dict)
+            
+        return {"data": serialized_data, "page_info": {"page": page, "total_pages": 1, "data_size": total_data_size}}
 
     else:
         # 2. Kanban/Summary Board Standard response
@@ -182,7 +197,6 @@ def delete_job_requirement(db: Session, jr_id: int, user_id: int, user_role: str
         raise HTTPException(status_code=404, detail="Job Requirement not found")
     db.delete(jr)
     db.commit()
-    # log_action(db, user_id, user_role, "DELETED", "JobRequirement", jr_id, {})
     return {"message": "deleted"}
 
 
@@ -193,7 +207,7 @@ def create_candidate(db: Session, data: Dict[str, Any], user_id: int, user_role:
     if user_role == "executive":
         raise HTTPException(status_code=401, detail="Unauthorized Access")
 
-    # 1. FIX: Map frontend keys to matching SQLAlchemy database columns
+    # Map frontend keys to matching SQLAlchemy database columns
     if "jr_id" in data:
         data["job_requirement_id"] = data.pop("jr_id")
     if "assignee_owner" in data:
@@ -201,11 +215,10 @@ def create_candidate(db: Session, data: Dict[str, Any], user_id: int, user_role:
     if "work_experience_duration" in data:
         data["work_experience"] = data.pop("work_experience_duration")
 
-    # 2. Validation Checks
+    # Validation Checks
     if not data.get("candidate_name") or not data.get("job_requirement_id"):
         raise HTTPException(status_code=400, detail="candidate_name and job_requirement_id are required")
 
-    # Cast foreign keys safely to integers for backend check
     try:
         jr_id_int = int(data["job_requirement_id"])
         data["job_requirement_id"] = jr_id_int
@@ -216,7 +229,7 @@ def create_candidate(db: Session, data: Dict[str, Any], user_id: int, user_role:
         try:
             data["assignee_id"] = int(data["assignee_id"])
         except (ValueError, TypeError):
-            data["assignee_id"] = None # Avoid crash if string text name was submitted
+            data["assignee_id"] = None
 
     jr_exists = db.query(JobRequirement.id).filter(JobRequirement.id == jr_id_int).first()
     if not jr_exists:
@@ -251,7 +264,6 @@ def get_all_candidates(
     filters = []
     single_id_request = False
 
-    # 1. Single ID Fetch
     if candidate_id is not None:
         filters.append(Candidate.id == candidate_id)
         single_id_request = True
@@ -288,20 +300,24 @@ def get_all_candidates(
         candidate = data[0]
         note_pairs = []
         
-        # Syncing with pair_filters format
-        note_pairs.append({"Parent_Id.id": str(candidate.id), "module": "Candidate"})
+        # ── FIX: SUPPORT BOTH STRUCTURAL BLUEPRINTS FOR CANDIDATE ONLY NOTES ──
+        note_pairs.append({"Parent_Id": str(candidate.id), "module": "Candidates"})
+        note_pairs.append({"Parent_Id.id": str(candidate.id), "module": "Candidates"})
         
-        candidate.notes = get_notes(
+        notes = get_notes(
             pair_filters=note_pairs,
             notes_collection=mongodb["Notes"]
         )
+        
+        candidate_dict = stringify_ids(candidate)
+        candidate_dict["notes"] = notes
+        
         return {
-            "data": stringify_ids(data),
+            "data": [candidate_dict],
             "page_info": {"page": 1, "total_pages": 1, "data_size": total_data_size},
         }
 
     else:
-        # Standard Kanban board view response
         base_query = db.query(Candidate).filter(and_(*filters)) if filters else db.query(Candidate)
         total_data_size = base_query.count()
         data_records = base_query.order_by(Candidate.created_time.desc()).offset(offset).limit(limit).all()
@@ -324,7 +340,6 @@ def update_candidate(db: Session, candidate_id: int, payload: Dict[str, Any], us
     if not candidate:
         raise HTTPException(status_code=404, detail="Candidate not found")
 
-    # 1. FIX: Map frontend keys to matching columns on updates
     if "jr_id" in payload:
         payload["job_requirement_id"] = payload.pop("jr_id")
     if "assignee_owner" in payload:
@@ -332,17 +347,11 @@ def update_candidate(db: Session, candidate_id: int, payload: Dict[str, Any], us
     if "work_experience_duration" in payload:
         payload["work_experience"] = payload.pop("work_experience_duration")
 
-    # ── DRAG & DROP FIX ──
-    # If the payload comes from the Kanban drag-and-drop update, 
-    # normalize it to the database column name (checking if your model uses 'candidate_status')
     if "candidate_status" in payload:
-        # If your database column is actually named 'candidate_status', keep this.
-        # If your database column is named 'status', change the line below to: payload["status"] = payload.get("candidate_status")
         candidate.status_date = datetime.now(timezone.utc)
 
     for key, value in payload.items():
         if hasattr(candidate, key):
-            # Safe type conversions for standard modifications
             if key in ["job_requirement_id", "assignee_id"] and value:
                 try:
                     setattr(candidate, key, int(value))
@@ -366,5 +375,4 @@ def delete_candidate(db: Session, candidate_id: int, user_id: int, user_role: st
         raise HTTPException(status_code=404, detail="Candidate not found")
     db.delete(candidate)
     db.commit()
-    # log_action(db, user_id, user_role, "DELETED", "Candidate", candidate_id, {})
     return {"message": "deleted"}

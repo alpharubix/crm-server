@@ -1,6 +1,6 @@
 import logging
 import math
-from datetime import datetime
+from datetime import datetime,timezone
 from typing import Any, Dict, Optional
 
 from fastapi import HTTPException
@@ -41,15 +41,65 @@ def stringify_ids(data):
 
 # ── Job Requirement ──────────────────────────────────────────────
 
-def create_job_requirement(
-    db: Session, data: Dict[str, Any], user_id: int, user_role: str
-):
+def create_job_requirement(db: Session, data: Dict[str, Any], user_id: int, user_role: str):
+    if user_role == "executive":
+        raise HTTPException(status_code=401, detail="Unauthorized access")
+
+    if not data.get("hiring_position"):
+        raise HTTPException(status_code=400, detail="hiring_position is required")
+        
+    # Force initial workflow state on creation
+    data["status"] = "pending_approval"
+
     jr = JobRequirement(**data, created_by_id=user_id)
     db.add(jr)
     db.commit()
     db.refresh(jr)
-    # log_action(db, user_id, user_role, "CREATED", "JobRequirement", jr.id, data)
     return stringify_ids(jr)
+
+
+def update_job_requirement(db: Session, jr_id: int, payload: Dict[str, Any], user_id: int, user_role: str):
+    if user_role == "executive":
+        raise HTTPException(status_code=401, detail="Unauthorized Access")
+
+    jr = db.query(JobRequirement).filter(JobRequirement.id == jr_id).first()
+    if not jr:
+        raise HTTPException(status_code=404, detail="Job Requirement not found")
+
+    # Workflow Gate: Ensure only the designated Approver can shift status to approved
+    if "status" in payload and payload["status"] == "approved":
+    # ALLOW EITHER: The assigned approver OR the original creator to approve it
+        is_approver = str(user_id) == str(jr.approver_id)
+        is_creator = str(user_id) == str(jr.created_by_id)
+        if not (is_approver or is_creator) and user_role not in ["admin", "manager"]:
+            raise HTTPException(status_code=403, detail="Only the designated Approver or Creator can approve this requirement.")
+
+    # Assignment Gate: Recruiter assignment is blocked unless it is already approved or being approved now
+    if "assignee_id" in payload and payload["assignee_id"] is not None:
+        current_status = payload.get("status", jr.status)
+        if current_status != "approved":
+            raise HTTPException(
+                status_code=400, 
+                detail="Cannot assign recruiters to a requirement that is not yet approved."
+            )
+        if user_id != jr.approver_id and user_role not in ["admin", "manager"]:
+            raise HTTPException(status_code=403, detail="Only the designated Approver can assign recruiters.")
+
+    # General authorization checks matching projects module
+    if user_id not in [jr.created_by_id, jr.approver_id, jr.assignee_id] and user_role not in ["admin", "manager"]:
+        raise HTTPException(status_code=403, detail="You do not have permission to modify this requirement")
+
+    for key, value in payload.items():
+        if hasattr(jr, key):
+            setattr(jr, key, None if value == "" else value)
+
+    try:
+        db.commit()
+        db.refresh(jr)
+        return stringify_ids(jr)
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 def get_all_job_requirements(
@@ -126,27 +176,6 @@ def get_all_job_requirements(
             },
         }
 
-def update_job_requirement(
-    db: Session, jr_id: int, payload: Dict[str, Any], user_id: int, user_role: str
-):
-    jr = db.query(JobRequirement).filter(JobRequirement.id == jr_id).first()
-    if not jr:
-        raise HTTPException(status_code=404, detail="Job Requirement not found")
-
-    for key, value in payload.items():
-        if hasattr(jr, key):
-            setattr(jr, key, None if value == "" else value)
-
-    try:
-        db.commit()
-        db.refresh(jr)
-        # log_action(db, user_id, user_role, "UPDATED", "JobRequirement", jr_id, payload)
-        return stringify_ids(jr)
-    except Exception as e:
-        db.rollback()
-        raise HTTPException(status_code=400, detail=f"Database error: {str(e)}")
-
-
 def delete_job_requirement(db: Session, jr_id: int, user_id: int, user_role: str):
     jr = db.query(JobRequirement).filter(JobRequirement.id == jr_id).first()
     if not jr:
@@ -161,12 +190,43 @@ def delete_job_requirement(db: Session, jr_id: int, user_id: int, user_role: str
 
 
 def create_candidate(db: Session, data: Dict[str, Any], user_id: int, user_role: str):
+    if user_role == "executive":
+        raise HTTPException(status_code=401, detail="Unauthorized Access")
+
+    # 1. FIX: Map frontend keys to matching SQLAlchemy database columns
+    if "jr_id" in data:
+        data["job_requirement_id"] = data.pop("jr_id")
+    if "assignee_owner" in data:
+        data["assignee_id"] = data.pop("assignee_owner")
+    if "work_experience_duration" in data:
+        data["work_experience"] = data.pop("work_experience_duration")
+
+    # 2. Validation Checks
+    if not data.get("candidate_name") or not data.get("job_requirement_id"):
+        raise HTTPException(status_code=400, detail="candidate_name and job_requirement_id are required")
+
+    # Cast foreign keys safely to integers for backend check
+    try:
+        jr_id_int = int(data["job_requirement_id"])
+        data["job_requirement_id"] = jr_id_int
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=400, detail="Invalid job_requirement_id format")
+
+    if data.get("assignee_id"):
+        try:
+            data["assignee_id"] = int(data["assignee_id"])
+        except (ValueError, TypeError):
+            data["assignee_id"] = None # Avoid crash if string text name was submitted
+
+    jr_exists = db.query(JobRequirement.id).filter(JobRequirement.id == jr_id_int).first()
+    if not jr_exists:
+        raise HTTPException(status_code=404, detail="Target Job Requirement parent does not exist")
+
     candidate = Candidate(**data, created_by_id=user_id)
     try:
         db.add(candidate)
         db.commit()
         db.refresh(candidate)
-        # log_action(db, user_id, user_role, "CREATED", "Candidate", candidate.id, data)
         return stringify_ids(candidate)
     except Exception as e:
         db.rollback()
@@ -256,30 +316,49 @@ def get_all_candidates(
         }
 
 
-def update_candidate(
-    db: Session,
-    candidate_id: int,
-    payload: Dict[str, Any],
-    user_id: int,
-    user_role: str,
-):
+def update_candidate(db: Session, candidate_id: int, payload: Dict[str, Any], user_id: int, user_role: str):
+    if user_role == "executive":
+        raise HTTPException(status_code=401, detail="Unauthorized Access")
+
     candidate = db.query(Candidate).filter(Candidate.id == candidate_id).first()
     if not candidate:
         raise HTTPException(status_code=404, detail="Candidate not found")
 
+    # 1. FIX: Map frontend keys to matching columns on updates
+    if "jr_id" in payload:
+        payload["job_requirement_id"] = payload.pop("jr_id")
+    if "assignee_owner" in payload:
+        payload["assignee_id"] = payload.pop("assignee_owner")
+    if "work_experience_duration" in payload:
+        payload["work_experience"] = payload.pop("work_experience_duration")
+
+    # ── DRAG & DROP FIX ──
+    # If the payload comes from the Kanban drag-and-drop update, 
+    # normalize it to the database column name (checking if your model uses 'candidate_status')
+    if "candidate_status" in payload:
+        # If your database column is actually named 'candidate_status', keep this.
+        # If your database column is named 'status', change the line below to: payload["status"] = payload.get("candidate_status")
+        candidate.status_date = datetime.now(timezone.utc)
+
     for key, value in payload.items():
         if hasattr(candidate, key):
-            setattr(candidate, key, None if value == "" else value)
+            # Safe type conversions for standard modifications
+            if key in ["job_requirement_id", "assignee_id"] and value:
+                try:
+                    setattr(candidate, key, int(value))
+                except (ValueError, TypeError):
+                    pass
+            else:
+                setattr(candidate, key, None if value == "" else value)
 
     try:
         db.commit()
         db.refresh(candidate)
-        # log_action(db, user_id, user_role, "UPDATED", "Candidate", candidate_id, payload)
         return stringify_ids(candidate)
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=400, detail=f"Database error: {str(e)}")
-
+    
 
 def delete_candidate(db: Session, candidate_id: int, user_id: int, user_role: str):
     candidate = db.query(Candidate).filter(Candidate.id == candidate_id).first()

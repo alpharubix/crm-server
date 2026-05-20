@@ -32,6 +32,8 @@ class JobRequirement(Base):
     educational_qualification_ug = Column(ARRAY(String), nullable=True)
     educational_qualification_pg = Column(ARRAY(String), nullable=True)
 
+    status = Column(String, nullable=False, default="pending_approval")  # pending_approval, approved, rejected
+
     # --- Section: Work Experience ---
     experience = Column(String, nullable=True)  # Picklist (0-2y, 2-4y, etc.)
     work_experience_department = Column(String, nullable=True)

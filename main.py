@@ -1,8 +1,19 @@
+import os
 from contextlib import asynccontextmanager
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from src.routers.revenue import revenue_router
+import uvicorn
+from dotenv import load_dotenv
+
+# 1. Load env vars BEFORE importing modules that rely on them
+load_dotenv(override=True)
+
+# 2. Local imports
 from src.database import Base, engine
 from src.middleware.auth import authorization
+from src.controllers.Background_threads import BackgroundThreadPool
+
+# Router imports
 from src.routers import account as account_router
 from src.routers import audit_log as audit_log_router
 from src.routers import contact as contact_router
@@ -15,36 +26,19 @@ from src.routers.tickets import tickets_router
 from src.routers.export_csv import export_csv_router
 from src.routers.deal_documents import deal_docs_router
 from src.routers.hiring import candidate_router, jr_router
-import os
+from src.routers.revenue import revenue_router
 
-import uvicorn
-from dotenv import load_dotenv
-from fastapi import FastAPI
-from src.controllers.Background_threads import BackgroundThreadPool
-load_dotenv(override=True)
-
-'''
-Long Server Start Cause:
-These functions runs synchronously at the module level. It queries the database over the network to fetch the schema for every existing table. This causes severe blocking I/O during initialization.
-
-Do not reflect or create tables on application startup. Use alembic (which is already in dependencies) to manage database migrations offline.
-'''
-Base.metadata.create_all(bind=engine)
-
-app = FastAPI()
-
-
+# 3. Handle setup during the lifespan, not on script execution
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Create tables only when the app is actively starting up
+    # Base.metadata.create_all(bind=engine)
     BackgroundThreadPool.initialize_thread_pool()
     yield
     BackgroundThreadPool.shutdown()
 
+# 4. Single App initialization
 app = FastAPI(lifespan=lifespan)
-
-@app.get("/")
-def test():
-    return {"message": "Hello World"}
 
 app.middleware("http")(authorization)
 
@@ -60,6 +54,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Include Routers
 app.include_router(account_router.router)
 app.include_router(contact_router.router)
 app.include_router(user_router.router)
@@ -75,7 +70,11 @@ app.include_router(candidate_router)
 app.include_router(jr_router)
 app.include_router(revenue_router)
 
+@app.get("/")
+def test():
+    return {"message": "Hello World"}
+
 if __name__ == "__main__":
-    # Cloud Run provides PORT as an env var; default to 8080 if not found
     port = int(os.getenv("PORT", 8080))
+    # Turn reload=False if you want to isolate environment/network start speeds
     uvicorn.run("main:app", host="0.0.0.0", port=port, reload=True)

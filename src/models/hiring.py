@@ -1,8 +1,7 @@
 from sqlalchemy import BIGINT, Column, DateTime, ForeignKey, Integer, String, Text, Float
-from sqlalchemy.dialects.postgresql import ARRAY, JSONB
+from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
-
 from ..database import Base
 
 
@@ -18,35 +17,35 @@ class JobRequirement(Base):
     sub_level = Column(String, nullable=True)
     no_of_vacancies = Column(Integer, nullable=True)
     gender = Column(String, nullable=True)
-    age_limit = Column(Integer, nullable=True) # Max Age Limit in Excel
+    age_limit = Column(Integer, nullable=True)  # "Age Limit"
     hiring_location_city = Column(String, nullable=True, index=True)
     
     # --- Section: Compensation & Timeline ---
     min_annual_ctc = Column(String, nullable=True)
     max_annual_ctc = Column(String, nullable=True)
     position_open_date = Column(DateTime(timezone=True), nullable=True)
-    tentative_joining_date = Column(DateTime(timezone=True), nullable=True) # "Joining Date" in Excel
-    tat = Column(Integer, nullable=True) # Duration (days)
-    
-    # --- Section: Education (Multi-select in Excel) ---
+    tentative_joining_date = Column(DateTime(timezone=True), nullable=True)  # "Joining Date"
+    tat = Column(Integer, nullable=True)  # Duration (days)
+    qualification = Column(String, nullable=True)  # Single Line baseline field
+
+    # --- Section: Education (Multi-select) ---
     educational_qualification_ug = Column(ARRAY(String), nullable=True)
     educational_qualification_pg = Column(ARRAY(String), nullable=True)
-    qualification = Column(String, nullable=True) # "Qualification - Single Line" from Detail view
 
-    # --- Section: Work Experience (Distinct section in Excel) ---
-    experience = Column(String, nullable=True) # Overall Experience Picklist
-    work_experience_department = Column(String, nullable=True) # "Department" under Work Exp section
-    work_description = Column(Text, nullable=True) # "Work Description" multi-line
+    status = Column(String, nullable=False, default="pending_approval")  # pending_approval, approved, rejected
+
+    # --- Section: Work Experience ---
+    experience = Column(String, nullable=True)  # Picklist (0-2y, 2-4y, etc.)
+    work_experience_department = Column(String, nullable=True)
+    work_description = Column(Text, nullable=True)
     
     # --- Section: Skills & Languages ---
-    skills = Column(String, nullable=True) # "Skills Required"
+    skills = Column(String, nullable=True)  # "Skills Required"
     language_proficiency = Column(ARRAY(String), nullable=True)
 
-    # --- Section: Roles & Job Description ---
+    # --- Section: Roles & Core Assignment ---
     reporting_manager = Column(String, nullable=True)
     job_description = Column(Text, nullable=True)
-    
-    # --- Section: Assignment ---
     approver_id = Column(BIGINT, ForeignKey("users.id"), nullable=True)
     assignee_id = Column(BIGINT, ForeignKey("users.id"), nullable=True)
     created_by_id = Column(BIGINT, ForeignKey("users.id"), nullable=True)
@@ -70,36 +69,36 @@ class Candidate(Base):
 
     # --- Section: Candidate Info ---
     candidate_name = Column(String, nullable=False)
-    candidate_status = Column(String, nullable=True, index=True) # Picklist in Excel
+    candidate_status = Column(String, nullable=True, index=True)
     location_city = Column(String, nullable=True)
-    status_date = Column(DateTime(timezone=True), nullable=True) # Date (dd-mm-yyyy)
-    call_back_date = Column(DateTime(timezone=True), nullable=True) # Date (dd-mm-yyyy)
+    status_date = Column(DateTime(timezone=True), nullable=True)
+    call_back_date = Column(DateTime(timezone=True), nullable=True)
     phone_no = Column(String, nullable=True)
     email = Column(String, nullable=True, index=True)
-    resume = Column(String, nullable=True) # Attachment / Link
+    resume = Column(String, nullable=True)
 
     # --- Section: Education ---
-    educational_qualification_ug = Column(String, nullable=True) # Picklist
-    year_of_passing_ug = Column(String, nullable=True) # YYYY
-    educational_qualification_pg = Column(String, nullable=True) # Picklist
-    year_of_passing_pg = Column(String, nullable=True) # YYYY
+    educational_qualification_ug = Column(String, nullable=True)
+    year_of_passing_ug = Column(String, nullable=True)
+    educational_qualification_pg = Column(String, nullable=True)
+    year_of_passing_pg = Column(String, nullable=True)
 
     # --- Section: Work Experience ---
-    work_experience = Column(String, nullable=True) # Duration (e.g. 2y 8m)
-    industry = Column(String, nullable=True) # Picklist
+    work_experience = Column(String, nullable=True)  # Duration (2y 8m)
+    industry = Column(String, nullable=True)
 
     # --- Section: Skills & Languages ---
     skills = Column(String, nullable=True)
-    language_proficiency = Column(ARRAY(String), nullable=True) # Multi-Select
+    language_proficiency = Column(ARRAY(String), nullable=True)
 
-    # --- Section: Candidate Rating (Matches Excel + Footer) ---
-    rating = Column(Float, nullable=True) # 1-5 rating
-    feedback_status = Column(String, nullable=True) # "Submitted", "Pending"
-    feedback_form_link = Column(String, nullable=True) # Link to "Feedback Form" sheet data
+    # --- Section: Candidate Rating Block ---
+    rating = Column(Float, nullable=True)
+    feedback_status = Column(String, nullable=True)
+    feedback_form_link = Column(String, nullable=True)
     rating_submitted_by = Column(BIGINT, ForeignKey("users.id"), nullable=True)
 
-    # --- Ownership ---
-    assignee_id = Column(BIGINT, ForeignKey("users.id"), nullable=True) # User
+    # --- Section: Ownership ---
+    assignee_id = Column(BIGINT, ForeignKey("users.id"), nullable=True)
     created_by_id = Column(BIGINT, ForeignKey("users.id"), nullable=True)
 
     # Audit

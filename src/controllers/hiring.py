@@ -1,25 +1,32 @@
 import logging
 import math
-from datetime import datetime
+from datetime import datetime,timezone
 from typing import Any, Dict, Optional
 
 from fastapi import HTTPException
-from sqlalchemy import and_
+from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session, selectinload
 from starlette.requests import Request
 
-from src.controllers.audit_log import log_action
+# from src.controllers.audit_log import log_action
 from src.controllers.notes import get_notes
 from src.models.hiring import Candidate, JobRequirement
 
-# ── Job Requirement ──────────────────────────────────────────────
-
+# ── ID Precision Fix Helper ──────────────────────────────────────
 
 def stringify_ids(data):
     if isinstance(data, list):
         return [stringify_ids(item) for item in data]
-    if hasattr(data, "__dict__"):  # For SQLAlchemy objects
-        data = {c.name: getattr(data, c.name) for c in data.__table__.columns}
+    if hasattr(data, "__dict__"):
+        res = {c.name: getattr(data, c.name) for c in data.__table__.columns}
+        
+        for rel in ["approver", "assignee", "created_by", "submitted_by_user"]:
+            if rel in data.__dict__:
+                val = getattr(data, rel)
+                if val:
+                    res[rel] = {"id": str(val.id), "name": getattr(val, "name", getattr(val, "username", str(val.id)))}
+        return res
+        
     if isinstance(data, dict):
         new_data = {}
         for k, v in data.items():
@@ -32,16 +39,67 @@ def stringify_ids(data):
         return new_data
     return data
 
+# ── Job Requirement ──────────────────────────────────────────────
 
-def create_job_requirement(
-    db: Session, data: Dict[str, Any], user_id: int, user_role: str
-):
+def create_job_requirement(db: Session, data: Dict[str, Any], user_id: int, user_role: str):
+    if user_role == "executive":
+        raise HTTPException(status_code=401, detail="Unauthorized access")
+
+    if not data.get("hiring_position"):
+        raise HTTPException(status_code=400, detail="hiring_position is required")
+        
+    # Force initial workflow state on creation
+    data["status"] = "pending_approval"
+
     jr = JobRequirement(**data, created_by_id=user_id)
     db.add(jr)
     db.commit()
     db.refresh(jr)
-    log_action(db, user_id, user_role, "CREATED", "JobRequirement", jr.id, data)
-    return jr
+    return stringify_ids(jr)
+
+
+def update_job_requirement(db: Session, jr_id: int, payload: Dict[str, Any], user_id: int, user_role: str):
+    if user_role == "executive":
+        raise HTTPException(status_code=401, detail="Unauthorized Access")
+
+    jr = db.query(JobRequirement).filter(JobRequirement.id == jr_id).first()
+    if not jr:
+        raise HTTPException(status_code=404, detail="Job Requirement not found")
+
+    # Workflow Gate: Ensure only the designated Approver can shift status to approved
+    if "status" in payload and payload["status"] == "approved":
+    # ALLOW EITHER: The assigned approver OR the original creator to approve it
+        is_approver = str(user_id) == str(jr.approver_id)
+        is_creator = str(user_id) == str(jr.created_by_id)
+        if not (is_approver or is_creator) and user_role not in ["admin", "manager"]:
+            raise HTTPException(status_code=403, detail="Only the designated Approver or Creator can approve this requirement.")
+
+    # Assignment Gate: Recruiter assignment is blocked unless it is already approved or being approved now
+    if "assignee_id" in payload and payload["assignee_id"] is not None:
+        current_status = payload.get("status", jr.status)
+        if current_status != "approved":
+            raise HTTPException(
+                status_code=400, 
+                detail="Cannot assign recruiters to a requirement that is not yet approved."
+            )
+        if user_id != jr.approver_id and user_role not in ["admin", "manager"]:
+            raise HTTPException(status_code=403, detail="Only the designated Approver can assign recruiters.")
+
+    # General authorization checks matching projects module
+    if user_id not in [jr.created_by_id, jr.approver_id, jr.assignee_id] and user_role not in ["admin", "manager"]:
+        raise HTTPException(status_code=403, detail="You do not have permission to modify this requirement")
+
+    for key, value in payload.items():
+        if hasattr(jr, key):
+            setattr(jr, key, None if value == "" else value)
+
+    try:
+        db.commit()
+        db.refresh(jr)
+        return stringify_ids(jr)
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 def get_all_job_requirements(
@@ -58,68 +116,65 @@ def get_all_job_requirements(
     limit = 30
     offset = (page - 1) * limit
     filters = []
+    single_id_request = False
 
     # 1. Detail View (Fetch by ID)
     if jr_id is not None:
-        jr = db.query(JobRequirement).filter(JobRequirement.id == jr_id).options(
-            selectinload(JobRequirement.approver),
-            selectinload(JobRequirement.assignee),
-            selectinload(JobRequirement.created_by)
-        ).first()
-        
-        if not jr:
-            raise HTTPException(status_code=404, detail="JR not found")
+        filters.append(JobRequirement.id == jr_id)
+        single_id_request = True
 
-        # Fetch Notes from MongoDB (Matches "Notes" section in Excel)
-        jr.notes = get_notes(
-            id_list=[str(jr.id)],
-            notes_collection=mongodb["Notes"],
-            module_name=["JobRequirement"]
-        )
-        return {"data": stringify_ids([jr]), "page_info": {"page": 1, "total_pages": 1, "data_size": 1}}
-
-    # 2. Kanban/Summary View Filters (Matches Excel Summary Filter row)
     if hiring_position:
-        filters.append(JobRequirement.hiring_position == hiring_position)
+        filters.append(JobRequirement.hiring_position == hiring_position.strip())
     if department:
-        filters.append(JobRequirement.department == department)
+        filters.append(JobRequirement.department == department.strip())
     if hiring_location_city:
-        filters.append(JobRequirement.hiring_location_city == hiring_location_city)
+        filters.append(JobRequirement.hiring_location_city == hiring_location_city.strip())
     if tentative_joining_date:
         filters.append(JobRequirement.tentative_joining_date <= tentative_joining_date)
 
-    query = db.query(JobRequirement).filter(and_(*filters)) if filters else db.query(JobRequirement)
-    total = query.count()
-    data = query.order_by(JobRequirement.created_time.desc()).offset(offset).limit(limit).all()
+    if single_id_request:
+        base_query = db.query(JobRequirement).filter(and_(*filters)) if filters else db.query(JobRequirement)
+        total_data_size = base_query.count()
+        data = (
+            base_query.offset(offset)
+            .options(
+                selectinload(JobRequirement.approver),
+                selectinload(JobRequirement.assignee),
+                selectinload(JobRequirement.created_by)
+            )
+            .limit(limit)
+            .all()
+        )
+        
+        if len(data) != 0:
+            jr: JobRequirement = data[0]
+            note_pairs = []
+            
+            # Match the pair_filters system from get_all_accounts
+            note_pairs.append({"Parent_Id.id": str(jr.id), "module": "JobRequirement"})
+            
+            # Fetch paired notes dictionary from MongoDB
+            jr.notes = get_notes(
+                pair_filters=note_pairs,
+                notes_collection=mongodb["Notes"]
+            )
+            
+        return {"data": stringify_ids(data), "page_info": {"page": page, "total_pages": 1, "data_size": total_data_size}}
 
-    return {
-        "data": stringify_ids(data),
-        "page_info": {
-            "page": page,
-            "total_pages": math.ceil(total / limit) if total else 1,
-            "data_size": total,
-        },
-    }
-def update_job_requirement(
-    db: Session, jr_id: int, payload: Dict[str, Any], user_id: int, user_role: str
-):
-    jr = db.query(JobRequirement).filter(JobRequirement.id == jr_id).first()
-    if not jr:
-        raise HTTPException(status_code=404, detail="Job Requirement not found")
+    else:
+        # 2. Kanban/Summary Board Standard response
+        query = db.query(JobRequirement).filter(and_(*filters)) if filters else db.query(JobRequirement)
+        total_data_size = query.count()
+        data_records = query.order_by(JobRequirement.created_time.desc()).offset(offset).limit(limit).all()
 
-    for key, value in payload.items():
-        if hasattr(jr, key):
-            setattr(jr, key, None if value == "" else value)
-
-    try:
-        db.commit()
-        db.refresh(jr)
-        log_action(db, user_id, user_role, "UPDATED", "JobRequirement", jr_id, payload)
-        return jr
-    except Exception as e:
-        db.rollback()
-        raise HTTPException(status_code=400, detail=f"Database error: {str(e)}")
-
+        return {
+            "data": stringify_ids(data_records),
+            "page_info": {
+                "page": page,
+                "total_pages": math.ceil(total_data_size / limit) if total_data_size else 1,
+                "data_size": total_data_size,
+            },
+        }
 
 def delete_job_requirement(db: Session, jr_id: int, user_id: int, user_role: str):
     jr = db.query(JobRequirement).filter(JobRequirement.id == jr_id).first()
@@ -127,7 +182,7 @@ def delete_job_requirement(db: Session, jr_id: int, user_id: int, user_role: str
         raise HTTPException(status_code=404, detail="Job Requirement not found")
     db.delete(jr)
     db.commit()
-    log_action(db, user_id, user_role, "DELETED", "JobRequirement", jr_id, {})
+    # log_action(db, user_id, user_role, "DELETED", "JobRequirement", jr_id, {})
     return {"message": "deleted"}
 
 
@@ -135,29 +190,47 @@ def delete_job_requirement(db: Session, jr_id: int, user_id: int, user_role: str
 
 
 def create_candidate(db: Session, data: Dict[str, Any], user_id: int, user_role: str):
-    # Remove job_requirement_id from the data if it accidentally comes from frontend
-    # data.pop("job_requirement_id", None)
+    if user_role == "executive":
+        raise HTTPException(status_code=401, detail="Unauthorized Access")
 
-    # Create the candidate instance
+    # 1. FIX: Map frontend keys to matching SQLAlchemy database columns
+    if "jr_id" in data:
+        data["job_requirement_id"] = data.pop("jr_id")
+    if "assignee_owner" in data:
+        data["assignee_id"] = data.pop("assignee_owner")
+    if "work_experience_duration" in data:
+        data["work_experience"] = data.pop("work_experience_duration")
+
+    # 2. Validation Checks
+    if not data.get("candidate_name") or not data.get("job_requirement_id"):
+        raise HTTPException(status_code=400, detail="candidate_name and job_requirement_id are required")
+
+    # Cast foreign keys safely to integers for backend check
+    try:
+        jr_id_int = int(data["job_requirement_id"])
+        data["job_requirement_id"] = jr_id_int
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=400, detail="Invalid job_requirement_id format")
+
+    if data.get("assignee_id"):
+        try:
+            data["assignee_id"] = int(data["assignee_id"])
+        except (ValueError, TypeError):
+            data["assignee_id"] = None # Avoid crash if string text name was submitted
+
+    jr_exists = db.query(JobRequirement.id).filter(JobRequirement.id == jr_id_int).first()
+    if not jr_exists:
+        raise HTTPException(status_code=404, detail="Target Job Requirement parent does not exist")
+
     candidate = Candidate(**data, created_by_id=user_id)
-
     try:
         db.add(candidate)
         db.commit()
         db.refresh(candidate)
-
-        # Log the action
-        log_action(db, user_id, user_role, "CREATED", "Candidate", candidate.id, data)
-
-        # Stringify IDs for JS precision safety
         return stringify_ids(candidate)
-
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=400, detail=f"Database error: {str(e)}")
-
-
-# src/controllers/hiring.py
 
 
 def get_all_candidates(
@@ -176,88 +249,116 @@ def get_all_candidates(
     limit = 30
     offset = (page - 1) * limit
     filters = []
+    single_id_request = False
 
     # 1. Single ID Fetch
     if candidate_id is not None:
-        candidate = (
-            db.query(Candidate)
-            .filter(Candidate.id == candidate_id)
-            .options(
-                selectinload(Candidate.assignee),
-                selectinload(Candidate.created_by),
-                # job_requirement relationship removed
-            )
-            .first()
-        )
-        if not candidate:
-            raise HTTPException(status_code=404, detail="Candidate not found")
+        filters.append(Candidate.id == candidate_id)
+        single_id_request = True
 
-        candidate.notes = get_notes(
-            id_list=[str(candidate.id)],
-            notes_collection=mongodb["Notes"],
-            module_name=["Candidate"],
-        )
-        return {
-            "data": stringify_ids([candidate]),
-            "page_info": {"page": 1, "total_pages": 1, "data_size": 1},
-        }
-
-    # 2. List Fetch with Filters (job_requirement_id removed)
     if candidate_name:
         filters.append(Candidate.candidate_name.ilike(f"%{candidate_name.strip()}%"))
     if candidate_status:
-        filters.append(Candidate.candidate_status == candidate_status)
+        filters.append(Candidate.candidate_status == candidate_status.strip())
     if location_city:
         filters.append(Candidate.location_city.ilike(f"%{location_city.strip()}%"))
     if industry:
-        filters.append(Candidate.industry == industry)
+        filters.append(Candidate.industry == industry.strip())
     if assignee_id:
         filters.append(Candidate.assignee_id == assignee_id)
     if job_requirement_id:
         filters.append(Candidate.job_requirement_id == job_requirement_id)
 
-    base_query = (
-        db.query(Candidate).filter(and_(*filters)) if filters else db.query(Candidate)
-    )
-    total = base_query.count()
-    data = base_query.offset(offset).limit(limit).all()
+    if single_id_request:
+        base_query = db.query(Candidate).filter(and_(*filters)) if filters else db.query(Candidate)
+        total_data_size = base_query.count()
+        data = (
+            base_query.offset(offset)
+            .options(
+                selectinload(Candidate.assignee),
+                selectinload(Candidate.created_by),
+                selectinload(Candidate.submitted_by_user)
+            )
+            .limit(limit)
+            .all()
+        )
+        if not data:
+            raise HTTPException(status_code=404, detail="Candidate not found")
 
-    return {
-        "data": stringify_ids(data),
-        "page_info": {
-            "page": page,
-            "total_pages": math.ceil(total / limit) if total else 1,
-            "data_size": total,
-        },
-    }
+        candidate = data[0]
+        note_pairs = []
+        
+        # Syncing with pair_filters format
+        note_pairs.append({"Parent_Id.id": str(candidate.id), "module": "Candidate"})
+        
+        candidate.notes = get_notes(
+            pair_filters=note_pairs,
+            notes_collection=mongodb["Notes"]
+        )
+        return {
+            "data": stringify_ids(data),
+            "page_info": {"page": 1, "total_pages": 1, "data_size": total_data_size},
+        }
+
+    else:
+        # Standard Kanban board view response
+        base_query = db.query(Candidate).filter(and_(*filters)) if filters else db.query(Candidate)
+        total_data_size = base_query.count()
+        data_records = base_query.order_by(Candidate.created_time.desc()).offset(offset).limit(limit).all()
+
+        return {
+            "data": stringify_ids(data_records),
+            "page_info": {
+                "page": page,
+                "total_pages": math.ceil(total_data_size / limit) if total_data_size else 1,
+                "data_size": total_data_size,
+            },
+        }
 
 
-def update_candidate(
-    db: Session,
-    candidate_id: int,
-    payload: Dict[str, Any],
-    user_id: int,
-    user_role: str,
-):
+def update_candidate(db: Session, candidate_id: int, payload: Dict[str, Any], user_id: int, user_role: str):
+    if user_role == "executive":
+        raise HTTPException(status_code=401, detail="Unauthorized Access")
+
     candidate = db.query(Candidate).filter(Candidate.id == candidate_id).first()
     if not candidate:
         raise HTTPException(status_code=404, detail="Candidate not found")
 
+    # 1. FIX: Map frontend keys to matching columns on updates
+    if "jr_id" in payload:
+        payload["job_requirement_id"] = payload.pop("jr_id")
+    if "assignee_owner" in payload:
+        payload["assignee_id"] = payload.pop("assignee_owner")
+    if "work_experience_duration" in payload:
+        payload["work_experience"] = payload.pop("work_experience_duration")
+
+    # ── DRAG & DROP FIX ──
+    # If the payload comes from the Kanban drag-and-drop update, 
+    # normalize it to the database column name (checking if your model uses 'candidate_status')
+    if "candidate_status" in payload:
+        # If your database column is actually named 'candidate_status', keep this.
+        # If your database column is named 'status', change the line below to: payload["status"] = payload.get("candidate_status")
+        candidate.status_date = datetime.now(timezone.utc)
+
     for key, value in payload.items():
         if hasattr(candidate, key):
-            setattr(candidate, key, None if value == "" else value)
+            # Safe type conversions for standard modifications
+            if key in ["job_requirement_id", "assignee_id"] and value:
+                try:
+                    setattr(candidate, key, int(value))
+                except (ValueError, TypeError):
+                    pass
+            else:
+                setattr(candidate, key, None if value == "" else value)
 
     try:
         db.commit()
         db.refresh(candidate)
-        log_action(
-            db, user_id, user_role, "UPDATED", "Candidate", candidate_id, payload
-        )
-        return candidate
+        return stringify_ids(candidate)
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=400, detail=f"Database error: {str(e)}")
-
+    
 
 def delete_candidate(db: Session, candidate_id: int, user_id: int, user_role: str):
     candidate = db.query(Candidate).filter(Candidate.id == candidate_id).first()
@@ -265,5 +366,5 @@ def delete_candidate(db: Session, candidate_id: int, user_id: int, user_role: st
         raise HTTPException(status_code=404, detail="Candidate not found")
     db.delete(candidate)
     db.commit()
-    log_action(db, user_id, user_role, "DELETED", "Candidate", candidate_id, {})
+    # log_action(db, user_id, user_role, "DELETED", "Candidate", candidate_id, {})
     return {"message": "deleted"}

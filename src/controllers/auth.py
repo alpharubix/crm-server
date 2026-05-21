@@ -62,6 +62,7 @@ class MANAGERID:
             3899927000005114004,  # Manjunath
             3899927000005114020,  # Digamber
             3899927000005965050,  # Sahil
+            3899927000000221552,  # Sarada
         ],
         # Ashwini R
         3899927000000319812: [
@@ -185,5 +186,6 @@ users = {  #users for fast lookup
     3899927000000498931: 'Karthik H M',
     3899927000000240595: 'Chiranjeevi B S',
     3899927000000319812: 'Ashwini R',
+    3899927000000221552: 'Sarada M'
     3899927000000650180: 'Pranay Kumar'
 }

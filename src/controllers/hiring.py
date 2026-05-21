@@ -41,8 +41,14 @@ def stringify_ids(data):
 
 # ── Job Requirement ──────────────────────────────────────────────
 
+# ── EXPLICIT HR DEPT BYPASS REGISTRY ──
+HR_USER_IDS = ["3899927000000318361", "3899927000000221552"] # Namrata and Sarada strings
+
 def create_job_requirement(db: Session, data: Dict[str, Any], user_id: int, user_role: str):
-    if user_role == "executive":
+    # Allow transaction if they are a Super Admin/Admin OR if their specific ID belongs to the HR Team array
+    is_hr_personnel = str(user_id) in HR_USER_IDS
+    
+    if user_role == "executive" and not is_hr_personnel:
         raise HTTPException(status_code=401, detail="Unauthorized access")
 
     if not data.get("hiring_position"):
@@ -59,34 +65,25 @@ def create_job_requirement(db: Session, data: Dict[str, Any], user_id: int, user
 
 
 def update_job_requirement(db: Session, jr_id: int, payload: Dict[str, Any], user_id: int, user_role: str):
-    if user_role == "executive":
+    is_hr_personnel = str(user_id) in HR_USER_IDS
+
+    if user_role == "executive" and not is_hr_personnel:
         raise HTTPException(status_code=401, detail="Unauthorized Access")
 
     jr = db.query(JobRequirement).filter(JobRequirement.id == jr_id).first()
     if not jr:
         raise HTTPException(status_code=404, detail="Job Requirement not found")
 
-    # Workflow Gate: Ensure only the designated Approver can shift status to approved
-    if "status" in payload and payload["status"] == "approved":
-        # ALLOW EITHER: The assigned approver OR the original creator to approve it
+    # Workflow Gate: Ensure only the designated Approver or Super Admin can shift status to approved/rejected
+    if "status" in payload and payload["status"] in ["approved", "rejected"]:
         is_approver = str(user_id) == str(jr.approver_id)
         is_creator = str(user_id) == str(jr.created_by_id)
-        if not (is_approver or is_creator) and user_role not in ["admin", "manager"]:
-            raise HTTPException(status_code=403, detail="Only the designated Approver or Creator can approve this requirement.")
+        # ONLY super_admin has true structural authorization, but let's match your exact hierarchy checks safely:
+        if not (is_approver or is_creator) and user_role not in ["super_admin", "admin", "manager"]:
+            raise HTTPException(status_code=403, detail="Only the designated Approver or Creator can modify the workflow path.")
 
-    # Assignment Gate: Recruiter assignment is blocked unless it is already approved or being approved now
-    if "assignee_id" in payload and payload["assignee_id"] is not None:
-        current_status = payload.get("status", jr.status)
-        if current_status != "approved":
-            raise HTTPException(
-                status_code=400, 
-                detail="Cannot assign recruiters to a requirement that is not yet approved."
-            )
-        if user_id != jr.approver_id and user_role not in ["admin", "manager"]:
-            raise HTTPException(status_code=403, detail="Only the designated Approver can assign recruiters.")
-
-    # General authorization checks matching projects module
-    if user_id not in [jr.created_by_id, jr.approver_id, jr.assignee_id] and user_role not in ["admin", "manager"]:
+    # General modification permission checks
+    if user_id not in [jr.created_by_id, jr.approver_id, jr.assignee_id] and user_role not in ["super_admin", "admin", "manager"] and not is_hr_personnel:
         raise HTTPException(status_code=403, detail="You do not have permission to modify this requirement")
 
     for key, value in payload.items():

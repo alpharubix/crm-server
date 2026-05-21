@@ -25,7 +25,7 @@ def stringify_ids(data):
                 val = getattr(data, rel)
                 if val:
                     res[rel] = {"id": str(val.id), "name": getattr(val, "name", getattr(val, "username", str(val.id)))}
-        return res
+        return stringify_ids(res)
         
     if isinstance(data, dict):
         new_data = {}
@@ -85,6 +85,9 @@ def update_job_requirement(db: Session, jr_id: int, payload: Dict[str, Any], use
     # General modification permission checks
     if user_id not in [jr.created_by_id, jr.approver_id, jr.assignee_id] and user_role not in ["super_admin", "admin", "manager"] and not is_hr_personnel:
         raise HTTPException(status_code=403, detail="You do not have permission to modify this requirement")
+    
+    for rel in ["approver", "assignee", "created_by", "submitted_by_user"]:
+            payload.pop(rel, None)
 
     for key, value in payload.items():
         if hasattr(jr, key):
@@ -343,9 +346,12 @@ def update_candidate(db: Session, candidate_id: int, payload: Dict[str, Any], us
         payload["assignee_id"] = payload.pop("assignee_owner")
     if "work_experience_duration" in payload:
         payload["work_experience"] = payload.pop("work_experience_duration")
-
     if "candidate_status" in payload:
-        candidate.status_date = datetime.now(timezone.utc)
+            new_status = payload["candidate_status"]
+            if new_status and str(new_status) != str(candidate.candidate_status):
+                candidate.status_date = datetime.now(timezone.utc)
+    
+    payload.pop("status_date", None)
 
     for key, value in payload.items():
         if hasattr(candidate, key):

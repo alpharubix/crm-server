@@ -62,6 +62,7 @@ class MANAGERID:
             3899927000005114004,  # Manjunath
             3899927000005114020,  # Digamber
             3899927000005965050,  # Sahil
+            3899927000000221552,  # Sarada
         ],
         # Ashwini R
         3899927000000319812: [
@@ -115,17 +116,6 @@ class MANAGERID:
             3899927000000208140,  # Shivaraj P N
             3899927000000488938,  # Nagaraj 
         ],
-        # # Digamber
-        # 3899927000005114020: [
-        #     3899927000005114020,   #digambar
-        #     3899927000004808001,  # Ayush
-        #     3899927000005965018,  # Arjun
-        #     3899927000007673012,  # Honappa
-        #     3899927000005114004,  # Manjunath
-        #     3899927000004429017,  # Sandeep
-        #     3899927000005965050,  # Sahil
-        # ],
-        # manager_id: [executive_ids]
     }
 
 users = {  #users for fast lookup
@@ -168,5 +158,6 @@ users = {  #users for fast lookup
     3899927000000647914: 'Prajwal G P',
     3899927000000498931: 'Karthik H M',
     3899927000000240595: 'Chiranjeevi B S',
-    3899927000000319812: 'Ashwini R'
+    3899927000000319812: 'Ashwini R',
+    3899927000000221552: 'Sarada M'
 }

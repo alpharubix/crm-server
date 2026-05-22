@@ -143,6 +143,13 @@ def get_notes(
                     val = note[time_key]
                     try:
                         dt = datetime.fromisoformat(val) if isinstance(val, str) else val
+                        # assume UTC if timezone missing
+                        if dt.tzinfo is None:
+                            dt = dt.replace(tzinfo=timezone.utc)
+
+                        # convert to IST
+                        dt = dt.astimezone(IST)
+
                         note[time_key] = dt.strftime("%d %b %Y, %I:%M %p")
                     except:
                         pass

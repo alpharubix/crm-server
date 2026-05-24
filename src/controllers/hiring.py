@@ -1,32 +1,36 @@
-import logging
 import math
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
-from src.controllers.notes import get_notes
 from fastapi import HTTPException
-from fastapi.encoders import jsonable_encoder
-from sqlalchemy import and_, or_
+from sqlalchemy import and_
 from sqlalchemy.orm import Session, selectinload
 from starlette.requests import Request
 
+from src.controllers.notes import get_notes
 from src.models.hiring import Candidate, JobRequirement
 
 # ── ID Precision Fix Helper ──────────────────────────────────────
+
 
 def stringify_ids(data):
     if isinstance(data, list):
         return [stringify_ids(item) for item in data]
     if hasattr(data, "__dict__"):
         res = {c.name: getattr(data, c.name) for c in data.__table__.columns}
-        
+
         for rel in ["approver", "assignee", "created_by", "submitted_by_user"]:
             if rel in data.__dict__:
                 val = getattr(data, rel)
                 if val:
-                    res[rel] = {"id": str(val.id), "name": getattr(val, "name", getattr(val, "username", str(val.id)))}
+                    res[rel] = {
+                        "id": str(val.id),
+                        "name": getattr(
+                            val, "name", getattr(val, "username", str(val.id))
+                        ),
+                    }
         return stringify_ids(res)
-        
+
     if isinstance(data, dict):
         new_data = {}
         for k, v in data.items():
@@ -39,21 +43,28 @@ def stringify_ids(data):
         return new_data
     return data
 
+
 # ── Job Requirement ──────────────────────────────────────────────
 
 # ── EXPLICIT HR DEPT BYPASS REGISTRY ──
-HR_USER_IDS = ["3899927000000318361", "3899927000000221552"] # Namrata and Sarada strings
+HR_USER_IDS = [
+    "3899927000000318361",
+    "3899927000000221552",
+]  # Namrata and Sarada strings
 
-def create_job_requirement(db: Session, data: Dict[str, Any], user_id: int, user_role: str):
+
+def create_job_requirement(
+    db: Session, data: Dict[str, Any], user_id: int, user_role: str
+):
     # Allow transaction if they are a Super Admin/Admin OR if their specific ID belongs to the HR Team array
     is_hr_personnel = str(user_id) in HR_USER_IDS
-    
+
     if user_role == "executive" and not is_hr_personnel:
         raise HTTPException(status_code=401, detail="Unauthorized access")
 
     if not data.get("hiring_position"):
         raise HTTPException(status_code=400, detail="hiring_position is required")
-        
+
     # Force initial workflow state on creation
     data["status"] = "pending_approval"
 
@@ -64,7 +75,9 @@ def create_job_requirement(db: Session, data: Dict[str, Any], user_id: int, user
     return stringify_ids(jr)
 
 
-def update_job_requirement(db: Session, jr_id: int, payload: Dict[str, Any], user_id: int, user_role: str):
+def update_job_requirement(
+    db: Session, jr_id: int, payload: Dict[str, Any], user_id: int, user_role: str
+):
     is_hr_personnel = str(user_id) in HR_USER_IDS
 
     if user_role == "executive" and not is_hr_personnel:
@@ -79,15 +92,29 @@ def update_job_requirement(db: Session, jr_id: int, payload: Dict[str, Any], use
         is_approver = str(user_id) == str(jr.approver_id)
         is_creator = str(user_id) == str(jr.created_by_id)
         # ONLY super_admin has true structural authorization, but let's match your exact hierarchy checks safely:
-        if not (is_approver or is_creator) and user_role not in ["super_admin", "admin", "manager"]:
-            raise HTTPException(status_code=403, detail="Only the designated Approver or Creator can modify the workflow path.")
+        if not (is_approver or is_creator) and user_role not in [
+            "super_admin",
+            "admin",
+            "manager",
+        ]:
+            raise HTTPException(
+                status_code=403,
+                detail="Only the designated Approver or Creator can modify the workflow path.",
+            )
 
     # General modification permission checks
-    if user_id not in [jr.created_by_id, jr.approver_id, jr.assignee_id] and user_role not in ["super_admin", "admin", "manager"] and not is_hr_personnel:
-        raise HTTPException(status_code=403, detail="You do not have permission to modify this requirement")
-    
+    if (
+        user_id not in [jr.created_by_id, jr.approver_id, jr.assignee_id]
+        and user_role not in ["super_admin", "admin", "manager"]
+        and not is_hr_personnel
+    ):
+        raise HTTPException(
+            status_code=403,
+            detail="You do not have permission to modify this requirement",
+        )
+
     for rel in ["approver", "assignee", "created_by", "submitted_by_user"]:
-            payload.pop(rel, None)
+        payload.pop(rel, None)
 
     for key, value in payload.items():
         if hasattr(jr, key):
@@ -112,6 +139,8 @@ def get_all_job_requirements(
     department: Optional[str] = None,
     hiring_location_city: Optional[str] = None,
     tentative_joining_date: Optional[str] = None,
+    position_type: Optional[str] = None,
+    business_vertical: Optional[str] = None,
 ):
     limit = 30
     offset = (page - 1) * limit
@@ -125,71 +154,105 @@ def get_all_job_requirements(
 
     if hiring_position:
         filters.append(JobRequirement.hiring_position == hiring_position.strip())
+    if business_vertical:
+        filters.append(JobRequirement.business_vertical == business_vertical.strip())
+    if position_type:
+        filters.append(JobRequirement.position_type == position_type.strip())
     if department:
         filters.append(JobRequirement.department == department.strip())
     if hiring_location_city:
-        filters.append(JobRequirement.hiring_location_city == hiring_location_city.strip())
+        filters.append(
+            JobRequirement.hiring_location_city == hiring_location_city.strip()
+        )
     if tentative_joining_date:
         filters.append(JobRequirement.tentative_joining_date <= tentative_joining_date)
 
     if single_id_request:
-        base_query = db.query(JobRequirement).filter(and_(*filters)) if filters else db.query(JobRequirement)
+        base_query = (
+            db.query(JobRequirement).filter(and_(*filters))
+            if filters
+            else db.query(JobRequirement)
+        )
         total_data_size = base_query.count()
         data = (
             base_query.offset(offset)
             .options(
                 selectinload(JobRequirement.approver),
                 selectinload(JobRequirement.assignee),
-                selectinload(JobRequirement.created_by)
+                selectinload(JobRequirement.created_by),
             )
             .limit(limit)
             .all()
         )
-        
+
         serialized_data = []
         if len(data) != 0:
             jr: JobRequirement = data[0]
             note_pairs = []
-            
+
             # ── FIX: SUPPORT BOTH STRUCTURAL BLUEPRINTS FOR JR NOTES ──
             # Look for notes stored cleanly as a flat string AND notes saved inside an object mapping wrapper
             note_pairs.append({"Parent_Id": str(jr.id), "module": "Job_Requirements"})
-            note_pairs.append({"Parent_Id.id": str(jr.id), "module": "Job_Requirements"})
-            
+            note_pairs.append(
+                {"Parent_Id.id": str(jr.id), "module": "Job_Requirements"}
+            )
+
             # Bubble-up System: Query child candidate records linked to this JR
-            child_candidates = db.query(Candidate.id).filter(Candidate.job_requirement_id == jr.id).all()
+            child_candidates = (
+                db.query(Candidate.id)
+                .filter(Candidate.job_requirement_id == jr.id)
+                .all()
+            )
             for candidate in child_candidates:
                 # ── FIX: SUPPORT BOTH STRUCTURAL BLUEPRINTS FOR CANDIDATE BUBBLE UP ──
-                note_pairs.append({"Parent_Id": str(candidate.id), "module": "Candidates"})
-                note_pairs.append({"Parent_Id.id": str(candidate.id), "module": "Candidates"})
-            
+                note_pairs.append(
+                    {"Parent_Id": str(candidate.id), "module": "Candidates"}
+                )
+                note_pairs.append(
+                    {"Parent_Id.id": str(candidate.id), "module": "Candidates"}
+                )
+
             # Fetch combined notes array from MongoDB Notes collection system
             notes = get_notes(
-                pair_filters=note_pairs,
-                notes_collection=mongodb["Notes"]
+                pair_filters=note_pairs, notes_collection=mongodb["Notes"]
             )
-            
+
             # Manually append the MongoDB notes list right into the base entity dict layout
             jr_dict = stringify_ids(jr)
             jr_dict["notes"] = notes
             serialized_data.append(jr_dict)
-            
-        return {"data": serialized_data, "page_info": {"page": page, "total_pages": 1, "data_size": total_data_size}}
+
+        return {
+            "data": serialized_data,
+            "page_info": {"page": page, "total_pages": 1, "data_size": total_data_size},
+        }
 
     else:
         # 2. Kanban/Summary Board Standard response
-        query = db.query(JobRequirement).filter(and_(*filters)) if filters else db.query(JobRequirement)
+        query = (
+            db.query(JobRequirement).filter(and_(*filters))
+            if filters
+            else db.query(JobRequirement)
+        )
         total_data_size = query.count()
-        data_records = query.order_by(JobRequirement.created_time.desc()).offset(offset).limit(limit).all()
+        data_records = (
+            query.order_by(JobRequirement.created_time.desc())
+            .offset(offset)
+            .limit(limit)
+            .all()
+        )
 
         return {
             "data": stringify_ids(data_records),
             "page_info": {
                 "page": page,
-                "total_pages": math.ceil(total_data_size / limit) if total_data_size else 1,
+                "total_pages": math.ceil(total_data_size / limit)
+                if total_data_size
+                else 1,
                 "data_size": total_data_size,
             },
         }
+
 
 def delete_job_requirement(db: Session, jr_id: int, user_id: int, user_role: str):
     jr = db.query(JobRequirement).filter(JobRequirement.id == jr_id).first()
@@ -217,7 +280,9 @@ def create_candidate(db: Session, data: Dict[str, Any], user_id: int, user_role:
 
     # Validation Checks
     if not data.get("candidate_name") or not data.get("job_requirement_id"):
-        raise HTTPException(status_code=400, detail="candidate_name and job_requirement_id are required")
+        raise HTTPException(
+            status_code=400, detail="candidate_name and job_requirement_id are required"
+        )
 
     try:
         jr_id_int = int(data["job_requirement_id"])
@@ -231,9 +296,13 @@ def create_candidate(db: Session, data: Dict[str, Any], user_id: int, user_role:
         except (ValueError, TypeError):
             data["assignee_id"] = None
 
-    jr_exists = db.query(JobRequirement.id).filter(JobRequirement.id == jr_id_int).first()
+    jr_exists = (
+        db.query(JobRequirement.id).filter(JobRequirement.id == jr_id_int).first()
+    )
     if not jr_exists:
-        raise HTTPException(status_code=404, detail="Target Job Requirement parent does not exist")
+        raise HTTPException(
+            status_code=404, detail="Target Job Requirement parent does not exist"
+        )
 
     candidate = Candidate(**data, created_by_id=user_id)
     try:
@@ -282,14 +351,18 @@ def get_all_candidates(
         filters.append(Candidate.job_requirement_id == job_requirement_id)
 
     if single_id_request:
-        base_query = db.query(Candidate).filter(and_(*filters)) if filters else db.query(Candidate)
+        base_query = (
+            db.query(Candidate).filter(and_(*filters))
+            if filters
+            else db.query(Candidate)
+        )
         total_data_size = base_query.count()
         data = (
             base_query.offset(offset)
             .options(
                 selectinload(Candidate.assignee),
                 selectinload(Candidate.created_by),
-                selectinload(Candidate.submitted_by_user)
+                selectinload(Candidate.submitted_by_user),
             )
             .limit(limit)
             .all()
@@ -299,40 +372,54 @@ def get_all_candidates(
 
         candidate = data[0]
         note_pairs = []
-        
+
         # ── FIX: SUPPORT BOTH STRUCTURAL BLUEPRINTS FOR CANDIDATE ONLY NOTES ──
         note_pairs.append({"Parent_Id": str(candidate.id), "module": "Candidates"})
         note_pairs.append({"Parent_Id.id": str(candidate.id), "module": "Candidates"})
-        
-        notes = get_notes(
-            pair_filters=note_pairs,
-            notes_collection=mongodb["Notes"]
-        )
-        
+
+        notes = get_notes(pair_filters=note_pairs, notes_collection=mongodb["Notes"])
+
         candidate_dict = stringify_ids(candidate)
         candidate_dict["notes"] = notes
-        
+
         return {
             "data": [candidate_dict],
             "page_info": {"page": 1, "total_pages": 1, "data_size": total_data_size},
         }
 
     else:
-        base_query = db.query(Candidate).filter(and_(*filters)) if filters else db.query(Candidate)
+        base_query = (
+            db.query(Candidate).filter(and_(*filters))
+            if filters
+            else db.query(Candidate)
+        )
         total_data_size = base_query.count()
-        data_records = base_query.order_by(Candidate.created_time.desc()).offset(offset).limit(limit).all()
+        data_records = (
+            base_query.order_by(Candidate.created_time.desc())
+            .offset(offset)
+            .limit(limit)
+            .all()
+        )
 
         return {
             "data": stringify_ids(data_records),
             "page_info": {
                 "page": page,
-                "total_pages": math.ceil(total_data_size / limit) if total_data_size else 1,
+                "total_pages": math.ceil(total_data_size / limit)
+                if total_data_size
+                else 1,
                 "data_size": total_data_size,
             },
         }
 
 
-def update_candidate(db: Session, candidate_id: int, payload: Dict[str, Any], user_id: int, user_role: str):
+def update_candidate(
+    db: Session,
+    candidate_id: int,
+    payload: Dict[str, Any],
+    user_id: int,
+    user_role: str,
+):
     if user_role == "executive":
         raise HTTPException(status_code=401, detail="Unauthorized Access")
 
@@ -347,10 +434,10 @@ def update_candidate(db: Session, candidate_id: int, payload: Dict[str, Any], us
     if "work_experience_duration" in payload:
         payload["work_experience"] = payload.pop("work_experience_duration")
     if "candidate_status" in payload:
-            new_status = payload["candidate_status"]
-            if new_status and str(new_status) != str(candidate.candidate_status):
-                candidate.status_date = datetime.now(timezone.utc)
-    
+        new_status = payload["candidate_status"]
+        if new_status and str(new_status) != str(candidate.candidate_status):
+            candidate.status_date = datetime.now(timezone.utc)
+
     payload.pop("status_date", None)
 
     for key, value in payload.items():
@@ -370,7 +457,7 @@ def update_candidate(db: Session, candidate_id: int, payload: Dict[str, Any], us
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=400, detail=f"Database error: {str(e)}")
-    
+
 
 def delete_candidate(db: Session, candidate_id: int, user_id: int, user_role: str):
     candidate = db.query(Candidate).filter(Candidate.id == candidate_id).first()

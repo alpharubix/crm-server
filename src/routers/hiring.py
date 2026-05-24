@@ -38,6 +38,8 @@ def list_job_requirements(
     tentative_joining_date: Optional[str] = None,
     db: Session = Depends(get_db),
     mongodb=Depends(get_mongodb),
+    business_vertical: Optional[str] = None,
+    position_type: Optional[str] = None,
 ):
     return repo.get_all_job_requirements(
         request=request,
@@ -49,6 +51,8 @@ def list_job_requirements(
         department=department,
         hiring_location_city=hiring_location_city,
         tentative_joining_date=tentative_joining_date,
+        business_vertical=business_vertical,
+        position_type=position_type
     )
 
 

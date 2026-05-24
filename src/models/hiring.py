@@ -1,7 +1,17 @@
-from sqlalchemy import BIGINT, Column, DateTime, ForeignKey, Integer, String, Text, Float
+from sqlalchemy import (
+    BIGINT,
+    Column,
+    DateTime,
+    Float,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+)
 from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
+
 from ..database import Base
 
 
@@ -17,14 +27,17 @@ class JobRequirement(Base):
     sub_level = Column(String, nullable=True)
     no_of_vacancies = Column(Integer, nullable=True)
     gender = Column(String, nullable=True)
-    age_limit = Column(Integer, nullable=True)  # "Age Limit"
+    age_limit = Column(Integer, nullable=True)
     hiring_location_city = Column(String, nullable=True, index=True)
-    
+
     # --- Section: Compensation & Timeline ---
     min_annual_ctc = Column(String, nullable=True)
     max_annual_ctc = Column(String, nullable=True)
+    avg_annual_ctc = Column(String, nullable=True)
     position_open_date = Column(DateTime(timezone=True), nullable=True)
-    tentative_joining_date = Column(DateTime(timezone=True), nullable=True)  # "Joining Date"
+    tentative_joining_date = Column(
+        DateTime(timezone=True), nullable=True
+    )  # "Joining Date"
     tat = Column(Integer, nullable=True)  # Duration (days)
     qualification = Column(String, nullable=True)  # Single Line baseline field
 
@@ -32,13 +45,18 @@ class JobRequirement(Base):
     educational_qualification_ug = Column(ARRAY(String), nullable=True)
     educational_qualification_pg = Column(ARRAY(String), nullable=True)
 
-    status = Column(String, nullable=False, default="pending_approval")  # pending_approval, approved, rejected
+    status = Column(
+        String, nullable=False, default="pending_approval"
+    )  # pending_approval, approved, rejected
 
     # --- Section: Work Experience ---
     experience = Column(String, nullable=True)  # Picklist (0-2y, 2-4y, etc.)
     work_experience_department = Column(String, nullable=True)
     work_description = Column(Text, nullable=True)
-    
+
+    business_vertical = Column(String, nullable=True)  # R1Xchange, 5pointcredit
+    position_type = Column(String, nullable=True)  # New, Replacement
+
     # --- Section: Skills & Languages ---
     skills = Column(String, nullable=True)  # "Skills Required"
     language_proficiency = Column(ARRAY(String), nullable=True)
@@ -51,8 +69,15 @@ class JobRequirement(Base):
     created_by_id = Column(BIGINT, ForeignKey("users.id"), nullable=True)
 
     # Audit
-    created_time = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
-    modified_time = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+    created_time = Column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    modified_time = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
 
     # Relationships
     approver = relationship("User", foreign_keys=[approver_id])
@@ -65,7 +90,9 @@ class Candidate(Base):
     __tablename__ = "candidates"
 
     id = Column(BIGINT, primary_key=True, autoincrement=True)
-    job_requirement_id = Column(BIGINT, ForeignKey("job_requirements.id"), nullable=True, index=True)
+    job_requirement_id = Column(
+        BIGINT, ForeignKey("job_requirements.id"), nullable=True, index=True
+    )
 
     # --- Section: Candidate Info ---
     candidate_name = Column(String, nullable=False)
@@ -86,6 +113,7 @@ class Candidate(Base):
     # --- Section: Work Experience ---
     work_experience = Column(String, nullable=True)  # Duration (2y 8m)
     industry = Column(String, nullable=True)
+    work_description = Column(Text, nullable=True)
 
     # --- Section: Skills & Languages ---
     skills = Column(String, nullable=True)
@@ -102,8 +130,15 @@ class Candidate(Base):
     created_by_id = Column(BIGINT, ForeignKey("users.id"), nullable=True)
 
     # Audit
-    created_time = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
-    modified_time = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+    created_time = Column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    modified_time = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
 
     # Relationships
     job_requirement = relationship("JobRequirement", back_populates="candidates")

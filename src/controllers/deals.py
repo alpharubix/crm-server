@@ -1,5 +1,5 @@
 import math
-from datetime import datetime, timedelta, timezone, date
+from datetime import date, datetime, timedelta, timezone
 
 from fastapi import HTTPException
 from fastapi.encoders import jsonable_encoder
@@ -10,7 +10,6 @@ from src.controllers.audit_log import log_action
 from src.controllers.auth import MANAGERID
 from src.controllers.notes import get_notes
 from src.models.deal import Deal
-from src.models.ticket import Ticket
 
 
 def get_deals(
@@ -69,46 +68,66 @@ def get_deals(
         if lender_name:
             filters.append(Deal.lender_name.ilike(f"%{lender_name.strip()}%"))
         if lender_login_type:
-            filters.append(Deal.lender_login_type.ilike(f"%{lender_login_type.strip()}%"))
+            filters.append(
+                Deal.lender_login_type.ilike(f"%{lender_login_type.strip()}%")
+            )
         if ticket_login:
             filters.append(Deal.ticket_login.ilike(f"%{ticket_login.strip()}%"))
         if type_of_case_login:
-            filters.append(Deal.type_of_case_login.ilike(f"%{type_of_case_login.strip()}%"))
+            filters.append(
+                Deal.type_of_case_login.ilike(f"%{type_of_case_login.strip()}%")
+            )
 
         # 3. Handle Safe Date Parameter Conversions
         if expected_closing_from:
             try:
-                filters.append(Deal.deal_expected_closing >= datetime.strptime(expected_closing_from, "%Y-%m-%d").date())
+                filters.append(
+                    Deal.deal_expected_closing
+                    >= datetime.strptime(expected_closing_from, "%Y-%m-%d").date()
+                )
             except ValueError:
                 pass
         if expected_closing_to:
             try:
-                filters.append(Deal.deal_expected_closing <= datetime.strptime(expected_closing_to, "%Y-%m-%d").date())
+                filters.append(
+                    Deal.deal_expected_closing
+                    <= datetime.strptime(expected_closing_to, "%Y-%m-%d").date()
+                )
             except ValueError:
                 pass
 
         if status_closing_from:
             try:
-                filters.append(Deal.deal_status_closing >= datetime.strptime(status_closing_from, "%Y-%m-%d").date())
+                filters.append(
+                    Deal.deal_status_closing
+                    >= datetime.strptime(status_closing_from, "%Y-%m-%d").date()
+                )
             except ValueError:
                 pass
         if status_closing_to:
             try:
-                filters.append(Deal.deal_status_closing <= datetime.strptime(status_closing_to, "%Y-%m-%d").date())
+                filters.append(
+                    Deal.deal_status_closing
+                    <= datetime.strptime(status_closing_to, "%Y-%m-%d").date()
+                )
             except ValueError:
                 pass
 
         # 4. Handle Record Creation Timestamps (Accessible by both Kanban & Standard List Views)
         if created_from:
             try:
-                date_from = datetime.strptime(created_from, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+                date_from = datetime.strptime(created_from, "%Y-%m-%d").replace(
+                    tzinfo=timezone.utc
+                )
                 filters.append(Deal.created_at >= date_from)
             except ValueError:
                 pass
         if created_to:
             try:
                 date_to = (
-                    datetime.strptime(created_to, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+                    datetime.strptime(created_to, "%Y-%m-%d").replace(
+                        tzinfo=timezone.utc
+                    )
                     + timedelta(days=1)
                     - timedelta(seconds=1)
                 )
@@ -116,27 +135,31 @@ def get_deals(
             except ValueError:
                 pass
 
-# ------------------- KANBAN VIEW PROCESSOR -------------------
+        # ------------------- KANBAN VIEW PROCESSOR -------------------
         if kanban:
             # 1. First, build the clean query based on the active filters
             base_query = db.query(Deal).filter(and_(*filters))
-            
+
             # 2. Get the actual total count of ALL matching data in DB (e.g., 220)
             total_count = base_query.count()
 
             # 3. Pull the specific entities, but CAP them at 200 items max
-            deals = base_query.with_entities(
-                Deal.id,
-                Deal.account_name,
-                Deal.lender_name,
-                Deal.deal_status,
-                Deal.loan_type,
-                Deal.deal_owner_id,
-                Deal.deal_expected_closing,
-                Deal.deal_status_closing,
-                Deal.lender_login_type,
-                Deal.partner_code,
-            ).limit(200).all()  # <--- CHANGE IS HERE: Added .limit(200)
+            deals = (
+                base_query.with_entities(
+                    Deal.id,
+                    Deal.account_name,
+                    Deal.lender_name,
+                    Deal.deal_status,
+                    Deal.loan_type,
+                    Deal.deal_owner_id,
+                    Deal.deal_expected_closing,
+                    Deal.deal_status_closing,
+                    Deal.lender_login_type,
+                    Deal.partner_code,
+                )
+                .limit(200)
+                .all()
+            )  # <--- CHANGE IS HERE: Added .limit(200)
 
             # 4. Group your dataset by stage status (Will process max 200 items)
             grouped: dict = {}
@@ -146,7 +169,9 @@ def get_deals(
                     {
                         **deal._asdict(),
                         "id": str(deal.id),
-                        "deal_owner_id": str(deal.deal_owner_id) if deal.deal_owner_id else None,
+                        "deal_owner_id": str(deal.deal_owner_id)
+                        if deal.deal_owner_id
+                        else None,
                     }
                 )
 
@@ -157,20 +182,35 @@ def get_deals(
 
         # Single Deal Detail View Scenario
         if deal_id:
-            deals = base_query.options(selectinload(Deal.owner), selectinload(Deal.revenue)).limit(1).all()
+            deals = (
+                base_query.options(selectinload(Deal.owner), selectinload(Deal.revenue))
+                .limit(1)
+                .all()
+            )
             if deals:
                 deal = deals[0]
                 ids_list = [str(deal.id)]
                 if getattr(deal, "crm_deal_id", None):
                     ids_list.append(str(deal.crm_deal_id))
 
-                tickets_records = db.query(Ticket).filter(Ticket.deal_id == deal.id).all()
+                tickets_records = (
+                    db.query(Ticket).filter(Ticket.deal_id == deal.id).all()
+                )
 
                 serialized_tickets = []
                 for ticket in tickets_records:
                     ids_list.append(str(ticket.id))
-                    t_dict = {c.name: getattr(ticket, c.name) for c in ticket.__table__.columns}
-                    for key in ("id", "deal_id", "created_by", "modified_by", "partner_code"):
+                    t_dict = {
+                        c.name: getattr(ticket, c.name)
+                        for c in ticket.__table__.columns
+                    }
+                    for key in (
+                        "id",
+                        "deal_id",
+                        "created_by",
+                        "modified_by",
+                        "partner_code",
+                    ):
                         if t_dict.get(key) is not None:
                             t_dict[key] = str(t_dict[key])
                     serialized_tickets.append(t_dict)
@@ -178,8 +218,17 @@ def get_deals(
                 serialized_revenue = []
                 if getattr(deal, "revenue", None):
                     for revenue in deal.revenue:
-                        revenue_dict = {c.name: getattr(revenue, c.name) for c in revenue.__table__.columns}
-                        for key in ("id", "deal_id", "owner_id", "created_by", "updated_by"):
+                        revenue_dict = {
+                            c.name: getattr(revenue, c.name)
+                            for c in revenue.__table__.columns
+                        }
+                        for key in (
+                            "id",
+                            "deal_id",
+                            "owner_id",
+                            "created_by",
+                            "updated_by",
+                        ):
                             if revenue_dict.get(key) is not None:
                                 revenue_dict[key] = str(revenue_dict[key])
 
@@ -197,7 +246,9 @@ def get_deals(
                     module_name=["Deals", "Tickets"],
                 )
 
-                deal_dict = {c.name: getattr(deal, c.name) for c in deal.__table__.columns}
+                deal_dict = {
+                    c.name: getattr(deal, c.name) for c in deal.__table__.columns
+                }
                 deal_dict["id"] = str(deal.id)
                 if deal.deal_owner_id:
                     deal_dict["deal_owner_id"] = str(deal.deal_owner_id)
@@ -268,6 +319,7 @@ def get_deals(
         print(e)
         raise HTTPException(status_code=500, detail="Internal Server Error")
 
+
 def create_deal(deal, db: Session, user_id, user_role):
     try:
         created_deal = Deal(
@@ -299,12 +351,20 @@ def create_deal(deal, db: Session, user_id, user_role):
         db.commit()
         db.refresh(created_deal)
         # 1. Convert the Pydantic model to a dict
-        deal_dict = deal.model_dump() 
+        deal_dict = deal.model_dump()
 
         # 2. Sanitize it with jsonable_encoder to safely convert Decimals/Dates to JSON strings/numbers
         sanitized_payload = jsonable_encoder(deal_dict)
         # Converts the incoming Pydantic schema to a clean JSON dict
-        log_action(db, user_id, user_role, "CREATED", "Deal", created_deal.id, sanitized_payload)
+        log_action(
+            db,
+            user_id,
+            user_role,
+            "CREATED",
+            "Deal",
+            created_deal.id,
+            sanitized_payload,
+        )
 
         return created_deal
     except Exception as e:
@@ -368,27 +428,22 @@ def get_deal_id(user_id: int, role: str, deal_name: str, db: Session):
 
         if allowed_owner_ids is not None:
             filters.append(Deal.deal_owner_id.in_(allowed_owner_ids))
-         #append the query-parameter
+        # append the query-parameter
         filters.append(Deal.account_name.ilike(f"{deal_name.strip()}%"))
 
-        data = db.query(Deal.id,Deal.account_name).filter(*filters)
+        data = db.query(Deal.id, Deal.account_name).filter(*filters)
 
         serialized_deals = []
 
         for deal in data:
-            revenue_dict = {
-                "id": str(deal.id),
-                "account_name": deal.account_name
-            }
+            revenue_dict = {"id": str(deal.id), "account_name": deal.account_name}
             serialized_deals.append(revenue_dict)
-
 
         return {
             "success": True,
-            "message":"Deal lookup fetched successfully",
-            "data":serialized_deals
+            "message": "Deal lookup fetched successfully",
+            "data": serialized_deals,
         }
     except Exception as e:
         print(e)
         raise HTTPException(status_code=500, detail="Internal server error")
-

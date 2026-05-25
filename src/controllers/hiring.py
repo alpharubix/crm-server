@@ -267,7 +267,9 @@ def delete_job_requirement(db: Session, jr_id: int, user_id: int, user_role: str
 
 
 def create_candidate(db: Session, data: Dict[str, Any], user_id: int, user_role: str):
-    if user_role == "executive":
+    is_hr_personnel = str(user_id) in HR_USER_IDS
+
+    if user_role == "executive" and not is_hr_personnel:
         raise HTTPException(status_code=401, detail="Unauthorized Access")
 
     # Map frontend keys to matching SQLAlchemy database columns
@@ -420,7 +422,8 @@ def update_candidate(
     user_id: int,
     user_role: str,
 ):
-    if user_role == "executive":
+    is_hr_personnel = str(user_id) in HR_USER_IDS
+    if user_role == "executive" and not is_hr_personnel:
         raise HTTPException(status_code=401, detail="Unauthorized Access")
 
     candidate = db.query(Candidate).filter(Candidate.id == candidate_id).first()

@@ -103,6 +103,7 @@ class Candidate(Base):
     phone_no = Column(String, nullable=True)
     email = Column(String, nullable=True, index=True)
     resume = Column(String, nullable=True)
+    data_source = Column(String, nullable=True)
 
     # --- Section: Education ---
     educational_qualification_ug = Column(String, nullable=True)

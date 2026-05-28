@@ -2,27 +2,27 @@ import csv
 import io
 import logging
 import math
-from datetime import datetime
-from typing import Optional
+from datetime import datetime, timezone
+from typing import Any, Dict, Optional
+
 import pandas as pd
 from fastapi import HTTPException, UploadFile
 from pymongo.synchronous.collection import Collection
 from sqlalchemy import and_, or_
-from sqlalchemy.exc import  SQLAlchemyError
-from sqlalchemy.orm import Session,selectinload, joinedload
+from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.orm import Session, joinedload, selectinload
+from sqlalchemy.orm.attributes import flag_modified
 from starlette.requests import Request
 from starlette.responses import JSONResponse
+
 from src.controllers.audit_log import log_action
 from src.controllers.auth import MANAGERID
 from src.controllers.notes import get_notes
-from src.utility.utils import get_account_headers
 from src.models.ticket import Ticket
+from src.utility.utils import get_account_headers
 
 from ..models.account import Account, AccountStatusHistory
-from ..schemas.account import AccountBase, ListAccountsResponse
-from datetime import datetime, timezone
-from typing import Any, Dict
-from sqlalchemy.orm.attributes import flag_modified
+from ..schemas.account import AccountBase
 
 
 def create_account(
@@ -31,30 +31,20 @@ def create_account(
     if db.query(Account).filter(Account.email == data.email).first():
         raise HTTPException(status_code=400, detail="Email exists")
 
-    new_account = Account(
-        first_name=data.first_name,
-        last_name=data.last_name,
-        email=data.email,
-        phone=data.phone,
-        account_name=data.account_name,
-        account_owner_id=data.account_owner_id,
-        account_status=data.account_status,
-        account_stage=data.account_stage,
-        source=data.source,
-        business_status=data.business_status,
-        distributor_code=data.distributor_code,
-        type_of_business=data.type_of_business,
-        industry=data.industry,
-        city=data.city,
-        state=data.state,
-        assignment_date=datetime.now(timezone.utc),
-        pincode=data.pincode,
-        waba_interested=data.waba_interested,
-        call_back_date_time=data.call_back_date_time,
-        custom_fields=data.custom_fields,
-        created_by_id=user_id,
-        created_time=data.created_time,
-    )
+    # 2. Convert Pydantic object entirely to primitive Python types (dicts, lists, strs)
+    # This guarantees JSONB blocks serialize correctly into PostgreSQL
+    account_data = data.model_dump()
+
+    # 3. Override system-managed parameters safely
+    account_data["created_by_id"] = user_id
+    account_data["assignment_date"] = datetime.now(timezone.utc)
+
+    # Handle incoming Pydantic datetime default quirks if needed
+    if data.created_time:
+        account_data["created_time"] = data.created_time
+
+    # 4. Dynamically unpack the dictionary into your SQLAlchemy Model
+    new_account = Account(**account_data)
 
     db.add(new_account)
     db.flush()
@@ -63,14 +53,20 @@ def create_account(
         account_id=new_account.id,
         old_status=None,
         new_status=new_account.account_status,
-        changed_by=user_id
+        changed_by=user_id,
     )
     db.add(history)
     db.commit()
     db.refresh(new_account)
 
     log_action(
-        db, user_id, user_role, "CREATED", "Account", new_account.id, data.model_dump(mode="json")
+        db,
+        user_id,
+        user_role,
+        "CREATED",
+        "Account",
+        new_account.id,
+        data.model_dump(mode="json"),
     )
 
     return new_account
@@ -161,14 +157,20 @@ def get_all_accounts(
         elif user_id not in MANAGER_EXECUTIVES_MAP:
             raise HTTPException(
                 status_code=403,
-                detail={"message": "You do not have permission to access records for this owner", "success": False},
+                detail={
+                    "message": "You do not have permission to access records for this owner",
+                    "success": False,
+                },
             )
         elif account_owner_id in MANAGER_EXECUTIVES_MAP.get(user_id):
             filters.append(Account.account_owner_id == int(account_owner_id))
         else:
             raise HTTPException(
                 status_code=403,
-                detail={"message": "You do not have permission to access records for this owner", "success": False},
+                detail={
+                    "message": "You do not have permission to access records for this owner",
+                    "success": False,
+                },
             )
 
     if single_id_request:
@@ -189,13 +191,15 @@ def get_all_accounts(
         if len(data) != 0:
             note_pairs = []
             acc: Account = data[0]
-            
+
             # Step 1: Add Parent Account to filter
             note_pairs.append({"Parent_Id.id": str(acc.id), "module": "Accounts"})
 
             # Step 2: Collect contact pairs
             for contact in acc.account_linked_contact:
-                note_pairs.append({"Parent_Id.id": str(contact.id), "module": "Contacts"})
+                note_pairs.append(
+                    {"Parent_Id.id": str(contact.id), "module": "Contacts"}
+                )
 
             # Step 3: Collect deal IDs and pairs
             deal_ids_for_tickets = []
@@ -203,7 +207,9 @@ def get_all_accounts(
                 note_pairs.append({"Parent_Id.id": str(deal.id), "module": "Deals"})
                 deal_ids_for_tickets.append(deal.id)
                 if deal.crm_deal_id:
-                    note_pairs.append({"Parent_Id.id": str(deal.crm_deal_id), "module": "Deals"})
+                    note_pairs.append(
+                        {"Parent_Id.id": str(deal.crm_deal_id), "module": "Deals"}
+                    )
 
             # Step 4: Query tickets and add to pairs
             tickets_by_deal: dict[int, list] = {}
@@ -215,8 +221,10 @@ def get_all_accounts(
                 )
                 for ticket in ticket_records:
                     # STRICTLY PAIR TICKET ID WITH TICKET MODULE
-                    note_pairs.append({"Parent_Id.id": str(ticket.id), "module": "Tickets"})
-                    
+                    note_pairs.append(
+                        {"Parent_Id.id": str(ticket.id), "module": "Tickets"}
+                    )
+
                     ticket_dict = {
                         c.name: getattr(ticket, c.name)
                         for c in ticket.__table__.columns
@@ -231,8 +239,7 @@ def get_all_accounts(
 
             # Step 6: Fetch notes with paired filters (This fixes your bug)
             acc.notes = get_notes(
-                pair_filters=note_pairs,
-                notes_collection=mongodb["Notes"]
+                pair_filters=note_pairs, notes_collection=mongodb["Notes"]
             )
 
         total_pages = math.ceil(total_data_size / limit)
@@ -249,10 +256,17 @@ def get_all_accounts(
         # Standard list view query
         data = (
             db.query(
-                Account.id, Account.account_name, Account.account_owner_id,
-                Account.account_status, Account.source, Account.type_of_business,
-                Account.industry, Account.state, Account.city,
-                Account.call_back_date_time, Account.phone,
+                Account.id,
+                Account.account_name,
+                Account.account_owner_id,
+                Account.account_status,
+                Account.source,
+                Account.type_of_business,
+                Account.industry,
+                Account.state,
+                Account.city,
+                Account.call_back_date_time,
+                Account.phone,
             )
             .filter(and_(*filters))
             .offset(offset)
@@ -270,6 +284,7 @@ def get_all_accounts(
             },
         }
 
+
 def update_account(
     db: Session, account_id: int, payload: Dict[str, Any], user_id: int, user_role: str
 ):
@@ -282,7 +297,7 @@ def update_account(
     old_owner_id = db_account.account_owner_id
 
     custom_fields_dict = dict(db_account.custom_fields or {})
-    
+
     for key, value in payload.items():
         if hasattr(db_account, key):
             if value == "" or value is None:
@@ -291,12 +306,14 @@ def update_account(
                 if isinstance(value, str):
                     try:
                         value = datetime.fromisoformat(value)
-                        
+
                         # Fix: Ensure timezone awareness for comparison to avoid TypeError
                         if value.tzinfo is None:
                             value = value.replace(tzinfo=timezone.utc)
 
-                        if key == "call_back_date_time" and value < datetime.now(timezone.utc):
+                        if key == "call_back_date_time" and value < datetime.now(
+                            timezone.utc
+                        ):
                             raise HTTPException(
                                 status_code=400,
                                 detail={"message": "Date should not be in the past"},
@@ -329,7 +346,7 @@ def update_account(
             account_id=account_id,
             old_status=old_status,
             new_status=new_status,
-            changed_by=user_id
+            changed_by=user_id,
         )
         db.add(history)
 
@@ -344,13 +361,15 @@ def update_account(
         db.rollback()
         raise HTTPException(status_code=400, detail=f"Database error: {str(e)}")
 
+
 def get_account_by_id(db: Session, account_id: int) -> Account:
     account = db.query(Account).filter(Account.id == account_id).first()
     if not account:
         raise HTTPException(status_code=404, detail="Account not found")
     return account
 
-#Account_Status_history i.e trackin of acc history by id
+
+# Account_Status_history i.e trackin of acc history by id
 def get_account_status_history(db: Session, account_id: int, page: int = 1):
     limit = 20
     offset = (page - 1) * limit
@@ -367,10 +386,10 @@ def get_account_status_history(db: Session, account_id: int, page: int = 1):
 
     if not history:
         raise HTTPException(
-            status_code=404, 
-            detail="No status history found for this account"
+            status_code=404, detail="No status history found for this account"
         )
     return history
+
 
 async def accounts_csv_update(file: UploadFile, db: Session):
     try:
@@ -490,21 +509,23 @@ async def update_accounts_based_on_csv(file, db: Session, user_id: int):
         csv_headers = {col.strip().lower() for col in (reader.fieldnames or [])}
         if account_headers - csv_headers:
             raise HTTPException(
-                status_code=400, 
-                detail=f"Header mismatch: {account_headers - csv_headers}"
+                status_code=400,
+                detail=f"Header mismatch: {account_headers - csv_headers}",
             )
 
         for row in data:
             row_number += 1
             try:
                 # Clean and identify row type
-                row = {k: (v.strip() if v and v.strip() else None) for k, v in row.items()}
+                row = {
+                    k: (v.strip() if v and v.strip() else None) for k, v in row.items()
+                }
                 is_new = not row.get("id")
 
                 # Type conversions
                 if row.get("id"):
                     row["id"] = int(row["id"])
-                
+
                 if row.get("call_back_date_time"):
                     row["call_back_date_time"] = datetime.strptime(
                         row["call_back_date_time"], "%m/%d/%Y %H:%M"
@@ -520,18 +541,26 @@ async def update_accounts_based_on_csv(file, db: Session, user_id: int):
                     row["created_by_id"] = int(user_id)
                     insertion_accounts.append(row)
                 else:
-                    updation_accounts.append({k: v for k, v in row.items() if v is not None})
+                    updation_accounts.append(
+                        {k: v for k, v in row.items() if v is not None}
+                    )
 
             except Exception as row_err:
                 error_list.append({"row": row_number, "error": str(row_err)})
 
         if not insertion_accounts and not updation_accounts:
             return JSONResponse(
-                status_code=200, 
-                content={"total_inserted": 0, "total_updated": 0, "row_errors": error_list}
+                status_code=200,
+                content={
+                    "total_inserted": 0,
+                    "total_updated": 0,
+                    "row_errors": error_list,
+                },
             )
 
-        db_result = update_and_insert_accounts(insertion_accounts, updation_accounts, db)
+        db_result = update_and_insert_accounts(
+            insertion_accounts, updation_accounts, db
+        )
         return JSONResponse(
             status_code=200,
             content={
@@ -545,6 +574,6 @@ async def update_accounts_based_on_csv(file, db: Session, user_id: int):
         raise
     except Exception as e:
         return JSONResponse(
-            status_code=500, 
-            content={"detail": f"Processing error: {str(e)}", "row_errors": error_list}
+            status_code=500,
+            content={"detail": f"Processing error: {str(e)}", "row_errors": error_list},
         )

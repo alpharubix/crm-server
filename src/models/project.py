@@ -17,6 +17,7 @@ class ProjectTypeEnum(str, enum.Enum):
     new = "new"
     upgradation = "upgradation"
     modification = "modification"
+    bug = "bug"
 
 
 class StatusEnum(str, enum.Enum):

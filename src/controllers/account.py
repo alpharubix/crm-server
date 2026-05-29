@@ -71,6 +71,7 @@ def create_account(
 
     return new_account
 
+
 def get_all_accounts(
     request: Request,
     db: Session,
@@ -296,7 +297,22 @@ def update_account(
     old_status = db_account.account_status
     old_owner_id = db_account.account_owner_id
 
+    # Track if the account name is explicitly changing before we modify the model instance
+    account_name_changed = False
+    new_account_name = payload.get("account_name")
+    if new_account_name is not None and new_account_name != db_account.account_name:
+        account_name_changed = True
+
     custom_fields_dict = dict(db_account.custom_fields or {})
+
+    # List of your JSONB columns to protect against full overwrites
+    jsonb_columns = [
+        "business_details",
+        "business_premise_address",
+        "applicant_residence_address",
+        "co_applicant_residence_address",
+        "customer_references",
+    ]
 
     for key, value in payload.items():
         if hasattr(db_account, key):
@@ -306,8 +322,6 @@ def update_account(
                 if isinstance(value, str):
                     try:
                         value = datetime.fromisoformat(value)
-
-                        # Fix: Ensure timezone awareness for comparison to avoid TypeError
                         if value.tzinfo is None:
                             value = value.replace(tzinfo=timezone.utc)
 
@@ -320,16 +334,29 @@ def update_account(
                             )
                     except Exception as e:
                         raise e
+                setattr(db_account, key, value)
+
+            # FIX: If the field is one of our JSONB dictionaries, MERGE it instead of overwriting
+            elif key in jsonb_columns:
+                current_dict = getattr(db_account, key) or {}
+                if isinstance(value, dict) and isinstance(current_dict, dict):
+                    # Shallow merge incoming keys into existing dictionary
+                    updated_dict = {**current_dict, **value}
+                    setattr(db_account, key, updated_dict)
+                    # Tell SQLAlchemy that this internal JSON dictionary was modified
+                    flag_modified(db_account, key)
+                else:
                     setattr(db_account, key, value)
             else:
                 setattr(db_account, key, value)
         else:
+            # Handle true ad-hoc custom fields falling back into custom_fields JSONB
             if value == "" or value is None:
                 custom_fields_dict[key] = None
             else:
                 custom_fields_dict[key] = value
 
-    # 2. Assignment Date Logic: Trigger only if owner ID in payload differs from DB
+    # 2. Assignment Date Logic
     if "account_owner_id" in payload:
         new_owner_val = payload["account_owner_id"]
         if new_owner_val is not None and str(new_owner_val) != str(old_owner_id):
@@ -349,6 +376,16 @@ def update_account(
             changed_by=user_id,
         )
         db.add(history)
+
+    # 4. CASCADE UPDATE TO DEALS: Keep denormalized deal names in sync
+    if account_name_changed and new_account_name:
+        from src.models.deal import (
+            Deal,  # Local import protects against dependency loops
+        )
+
+        db.query(Deal).filter(Deal.account_id == account_id).update(
+            {"account_name": new_account_name}, synchronize_session=False
+        )
 
     try:
         db.commit()

@@ -19,4 +19,5 @@ dependencies = [
     "python-multipart>=0.0.22",
     "pandas>=3.0.0",
     "starlette>=0.50.0",
+    "apscheduler>=3.11.2",
 ]

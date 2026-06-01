@@ -1,3 +1,4 @@
+import logging
 from datetime import datetime
 from typing import Optional
 from zoneinfo import ZoneInfo
@@ -5,13 +6,22 @@ from zoneinfo import ZoneInfo
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 
+from src.controllers.Background_threads import BackgroundThreadPool
+
+from ..controllers.mail import (
+    notify_project_approved,
+    notify_project_completed,
+    notify_project_pending_review,
+)
 from ..controllers.project_log import log_project_action
 from ..database import get_db
-from ..models.project import Project, ProjectComment, Task, TaskComment
+from ..models.project import Project, ProjectComment, StatusEnum, Task, TaskComment
 from ..models.project_log import ProjectLog
+from ..models.user import User
 
 IST = ZoneInfo("Asia/Kolkata")
 router = APIRouter(prefix="/projects", tags=["projects"])
+logger = logging.getLogger(__name__)
 
 
 def format_project(p) -> dict:
@@ -58,11 +68,9 @@ async def create_project(request: Request, db: Session = Depends(get_db)):
         priority=body.get("priority"),
         status=body.get("status", "pending_for_approve"),
         created_by=request.state.user_id,
-        # THIS WAS MISSING:
         approver_id=int(body["approver_id"]),
         start_date=body.get("start_date"),
         end_date=body.get("end_date"),
-        # Ensure array contains integers
         actioner_ids=[int(i) for i in body.get("actioner_ids", [])],
         project_type=body.get("project_type"),
         attachment_links=body.get("attachment_links", []),
@@ -71,6 +79,26 @@ async def create_project(request: Request, db: Session = Depends(get_db)):
     db.add(project)
     db.commit()
     db.refresh(project)
+
+    # 4. Target Trigger Update: Notify Team Members (actioner_ids) instead of just the Approver
+    if project.actioner_ids:
+        # Fetch all Team Member users and extract unique valid emails
+        team_members = db.query(User).filter(User.id.in_(project.actioner_ids)).all()
+        team_emails = list({user.email for user in team_members if user.email})
+
+        if team_emails:
+            # We pass the list to our non-blocking pool so the user doesn't face API delays
+            BackgroundThreadPool.execute_task(
+                notify_project_approved,  # Reusing your list engine function to mail the team
+                emails=team_emails,
+                project_name=project.name,
+                project_id=project.id,
+            )
+            logger.info(
+                f"Dispatched background creation alerts to team members: {team_emails}"
+            )
+
+    # 5. Audit Logging
     log_project_action(
         db,
         request.state.user_id,
@@ -221,6 +249,64 @@ async def update_project(
     project.modified_by = request.state.user_id
     db.commit()
     db.refresh(project)
+
+    # --- EMAIL NOTIFICATION TRIGGERS (Offloaded to BackgroundThreadPool) ---
+
+    # Trigger A: Project Approved (Moved to planning)
+    if project.status == StatusEnum.planning:
+        logger.info("statusenum: %s %s", project.status, StatusEnum.planning)
+        actioners = db.query(User).filter(User.id.in_(project.actioner_ids)).all()
+        emails = list({user.email for user in actioners if user.email})
+
+        if emails:
+            BackgroundThreadPool.execute_task(
+                notify_project_approved,
+                emails=emails,
+                project_name=project.name,
+                project_id=project.id,
+            )
+
+    # Trigger B: Project Pending Review
+    if project.status == StatusEnum.pending_for_review:
+        approver = db.query(User).filter(User.id == project.approver_id).first()
+
+        if approver and approver.email:
+            BackgroundThreadPool.execute_task(
+                notify_project_pending_review,
+                approver_email=approver.email,
+                approver_name=approver.full_name,
+                project_name=project.name,
+                project_id=project.id,
+            )
+
+    # Trigger C: NEW REQUIRED STATUS - Project Completed
+    # Notifies: Team Members (actioners) + Approver + Initiator (created_by)
+    if project.status == StatusEnum.completed:
+        logger.info("Project completed: %s", project.name)
+
+        # Collect distinct user IDs for all 3 target roles
+        stakeholder_ids = set()
+        if project.actioner_ids:
+            stakeholder_ids.update(project.actioner_ids)
+        if project.approver_id:
+            stakeholder_ids.add(project.approver_id)
+        if project.created_by:
+            stakeholder_ids.add(project.created_by)
+
+        # Extract unique emails from database
+        stakeholders = db.query(User).filter(User.id.in_(list(stakeholder_ids))).all()
+        notification_emails = list({u.email for u in stakeholders if u.email})
+
+        if notification_emails:
+            BackgroundThreadPool.execute_task(
+                notify_project_completed,  # Extracted to the thread pool cleanly
+                emails=notification_emails,
+                project_name=project.name,
+                project_id=project.id,
+            )
+            logger.info(f"Dispatched completion alerts to: {notification_emails}")
+
+    # 4. Audit Logging
     log_project_action(
         db,
         request.state.user_id,

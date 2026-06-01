@@ -1,3 +1,4 @@
+import logging
 import os
 from contextlib import asynccontextmanager
 
@@ -10,7 +11,12 @@ from fastapi.middleware.cors import CORSMiddleware
 load_dotenv(override=True)
 
 # 2. Local imports
+
+from apscheduler.schedulers.background import BackgroundScheduler
+
 from src.controllers.Background_threads import BackgroundThreadPool
+from src.database import SessionLocal
+from src.jobs.project_overdue import check_overdue_projects
 from src.middleware.auth import authorization
 
 # Router imports
@@ -28,15 +34,50 @@ from src.routers.notes import notes_router
 from src.routers.revenue import revenue_router
 from src.routers.tickets import tickets_router
 
-
 # 3. Handle setup during the lifespan, not on script execution
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(name)s - %(message)s"
+)
+logger = logging.getLogger(__name__)
+
+scheduler = BackgroundScheduler()
+
+
+def run_overdue_check():
+    db = SessionLocal()
+
+    try:
+        check_overdue_projects(db)
+    finally:
+        db.close()
+
+
+# app = FastAPI()
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Create tables only when the app is actively starting up
-    # Base.metadata.create_all(bind=engine)
     BackgroundThreadPool.initialize_thread_pool()
+
+    # Start scheduler
+    scheduler.add_job(
+        run_overdue_check,
+        trigger="cron",
+        hour=9,
+        minute=0,
+        id="project_overdue_job",
+        replace_existing=True,
+    )
+    if not scheduler.running:
+        scheduler.start()
+        logger.info("Overdue project scheduler started")
+
     yield
+
+    scheduler.shutdown()
     BackgroundThreadPool.shutdown()
+
+    logger.info("Scheduler shutdown complete")
 
 
 # 4. Single App initialization

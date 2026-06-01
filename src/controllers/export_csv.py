@@ -9,12 +9,12 @@ from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
 from starlette.requests import Request
 
-from ..models.account import Account
-from src.models.deal import Deal
-from src.models.user import User
-from ..controllers.auth import MANAGERID
+from src.controllers.auth import MANAGERID
 from src.controllers.Background_threads import BackgroundThreadPool
 from src.controllers.mail import send_general_email
+from src.models.account import Account
+from src.models.deal import Deal
+
 
 def export_accounts_csv(
     request: Request,
@@ -30,7 +30,6 @@ def export_accounts_csv(
     account_owner_id: Optional[int] = None,
     call_back_date_time: Optional[str] = None,
 ):
-    
 
     # --- . RBAC ---
     MANAGER_EXECUTIVES_MAP = MANAGERID().MANAGER_EXECUTIVES_MAP
@@ -48,18 +47,20 @@ def export_accounts_csv(
         filters.append(Account.account_owner_id == user_id)
 
     # --- . Block bulk export FIRST, before anything else ---
-    no_filters_applied = not any([
-        account_name,
-        account_status,
-        account_stage,
-        source,
-        industry,
-        city,
-        state,
-        phone_number,
-        account_owner_id,
-        call_back_date_time,
-    ])
+    no_filters_applied = not any(
+        [
+            account_name,
+            account_status,
+            account_stage,
+            source,
+            industry,
+            city,
+            state,
+            phone_number,
+            account_owner_id,
+            call_back_date_time,
+        ]
+    )
     # --- . Query filters ---
     if account_name:
         filters.append(Account.account_name.ilike(f"%{account_name.strip()}%"))
@@ -100,16 +101,15 @@ def export_accounts_csv(
         except ValueError:
             raise HTTPException(
                 status_code=400,
-                detail="Invalid call_back_date_time format. Use ISO format e.g. 2024-01-31T00:00:00"
+                detail="Invalid call_back_date_time format. Use ISO format e.g. 2024-01-31T00:00:00",
             )
-        
+
     count = db.query(Account.id).filter(and_(*filters) if filters else True).count()
     if count == 0:
         raise HTTPException(
-            status_code=404,
-            detail="No Accounts found for the applied filters."
+            status_code=404, detail="No Accounts found for the applied filters."
         )
-   # 5. Fetch rows — ALL columns except custom_fields (JSONB, useless in CSV)
+    # 5. Fetch rows — ALL columns except custom_fields (JSONB, useless in CSV)
     rows = (
         db.query(
             Account.id,
@@ -147,47 +147,78 @@ def export_accounts_csv(
         output = io.StringIO()
         writer = csv.writer(output)
 
-        writer.writerow([
-            "ID", "First Name", "Last Name", "Email", "Phone",
-            "Account Name", "Account Owner ID", "Account Status", "Account Stage",
-            "Source", "Business Status", "Distributor Code",
-            "Type of Business", "Industry",
-            "City", "State", "Pincode",
-            "WABA Interested", "Callback DateTime",
-            "Created Time", "Modified Time", "Assignment Date", "Created By ID",
-        ])
+        writer.writerow(
+            [
+                "ID",
+                "First Name",
+                "Last Name",
+                "Email",
+                "Phone",
+                "Account Name",
+                "Account Owner ID",
+                "Account Status",
+                "Account Stage",
+                "Source",
+                "Business Status",
+                "Distributor Code",
+                "Type of Business",
+                "Industry",
+                "City",
+                "State",
+                "Pincode",
+                "WABA Interested",
+                "Callback DateTime",
+                "Created Time",
+                "Modified Time",
+                "Assignment Date",
+                "Created By ID",
+            ]
+        )
         yield output.getvalue()
-        output.seek(0); output.truncate(0)
+        output.seek(0)
+        output.truncate(0)
 
         for row in rows:
-            writer.writerow([
-                str(row.id) if row.id else "",
-                row.first_name or "",
-                row.last_name or "",
-                row.email or "",
-                row.phone or "",
-                row.account_name or "",
-                str(row.account_owner_id) if row.account_owner_id else "",
-                row.account_status or "",
-                row.account_stage or "",
-                row.source or "",
-                row.business_status or "",
-                row.distributor_code or "",
-                row.type_of_business or "",
-                row.industry or "",
-                row.city or "",
-                row.state or "",
-                row.pincode or "",
-                str(row.waba_interested) if row.waba_interested is not None else "",
-                row.call_back_date_time.strftime("%Y-%m-%d %H:%M:%S") if row.call_back_date_time else "",
-                row.created_time.strftime("%Y-%m-%d %H:%M:%S") if row.created_time else "",
-                row.modified_time.strftime("%Y-%m-%d %H:%M:%S") if row.modified_time else "",
-                row.assignment_date.strftime("%Y-%m-%d %H:%M:%S") if row.assignment_date else "",
-                str(row.created_by_id) if row.created_by_id else "",
-            ])
+            writer.writerow(
+                [
+                    str(row.id) if row.id else "",
+                    row.first_name or "",
+                    row.last_name or "",
+                    row.email or "",
+                    row.phone or "",
+                    row.account_name or "",
+                    str(row.account_owner_id) if row.account_owner_id else "",
+                    row.account_status or "",
+                    row.account_stage or "",
+                    row.source or "",
+                    row.business_status or "",
+                    row.distributor_code or "",
+                    row.type_of_business or "",
+                    row.industry or "",
+                    row.city or "",
+                    row.state or "",
+                    row.pincode or "",
+                    str(row.waba_interested) if row.waba_interested is not None else "",
+                    row.call_back_date_time.strftime("%Y-%m-%d %H:%M:%S")
+                    if row.call_back_date_time
+                    else "",
+                    row.created_time.strftime("%Y-%m-%d %H:%M:%S")
+                    if row.created_time
+                    else "",
+                    row.modified_time.strftime("%Y-%m-%d %H:%M:%S")
+                    if row.modified_time
+                    else "",
+                    row.assignment_date.strftime("%Y-%m-%d %H:%M:%S")
+                    if row.assignment_date
+                    else "",
+                    str(row.created_by_id) if row.created_by_id else "",
+                ]
+            )
             yield output.getvalue()
-            output.seek(0); output.truncate(0)
-    #start a background thread for sending a mail in the background
+            output.seek(0)
+            output.truncate(0)
+
+    # start a background thread for sending a mail in the background
     BackgroundThreadPool.execute_task(
         intimate_user_via_mail,
         to="prathap@r1xchange.com",
@@ -199,7 +230,7 @@ def export_accounts_csv(
                 <table style="border-collapse: collapse; width: 100%; max-width: 600px;">
                     <tr>
                         <td style="padding: 8px; border: 1px solid #ddd;"><strong>Module</strong></td>
-                        <td style="padding: 8px; border: 1px solid #ddd;">{'Accounts'}</td>
+                        <td style="padding: 8px; border: 1px solid #ddd;">{"Accounts"}</td>
                     </tr>
                     <tr>
                         <td style="padding: 8px; border: 1px solid #ddd;"><strong>Role</strong></td>
@@ -225,15 +256,15 @@ def export_accounts_csv(
                 <p>Regards,</p>
                 <p><strong>System Notification Service</strong></p>
                 <p style="color: gray; font-size: 12px;">This is an automated message. Please do not reply to this email.</p>
-            """
-    ,        subject="[Data Export Alert] Account Data Export Initiated – Action Log Notification",)
+            """,
+        subject="[Data Export Alert] Account Data Export Initiated – Action Log Notification",
+    )
 
     return StreamingResponse(
         generate(),
         media_type="text/csv",
         headers={"Content-Disposition": f"attachment; filename={filename}"},
     )
-
 
 
 def export_deals_csv(
@@ -248,7 +279,9 @@ def export_deals_csv(
     deal_owner_id: Optional[int] = None,
 ):
     # 1. RBAC first
-    MANAGER_EXECUTIVES_MAP = MANAGERID.MANAGER_EXECUTIVES_MAP  # class-level, matches deals controller
+    MANAGER_EXECUTIVES_MAP = (
+        MANAGERID.MANAGER_EXECUTIVES_MAP
+    )  # class-level, matches deals controller
     user_id = int(request.state.user_id)
     role = request.state.role
 
@@ -263,10 +296,17 @@ def export_deals_csv(
         filters.append(Deal.deal_owner_id == user_id)
 
     # 2. Block bulk export
-    no_filters_applied = not any([
-        account_name, lender_name, case_status,
-        ticket_login, loan_type, type_of_case_login, deal_owner_id,
-    ])
+    no_filters_applied = not any(
+        [
+            account_name,
+            lender_name,
+            case_status,
+            ticket_login,
+            loan_type,
+            type_of_case_login,
+            deal_owner_id,
+        ]
+    )
 
     # 3. Query filters
     if account_name:
@@ -274,7 +314,7 @@ def export_deals_csv(
     if lender_name:
         filters.append(Deal.lender_name.ilike(f"%{lender_name.strip()}%"))
     if case_status:
-        filters.append(Deal.case_status.ilike(f"{case_status.strip()}%"))
+        filters.append(Deal.deal_status.ilike(f"{case_status.strip()}%"))
     if ticket_login:
         filters.append(Deal.ticket_login.ilike(f"{ticket_login.strip()}%"))
     if loan_type:
@@ -295,13 +335,12 @@ def export_deals_csv(
     count = db.query(Deal.id).filter(*filters).count()
     if count == 0:
         raise HTTPException(
-            status_code=404,
-            detail="No deals found for the applied filters."
+            status_code=404, detail="No deals found for the applied filters."
         )
     if count > 5000:
         raise HTTPException(
             status_code=403,
-            detail=f"Your filter matches {count} records. Maximum allowed is 5000. Apply more specific filters."
+            detail=f"Your filter matches {count} records. Maximum allowed is 5000. Apply more specific filters.",
         )
 
     # 5. Fetch rows — ALL columns except payment_receipt and sanction_letter
@@ -317,8 +356,8 @@ def export_deals_csv(
             Deal.type_of_login,
             Deal.type_of_case_login,
             Deal.ticket_login,
-            Deal.case_stage,
-            Deal.case_status,
+            Deal.deal_stage,
+            Deal.deal_status,
             Deal.disbursed_amount,
             Deal.sanction_amount,
             Deal.approved_amount,
@@ -362,76 +401,130 @@ def export_deals_csv(
     def generate():
         output = io.StringIO()
         writer = csv.writer(output)
-        writer.writerow([
-            "ID", "Account ID", "Account Name",
-            "Ticket ID", "Ticket Number", "Deal Type", "Loan Type",
-            "Type of Login", "Type of Case Login", "Ticket Login",
-            "Case Stage", "Case Status",
-            "Disbursed Amount", "Sanction Amount", "Approved Amount",
-            "Amount Required", "Processing Fees", "MM Charges",
-            "Insurance Amount", "PF Percentage", "Rate of Interest", "Interest Type",
-            "Deal Callback Date", "Disbursement Date", "Lender Login Date",
-            "Loan Start Date", "Loan End Date", "Targeted Disbursement Date", "Tenure",
-            "Lender Code", "Lender Name",
-            "Customer Rejection Reason", "Customer Rejection Explanation",
-            "Lender Rejection Reason", "Lender Rejection Explanation",
-            "Potential", "Product",
-            "Assignee ID", "Created By", "Modified By",
-            "Deal Owner ID", "CRM Deal ID",
-            "Created At", "Updated At",
-        ])
+        writer.writerow(
+            [
+                "ID",
+                "Account ID",
+                "Account Name",
+                "Ticket ID",
+                "Ticket Number",
+                "Deal Type",
+                "Loan Type",
+                "Type of Login",
+                "Type of Case Login",
+                "Ticket Login",
+                "Case Stage",
+                "Case Status",
+                "Disbursed Amount",
+                "Sanction Amount",
+                "Approved Amount",
+                "Amount Required",
+                "Processing Fees",
+                "MM Charges",
+                "Insurance Amount",
+                "PF Percentage",
+                "Rate of Interest",
+                "Interest Type",
+                "Deal Callback Date",
+                "Disbursement Date",
+                "Lender Login Date",
+                "Loan Start Date",
+                "Loan End Date",
+                "Targeted Disbursement Date",
+                "Tenure",
+                "Lender Code",
+                "Lender Name",
+                "Customer Rejection Reason",
+                "Customer Rejection Explanation",
+                "Lender Rejection Reason",
+                "Lender Rejection Explanation",
+                "Potential",
+                "Product",
+                "Assignee ID",
+                "Created By",
+                "Modified By",
+                "Deal Owner ID",
+                "CRM Deal ID",
+                "Created At",
+                "Updated At",
+            ]
+        )
         yield output.getvalue()
-        output.seek(0); output.truncate(0)
+        output.seek(0)
+        output.truncate(0)
 
         for row in rows:
-            writer.writerow([
-                str(row.id) if row.id else "",
-                str(row.account_id) if row.account_id else "",
-                row.account_name or "",
-                str(row.ticket_id) if row.ticket_id else "",
-                str(row.ticket_number) if row.ticket_number else "",
-                row.deal_type or "",
-                row.loan_type or "",
-                row.type_of_login or "",
-                row.type_of_case_login or "",
-                row.ticket_login or "",
-                row.case_stage or "",
-                row.case_status or "",
-                str(row.disbursed_amount) if row.disbursed_amount is not None else "",
-                str(row.sanction_amount) if row.sanction_amount is not None else "",
-                str(row.approved_amount) if row.approved_amount is not None else "",
-                str(row.amount_required) if row.amount_required is not None else "",
-                str(row.processing_fees) if row.processing_fees is not None else "",
-                str(row.mm_charges) if row.mm_charges is not None else "",
-                str(row.insurance_amount) if row.insurance_amount is not None else "",
-                str(row.pf_percentage) if row.pf_percentage is not None else "",
-                str(row.rate_of_interest) if row.rate_of_interest is not None else "",
-                row.interest_type or "",
-                row.deal_call_back_datetime.strftime("%Y-%m-%d") if row.deal_call_back_datetime else "",
-                row.disbursement_date.strftime("%Y-%m-%d") if row.disbursement_date else "",
-                row.lender_login_date.strftime("%Y-%m-%d") if row.lender_login_date else "",
-                row.loan_start_date.strftime("%Y-%m-%d") if row.loan_start_date else "",
-                row.loan_end_date.strftime("%Y-%m-%d") if row.loan_end_date else "",
-                row.targeted_disbursement_date.strftime("%Y-%m-%d") if row.targeted_disbursement_date else "",
-                str(row.tenure) if row.tenure is not None else "",
-                row.lender_code or "",
-                row.lender_name or "",
-                row.customer_rejection_reason or "",
-                row.customer_rejection_status_explanation or "",
-                row.lender_rejection_reason or "",
-                row.lender_rejection_status_explanation or "",
-                row.potential or "",
-                row.product or "",
-                str(row.assignee_id) if row.assignee_id else "",
-                str(row.created_by) if row.created_by else "",
-                str(row.modified_by) if row.modified_by else "",
-                str(row.deal_owner_id) if row.deal_owner_id else "",
-                str(row.crm_deal_id) if row.crm_deal_id else "",
-                row.created_at.strftime("%Y-%m-%d %H:%M:%S") if row.created_at else "",
-                row.updated_at.strftime("%Y-%m-%d %H:%M:%S") if row.updated_at else "",
-            ])
+            writer.writerow(
+                [
+                    str(row.id) if row.id else "",
+                    str(row.account_id) if row.account_id else "",
+                    row.account_name or "",
+                    str(row.ticket_id) if row.ticket_id else "",
+                    str(row.ticket_number) if row.ticket_number else "",
+                    row.deal_type or "",
+                    row.loan_type or "",
+                    row.type_of_login or "",
+                    row.type_of_case_login or "",
+                    row.ticket_login or "",
+                    row.case_stage or "",
+                    row.case_status or "",
+                    str(row.disbursed_amount)
+                    if row.disbursed_amount is not None
+                    else "",
+                    str(row.sanction_amount) if row.sanction_amount is not None else "",
+                    str(row.approved_amount) if row.approved_amount is not None else "",
+                    str(row.amount_required) if row.amount_required is not None else "",
+                    str(row.processing_fees) if row.processing_fees is not None else "",
+                    str(row.mm_charges) if row.mm_charges is not None else "",
+                    str(row.insurance_amount)
+                    if row.insurance_amount is not None
+                    else "",
+                    str(row.pf_percentage) if row.pf_percentage is not None else "",
+                    str(row.rate_of_interest)
+                    if row.rate_of_interest is not None
+                    else "",
+                    row.interest_type or "",
+                    row.deal_call_back_datetime.strftime("%Y-%m-%d")
+                    if row.deal_call_back_datetime
+                    else "",
+                    row.disbursement_date.strftime("%Y-%m-%d")
+                    if row.disbursement_date
+                    else "",
+                    row.lender_login_date.strftime("%Y-%m-%d")
+                    if row.lender_login_date
+                    else "",
+                    row.loan_start_date.strftime("%Y-%m-%d")
+                    if row.loan_start_date
+                    else "",
+                    row.loan_end_date.strftime("%Y-%m-%d") if row.loan_end_date else "",
+                    row.targeted_disbursement_date.strftime("%Y-%m-%d")
+                    if row.targeted_disbursement_date
+                    else "",
+                    str(row.tenure) if row.tenure is not None else "",
+                    row.lender_code or "",
+                    row.lender_name or "",
+                    row.customer_rejection_reason or "",
+                    row.customer_rejection_status_explanation or "",
+                    row.lender_rejection_reason or "",
+                    row.lender_rejection_status_explanation or "",
+                    row.potential or "",
+                    row.product or "",
+                    str(row.assignee_id) if row.assignee_id else "",
+                    str(row.created_by) if row.created_by else "",
+                    str(row.modified_by) if row.modified_by else "",
+                    str(row.deal_owner_id) if row.deal_owner_id else "",
+                    str(row.crm_deal_id) if row.crm_deal_id else "",
+                    row.created_at.strftime("%Y-%m-%d %H:%M:%S")
+                    if row.created_at
+                    else "",
+                    row.updated_at.strftime("%Y-%m-%d %H:%M:%S")
+                    if row.updated_at
+                    else "",
+                ]
+            )
             yield output.getvalue()
-            output.seek(0); output.truncate(0)
+            output.seek(0)
+            output.truncate(0)
 
     BackgroundThreadPool.execute_task(
         intimate_user_via_mail,
@@ -444,7 +537,7 @@ def export_deals_csv(
             <table style="border-collapse: collapse; width: 100%; max-width: 600px;">
                 <tr>
                     <td style="padding: 8px; border: 1px solid #ddd;"><strong>Module</strong></td>
-                    <td style="padding: 8px; border: 1px solid #ddd;">{'deals'}</td>
+                    <td style="padding: 8px; border: 1px solid #ddd;">{"deals"}</td>
                 </tr>
                 <tr>
                     <td style="padding: 8px; border: 1px solid #ddd;"><strong>Role</strong></td>
@@ -479,11 +572,10 @@ def export_deals_csv(
         headers={"Content-Disposition": f"attachment; filename={filename}"},
     )
 
-def intimate_user_via_mail(to:str,body:str,subject:str):
+
+def intimate_user_via_mail(to: str, body: str, subject: str):
     try:
-           send_general_email(to,subject,body)
-           print("Email sent successfully")
+        send_general_email(to, subject, body)
+        print("Email sent successfully")
     except Exception as e:
         print(e)
-
-

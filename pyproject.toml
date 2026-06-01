@@ -21,3 +21,6 @@ dependencies = [
     "starlette>=0.50.0",
     "apscheduler>=3.11.2",
 ]
+[[build.env]]
+name = "BP_PYTHON_VERSION"
+value = "3.13"

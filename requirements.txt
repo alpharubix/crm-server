@@ -8,6 +8,8 @@ annotated-types==0.7.0
     # via pydantic
 anyio==4.12.0
     # via starlette
+apscheduler==3.11.2
+    # via crm-backend
 bcrypt==5.0.0
     # via crm-backend
 click==8.3.1
@@ -66,7 +68,9 @@ sqlalchemy==2.0.44
     #   alembic
     #   crm-backend
 starlette==0.50.0
-    # via fastapi
+    # via
+    #   crm-backend
+    #   fastapi
 typing-extensions==4.15.0
     # via
     #   alembic
@@ -83,5 +87,8 @@ tzdata==2025.2
     # via
     #   crm-backend
     #   pandas
+    #   tzlocal
+tzlocal==5.3.1
+    # via apscheduler
 uvicorn==0.38.0
     # via crm-backend

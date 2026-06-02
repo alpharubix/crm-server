@@ -67,19 +67,23 @@ def get_tickets_list(
     if type_of_loan:
         filters.append(Ticket.type_of_loan.ilike(f"%{type_of_loan.strip()}%"))
 
-# ------------------- KANBAN VIEW PROCESSOR -------------------
+    # ------------------- KANBAN VIEW PROCESSOR -------------------
     if kanban:
         # 1. Clean up the date filters so they don't force a 30-day limit unless requested
         if created_from:
             try:
-                date_from = datetime.strptime(created_from, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+                date_from = datetime.strptime(created_from, "%Y-%m-%d").replace(
+                    tzinfo=timezone.utc
+                )
                 filters.append(Ticket.created_at >= date_from)
             except ValueError:
                 pass
         if created_to:
             try:
                 date_to = (
-                    datetime.strptime(created_to, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+                    datetime.strptime(created_to, "%Y-%m-%d").replace(
+                        tzinfo=timezone.utc
+                    )
                     + timedelta(days=1)
                     - timedelta(seconds=1)
                 )
@@ -94,7 +98,11 @@ def get_tickets_list(
             filters.append(Deal.account_name.ilike(f"%{account_name.strip()}%"))
 
         # Build the final unified query structure
-        final_query = db.query(Ticket).join(Deal, Ticket.deal_id == Deal.id).filter(and_(*filters))
+        final_query = (
+            db.query(Ticket)
+            .join(Deal, Ticket.deal_id == Deal.id)
+            .filter(and_(*filters))
+        )
 
         # 2. Get the real total count based on ALL combined filters (Can be > 200)
         total_count = final_query.count()
@@ -190,6 +198,52 @@ async def create_ticket(request: Request, db: Session = Depends(get_db)):
 
     log_action(db, user_id, user_role, "CREATED", "Ticket", ticket.id, safe_payload)
 
+    # ─── CONDITION 1 TRIGGER: TICKET CREATION NOTIFICATION ───
+    try:
+        # Fetch the Deal to identify the Deal Owner entity
+        deal_record = db.query(Deal).filter(Deal.id == int(ticket.deal_id)).first()
+        if deal_record and deal_record.deal_owner_id:
+            from src.models.user import User
+
+            deal_owner = (
+                db.query(User).filter(User.id == int(deal_record.deal_owner_id)).first()
+            )
+
+            if deal_owner and deal_owner.email:
+                recipient_emails = [deal_owner.email]
+
+                # Dynamic Supervisor Registry Mapping Lookup Loop
+                reporting_manager_id = None
+                for mgr_id, executive_ids in MANAGERID.MANAGER_EXECUTIVES_MAP.items():
+                    if deal_owner.id in executive_ids:
+                        reporting_manager_id = mgr_id
+                        break
+
+                if reporting_manager_id:
+                    manager_user = (
+                        db.query(User)
+                        .filter(User.id == int(reporting_manager_id))
+                        .first()
+                    )
+                    if manager_user and manager_user.email:
+                        recipient_emails.append(manager_user.email)
+
+                from src.controllers.Background_threads import BackgroundThreadPool
+                from src.controllers.mail import notify_ticket_created
+
+                clean_targets = list(
+                    {email.strip() for email in recipient_emails if email}
+                )
+
+                BackgroundThreadPool.execute_task(
+                    notify_ticket_created,
+                    clean_targets,
+                    deal_record.account_name or "Unknown Account",
+                    ticket.id,
+                )
+    except Exception as create_mail_err:
+        print(f"Warning: Ticket creation notification loop bypassed: {create_mail_err}")
+
     return ticket_dict
 
 
@@ -202,6 +256,9 @@ async def update_ticket(
 
     if not ticket:
         raise HTTPException(status_code=404, detail="Ticket not found")
+
+    # Capture the historical login state before the payload write loop modifies memory space
+    old_ticket_login = ticket.ticket_login
 
     body = await request.json()
 
@@ -222,6 +279,79 @@ async def update_ticket(
     db.refresh(ticket)
 
     log_action(db, user_id, user_role, "UPDATED", "Ticket", ticket.id, body)
+
+    # ─── CONDITIONS 2 & 3 TRIGGER: TICKET LOGIN FIELDS STATUS MODIFICATIONS ───
+    new_ticket_login = body.get("ticket_login")
+
+    # Fire workflow evaluation ONLY if ticket_login value is explicitly changing
+    if (
+        new_ticket_login is not None
+        and str(new_ticket_login).strip() != str(old_ticket_login).strip()
+    ):
+        try:
+            deal_record = db.query(Deal).filter(Deal.id == int(ticket.deal_id)).first()
+            if deal_record and deal_record.deal_owner_id:
+                from src.models.user import User
+
+                deal_owner = (
+                    db.query(User)
+                    .filter(User.id == int(deal_record.deal_owner_id))
+                    .first()
+                )
+
+                if deal_owner and deal_owner.email:
+                    recipient_emails = [deal_owner.email]
+
+                    # Supervisor Hierarchy Map Resolution Lookup Matrix
+                    reporting_manager_id = None
+                    for (
+                        mgr_id,
+                        executive_ids,
+                    ) in MANAGERID.MANAGER_EXECUTIVES_MAP.items():
+                        if deal_owner.id in executive_ids:
+                            reporting_manager_id = mgr_id
+                            break
+
+                    if reporting_manager_id:
+                        manager_user = (
+                            db.query(User)
+                            .filter(User.id == int(reporting_manager_id))
+                            .first()
+                        )
+                        if manager_user and manager_user.email:
+                            recipient_emails.append(manager_user.email)
+
+                    clean_targets = list(
+                        {email.strip() for email in recipient_emails if email}
+                    )
+
+                    from src.controllers.Background_threads import BackgroundThreadPool
+                    from src.controllers.mail import (
+                        notify_ticket_approved,
+                        notify_ticket_disapproved,
+                    )
+
+                    # Evaluate Condition 2: Field is modified to Approved
+                    if str(new_ticket_login).strip().lower() == "approved":
+                        BackgroundThreadPool.execute_task(
+                            notify_ticket_approved,
+                            clean_targets,
+                            ticket.lender_name,
+                            ticket.id,
+                        )
+
+                    # Evaluate Condition 3: Field is modified to Disapproved
+                    elif str(new_ticket_login).strip().lower() == "disapproved":
+                        BackgroundThreadPool.execute_task(
+                            notify_ticket_disapproved,
+                            clean_targets,
+                            ticket.lender_name,
+                            ticket.id,
+                        )
+        except Exception as update_mail_err:
+            print(
+                f"Warning: Ticket update transactional alert skipped: {update_mail_err}"
+            )
 
     return format_ticket(ticket)
 

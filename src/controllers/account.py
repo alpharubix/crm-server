@@ -18,7 +18,6 @@ from starlette.responses import JSONResponse
 from src.controllers.audit_log import log_action
 from src.controllers.auth import MANAGERID
 from src.controllers.Background_threads import BackgroundThreadPool
-from src.controllers.mail import notify_account_created
 from src.controllers.notes import get_notes
 from src.models.ticket import Ticket
 from src.utility.utils import get_account_headers
@@ -34,21 +33,14 @@ def create_account(
     if db.query(Account).filter(Account.email == data.email).first():
         raise HTTPException(status_code=400, detail="Email exists")
 
-    # 2. Convert Pydantic object entirely to primitive Python types (dicts, lists, strs)
-    # This guarantees JSONB blocks serialize correctly into PostgreSQL
     account_data = data.model_dump()
-
-    # 3. Override system-managed parameters safely
     account_data["created_by_id"] = user_id
     account_data["assignment_date"] = datetime.now(timezone.utc)
 
-    # Handle incoming Pydantic datetime default quirks if needed
     if data.created_time:
         account_data["created_time"] = data.created_time
 
-    # 4. Dynamically unpack the dictionary into your SQLAlchemy Model
     new_account = Account(**account_data)
-
     db.add(new_account)
     db.flush()
 
@@ -72,23 +64,172 @@ def create_account(
         data.model_dump(mode="json"),
     )
 
-    # send email to account owner in background
-    owner = new_account.owner  # lazy-loads from the same session
+    # --- NEW: ACCOUNT CREATED NOTIFICATION ROUTINE ---
+    owner = new_account.owner
     if owner and owner.email:
-        creator = db.query(User).filter(User.id == user_id).first()
-        print("creator details", creator)
+        notification_emails = [owner.email]
+
+        # Look up Reporting Manager via your class dictionary mapping configuration
+        MANAGER_EXECUTIVES_MAP = MANAGERID().MANAGER_EXECUTIVES_MAP
+        reporting_manager_id = None
+
+        # Traverse map keys (managers) to find which array contains this owner's ID
+        for mgr_id, executive_ids in MANAGER_EXECUTIVES_MAP.items():
+            if owner.id in executive_ids:
+                reporting_manager_id = mgr_id
+                break
+
+        if reporting_manager_id:
+            manager_user = (
+                db.query(User).filter(User.id == reporting_manager_id).first()
+            )
+            if manager_user and manager_user.email:
+                notification_emails.append(manager_user.email)
+
+        # Offload safely into your Background Thread Pool
+        from src.controllers.mail import notify_account_assigned
+
         BackgroundThreadPool.execute_task(
-            notify_account_created,
-            owner.email,
+            notify_account_assigned,
+            list(set(notification_emails)),  # Duplication filtering safe safeguard
             owner.full_name,
             new_account.account_name,
             new_account.id,
-            new_account.account_status,
-            new_account.account_stage,
-            creator.full_name if creator else "CRM System",
         )
 
     return new_account
+
+
+def update_account(
+    db: Session, account_id: int, payload: Dict[str, Any], user_id: int, user_role: str
+):
+    db_account = db.query(Account).filter(Account.id == account_id).first()
+    if not db_account:
+        raise HTTPException(status_code=404, detail={"msg": "Account not found"})
+
+    old_status = db_account.account_status
+    old_owner_id = db_account.account_owner_id
+
+    account_name_changed = False
+    new_account_name = payload.get("account_name")
+    if new_account_name is not None and new_account_name != db_account.account_name:
+        account_name_changed = True
+
+    custom_fields_dict = dict(db_account.custom_fields or {})
+    jsonb_columns = [
+        "business_details",
+        "business_premise_address",
+        "applicant_residence_address",
+        "co_applicant_residence_address",
+        "customer_references",
+    ]
+
+    for key, value in payload.items():
+        if hasattr(db_account, key):
+            if value == "" or value is None:
+                setattr(db_account, key, None)
+            elif "time" in key or "date" in key:
+                if isinstance(value, str):
+                    try:
+                        value = datetime.fromisoformat(value)
+                        if value.tzinfo is None:
+                            value = value.replace(tzinfo=timezone.utc)
+                        if key == "call_back_date_time" and value < datetime.now(
+                            timezone.utc
+                        ):
+                            raise HTTPException(
+                                status_code=400,
+                                detail={"message": "Date should not be in the past"},
+                            )
+                    except Exception as e:
+                        raise e
+                setattr(db_account, key, value)
+            elif key in jsonb_columns:
+                current_dict = getattr(db_account, key) or {}
+                if isinstance(value, dict) and isinstance(current_dict, dict):
+                    updated_dict = {**current_dict, **value}
+                    setattr(db_account, key, updated_dict)
+                    flag_modified(db_account, key)
+                else:
+                    setattr(db_account, key, value)
+            else:
+                setattr(db_account, key, value)
+        else:
+            if value == "" or value is None:
+                custom_fields_dict[key] = None
+            else:
+                custom_fields_dict[key] = value
+
+    # Track ownership alterations explicitly before committing changes
+    is_reassigned = False
+    new_owner_id = payload.get("account_owner_id")
+    if new_owner_id is not None and str(new_owner_id) != str(old_owner_id):
+        db_account.assignment_date = datetime.now(timezone.utc)
+        is_reassigned = True
+
+    db_account.custom_fields = custom_fields_dict
+    flag_modified(db_account, "custom_fields")
+    db_account.modified_by_id = user_id
+
+    new_status = db_account.account_status
+    if new_status != old_status:
+        history = AccountStatusHistory(
+            account_id=account_id,
+            old_status=old_status,
+            new_status=new_status,
+            changed_by=user_id,
+        )
+        db.add(history)
+
+    if account_name_changed and new_account_name:
+        from src.models.deal import Deal
+
+        db.query(Deal).filter(Deal.account_id == account_id).update(
+            {"account_name": new_account_name}, synchronize_session=False
+        )
+
+    try:
+        db.commit()
+        db.refresh(db_account)
+        log_action(db, user_id, user_role, "UPDATED", "Account", account_id, payload)
+
+        # --- NEW: ACCOUNT REASSIGNMENT TRIGGER ROUTINE ---
+        if is_reassigned:
+            new_owner = db.query(User).filter(User.id == int(new_owner_id)).first()
+            if new_owner and new_owner.email:
+                reassign_emails = [new_owner.email]
+
+                # Fetch reporting manager mapping for the new owner assignment configuration
+                MANAGER_EXECUTIVES_MAP = MANAGERID().MANAGER_EXECUTIVES_MAP
+                reporting_manager_id = None
+                for mgr_id, executive_ids in MANAGER_EXECUTIVES_MAP.items():
+                    if new_owner.id in executive_ids:
+                        reporting_manager_id = mgr_id
+                        break
+
+                if reporting_manager_id:
+                    manager_user = (
+                        db.query(User).filter(User.id == reporting_manager_id).first()
+                    )
+                    if manager_user and manager_user.email:
+                        reassign_emails.append(manager_user.email)
+
+                from src.controllers.mail import notify_account_assigned
+
+                BackgroundThreadPool.execute_task(
+                    notify_account_assigned,
+                    list(set(reassign_emails)),
+                    new_owner.full_name,
+                    db_account.account_name,
+                    db_account.id,
+                )
+
+        return db_account
+    except HTTPException as e:
+        raise e
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=f"Database error: {str(e)}")
 
 
 def get_all_accounts(
@@ -303,119 +444,6 @@ def get_all_accounts(
                 "data_size": total_data_size,
             },
         }
-
-
-def update_account(
-    db: Session, account_id: int, payload: Dict[str, Any], user_id: int, user_role: str
-):
-    db_account = db.query(Account).filter(Account.id == account_id).first()
-    if not db_account:
-        raise HTTPException(status_code=404, detail={"msg": "Account not found"})
-
-    # 1. Capture old values before changes
-    old_status = db_account.account_status
-    old_owner_id = db_account.account_owner_id
-
-    # Track if the account name is explicitly changing before we modify the model instance
-    account_name_changed = False
-    new_account_name = payload.get("account_name")
-    if new_account_name is not None and new_account_name != db_account.account_name:
-        account_name_changed = True
-
-    custom_fields_dict = dict(db_account.custom_fields or {})
-
-    # List of your JSONB columns to protect against full overwrites
-    jsonb_columns = [
-        "business_details",
-        "business_premise_address",
-        "applicant_residence_address",
-        "co_applicant_residence_address",
-        "customer_references",
-    ]
-
-    for key, value in payload.items():
-        if hasattr(db_account, key):
-            if value == "" or value is None:
-                setattr(db_account, key, None)
-            elif "time" in key or "date" in key:
-                if isinstance(value, str):
-                    try:
-                        value = datetime.fromisoformat(value)
-                        if value.tzinfo is None:
-                            value = value.replace(tzinfo=timezone.utc)
-
-                        if key == "call_back_date_time" and value < datetime.now(
-                            timezone.utc
-                        ):
-                            raise HTTPException(
-                                status_code=400,
-                                detail={"message": "Date should not be in the past"},
-                            )
-                    except Exception as e:
-                        raise e
-                setattr(db_account, key, value)
-
-            # FIX: If the field is one of our JSONB dictionaries, MERGE it instead of overwriting
-            elif key in jsonb_columns:
-                current_dict = getattr(db_account, key) or {}
-                if isinstance(value, dict) and isinstance(current_dict, dict):
-                    # Shallow merge incoming keys into existing dictionary
-                    updated_dict = {**current_dict, **value}
-                    setattr(db_account, key, updated_dict)
-                    # Tell SQLAlchemy that this internal JSON dictionary was modified
-                    flag_modified(db_account, key)
-                else:
-                    setattr(db_account, key, value)
-            else:
-                setattr(db_account, key, value)
-        else:
-            # Handle true ad-hoc custom fields falling back into custom_fields JSONB
-            if value == "" or value is None:
-                custom_fields_dict[key] = None
-            else:
-                custom_fields_dict[key] = value
-
-    # 2. Assignment Date Logic
-    if "account_owner_id" in payload:
-        new_owner_val = payload["account_owner_id"]
-        if new_owner_val is not None and str(new_owner_val) != str(old_owner_id):
-            db_account.assignment_date = datetime.now(timezone.utc)
-
-    db_account.custom_fields = custom_fields_dict
-    flag_modified(db_account, "custom_fields")
-    db_account.modified_by_id = user_id
-
-    # 3. Status History
-    new_status = db_account.account_status
-    if new_status != old_status:
-        history = AccountStatusHistory(
-            account_id=account_id,
-            old_status=old_status,
-            new_status=new_status,
-            changed_by=user_id,
-        )
-        db.add(history)
-
-    # 4. CASCADE UPDATE TO DEALS: Keep denormalized deal names in sync
-    if account_name_changed and new_account_name:
-        from src.models.deal import (
-            Deal,  # Local import protects against dependency loops
-        )
-
-        db.query(Deal).filter(Deal.account_id == account_id).update(
-            {"account_name": new_account_name}, synchronize_session=False
-        )
-
-    try:
-        db.commit()
-        db.refresh(db_account)
-        log_action(db, user_id, user_role, "UPDATED", "Account", account_id, payload)
-        return db_account
-    except HTTPException as e:
-        raise e
-    except Exception as e:
-        db.rollback()
-        raise HTTPException(status_code=400, detail=f"Database error: {str(e)}")
 
 
 def get_account_by_id(db: Session, account_id: int) -> Account:

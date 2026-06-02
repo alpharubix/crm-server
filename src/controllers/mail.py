@@ -243,3 +243,125 @@ def notify_project_completed(emails: list, project_name: str, project_id: int):
     send_general_email_list(
         to=emails, subject=f"Project Completed: {project_name}", body=html
     )
+
+
+def notify_account_assigned(
+    recipients_list: list, owner_name: str, account_name: str, account_id: int
+):
+    """
+    Sends the official assignment notification alert to the
+    Account Owner and their corresponding Reporting Manager.
+    """
+    html = f"""
+    <p>Dear {owner_name},</p>
+    
+    <p>A new record under the module "<strong>Accounts</strong>" for "<strong>{account_name}</strong>" has been assigned to you via CRM system, please do login into the system and check for the details.</p>
+    
+    <p><a href="https://r1xchange-crm.vercel.app/accounts/{account_id}" style="background-color: #28a745; color: white; padding: 8px 15px; text-decoration: none; border-radius: 4px; display: inline-block;">Open Assigned Account</a></p>
+    
+    <br/>
+    <p>Thanks,</p>
+    <p><strong>CRM Data Administrator</strong></p>
+    <p style="color: gray; font-size: 11px;">This is an automated system message. Please do not reply directly.</p>
+    """
+
+    send_general_email_list(
+        to=recipients_list, subject=f"New Account Assigned: {account_name}", body=html
+    )
+
+
+def notify_deal_created_approval(
+    recipients_list: list, account_name: str, deal_id: int
+):
+    """
+    Sends an approval request alert to the Reporting Manager and
+    the Banking Team whenever a single new Deal record is created.
+    """
+    html = f"""
+    <p>Dear Banking Team / Reporting Manager,</p>
+    
+    <p>A new Deal is created under the "<strong>{account_name}</strong>", Kindly review the request and provide approval for lender login.</p>
+    
+    <p><a href="https://r1xchange-crm.vercel.app/deals/{deal_id}" style="background-color: #007bff; color: white; padding: 8px 15px; text-decoration: none; border-radius: 4px; display: inline-block;">Review Deal Profile</a></p>
+    
+    <br/>
+    <p>Thanks,</p>
+    <p><strong>CRM Data Administrator</strong></p>
+    <p style="color: gray; font-size: 11px;">This is an automated system message. Please do not reply directly to this email.</p>
+    """
+
+    send_general_email_list(
+        to=recipients_list,
+        subject=f"New Deal Created - Approval Required: {account_name}",
+        body=html,
+    )
+
+
+def notify_ticket_created(emails: list, account_name: str, ticket_id: int):
+    html = f"""
+    <p>Dear Deal Owner / Reporting Manager,</p>
+    <p>A new Ticket is created under the "<strong>{account_name}</strong>" module and has been assigned to the Ticket Owner.</p>
+    <p><a href="https://r1xchange-crm.vercel.app/tickets/{ticket_id}" style="background-color: #007bff; color: white; padding: 8px 15px; text-decoration: none; border-radius: 4px; display: inline-block;">Open Ticket Profile</a></p>
+    <br/>
+    <p>Thanks,</p>
+    <p><strong>CRM Data Administrator</strong></p>
+    """
+    send_general_email_list(
+        to=emails, subject=f"New Ticket Created: {account_name}", body=html
+    )
+
+
+def notify_ticket_approved(emails: list, lender_name: str, ticket_id: int):
+    html = f"""
+    <p>Dear Deal Owner / Reporting Manager,</p>
+    <p>Your ticket created has been <strong>Approved</strong> by the banking team and will be logged with lender: <strong>{lender_name or "N/A"}</strong>.</p>
+    <p><a href="https://r1xchange-crm.vercel.app/tickets/{ticket_id}" style="background-color: #28a745; color: white; padding: 8px 15px; text-decoration: none; border-radius: 4px; display: inline-block;">View Approved Ticket</a></p>
+    <br/>
+    <p>Thanks,</p>
+    <p><strong>CRM Data Administrator</strong></p>
+    """
+    send_general_email_list(to=emails, subject="Ticket - Approved", body=html)
+
+
+def notify_ticket_disapproved(emails: list, lender_name: str, ticket_id: int):
+    html = f"""
+    <p>Dear Deal Owner / Reporting Manager,</p>
+    <p>Your ticket created has been <strong style="color: red;">Disapproved</strong> by the banking team and will be logged with lender: <strong>{lender_name or "N/A"}</strong>.</p>
+    <p><a href="https://r1xchange-crm.vercel.app/tickets/{ticket_id}" style="background-color: #dc3545; color: white; padding: 8px 15px; text-decoration: none; border-radius: 4px; display: inline-block;">View Ticket Details</a></p>
+    <br/>
+    <p>Thanks,</p>
+    <p><strong>CRM Data Administrator</strong></p>
+    """
+    send_general_email_list(to=emails, subject="Ticket - Disapproved", body=html)
+
+
+def notify_document_submitted(
+    emails: list, deal_name: str, module_name: str, doc_id: int
+):
+    html = f"""
+    <p>Dear Banking Team / Reporting Manager,</p>
+    <p>A new document has been <strong>submitted</strong> under the Deal "<strong>{deal_name}</strong>" under the Module "<strong>{module_name or "N/A"}</strong>".</p>
+    <p><a href="https://r1xchange-crm.vercel.app/deals/documents/{doc_id}" style="background-color: #28a745; color: white; padding: 8px 15px; text-decoration: none; border-radius: 4px; display: inline-block;">Review Submitted Document</a></p>
+    <br/>
+    <p>Thanks,</p>
+    <p><strong>CRM Data Administrator</strong></p>
+    """
+    send_general_email_list(
+        to=emails, subject=f"Document submitted - {deal_name}", body=html
+    )
+
+
+def notify_document_required(
+    emails: list, deal_name: str, module_name: str, doc_id: int
+):
+    html = f"""
+    <p>Dear Deal Owner,</p>
+    <p>A new document is <strong>required</strong> under the Deal "<strong>{deal_name}</strong>" under the Module "<strong>{module_name or "N/A"}</strong>". Please login to upload the requested asset.</p>
+    <p><a href="https://r1xchange-crm.vercel.app/deals/documents/{doc_id}" style="background-color: #dc3545; color: white; padding: 8px 15px; text-decoration: none; border-radius: 4px; display: inline-block;">View Requested Document</a></p>
+    <br/>
+    <p>Thanks,</p>
+    <p><strong>CRM Data Administrator</strong></p>
+    """
+    send_general_email_list(
+        to=emails, subject=f"Document Required - {deal_name}", body=html
+    )

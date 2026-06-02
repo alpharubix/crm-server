@@ -1,10 +1,11 @@
-from fastapi import HTTPException, status
+from fastapi import HTTPException
 from sqlalchemy.orm import Session
-from starlette.responses import JSONResponse, Response
+from starlette.responses import JSONResponse
 
 from src.models.user import User
 from src.schemas.authentication import Login
 from src.utility.utils import get_jwt_token, is_password_correct
+
 
 def validate_login(body: Login, db: Session):
     email = body.email
@@ -34,7 +35,7 @@ def validate_login(body: Login, db: Session):
                     httponly=True,
                     secure=True,
                     samesite="none",
-                    max_age=60 * 60 * 24 * 30  # 30 days
+                    max_age=60 * 60 * 24 * 30,  # 30 days
                 )
                 return response
     except HTTPException as error:
@@ -59,6 +60,7 @@ class MANAGERID:
             3899927000004429017,  # Sandeep
             3899927000004808001,  # Ayush
             3899927000007673012,  # Honappa
+            3899927000000795843,  # Prashanth
             3899927000005114004,  # Manjunath
             3899927000005114020,  # Digamber
             3899927000005965050,  # Sahil
@@ -77,6 +79,7 @@ class MANAGERID:
             3899927000004429017,  # Sandeep
             3899927000004808001,  # Ayush
             3899927000007673012,  # Honappa
+            3899927000000795843,  # Prashanth
             3899927000005114004,  # Manjunath
             3899927000005114020,  # Digamber
             3899927000005965050,  # Sahil
@@ -88,12 +91,13 @@ class MANAGERID:
             3899927000000498931,  # Karthik H M
             3899927000000647914,  # Prajwal G P
             3899927000000208140,  # Shivaraj P N
-            3899927000000488938,  # Nagaraj 
+            3899927000000488938,  # Nagaraj
             3899927000005114050,  # sutapa
             3899927000005965018,  # Arjun
             3899927000004429017,  # Sandeep
             3899927000004808001,  # Ayush
             3899927000007673012,  # Honappa
+            3899927000000795843,  # Prashanth
             3899927000005114004,  # Manjunath
             3899927000005114020,  # Digamber
             3899927000005965050,  # Sahil
@@ -109,15 +113,16 @@ class MANAGERID:
         3899927000000851906: [
             3899927000000851906,  # Prathap
             3899927000007673012,  # Honappa
+            3899927000000795843,  # Prashanth
             3899927000000452950,  # Vinod
         ],
-        # Nagaraj 
-        3899927000000488938 :[
+        # Nagaraj
+        3899927000000488938: [
             3899927000000240595,  # Chiranjeevi B S
             3899927000000498931,  # Karthik H M
             3899927000000647914,  # Prajwal G P
             3899927000000208140,  # Shivaraj P N
-            3899927000000488938,  # Nagaraj 
+            3899927000000488938,  # Nagaraj
         ],
         # Pranay
         3899927000000650180: [
@@ -130,6 +135,7 @@ class MANAGERID:
             3899927000004429017,  # Sandeep
             3899927000004808001,  # Ayush
             3899927000007673012,  # Honappa
+            3899927000000795843,  # Prashanth
             3899927000005114004,  # Manjunath
             3899927000005114020,  # Digamber
             3899927000005965050,  # Sahil
@@ -149,7 +155,8 @@ class MANAGERID:
         # manager_id: [executive_ids]
     }
 
-users = {  #users for fast lookup
+
+users = {  # users for fast lookup
     3899927000003497001: "Sudha S",
     3899927000004429001: "Somasundaram S",
     3899927000005114034: "Mamatha Rani",
@@ -180,16 +187,17 @@ users = {  #users for fast lookup
     3899927000000318361: "Namrata Srivastava",
     3899927000000201013: "Anslem Prathap",
     3899927000005965002: "Subhasini T S",
-    3899927000000615348: 'Ashok M',
-    3899927000000964875: 'Suraj Gupta',
-    3899927000000882594: 'Myisa Beiucy',
-    3899927000000723465: 'Kaveri Metri',
-    3899927000000488938: 'Nagaraj Hodmany',
-    3899927000000208140: 'Shivaraj P N',
-    3899927000000647914: 'Prajwal G P',
-    3899927000000498931: 'Karthik H M',
-    3899927000000240595: 'Chiranjeevi B S',
-    3899927000000319812: 'Ashwini R',
-    3899927000000221552: 'Sarada M',
-    3899927000000650180: 'Pranay Kumar'
+    3899927000000615348: "Ashok M",
+    3899927000000964875: "Suraj Gupta",
+    3899927000000882594: "Myisa Beiucy",
+    3899927000000723465: "Kaveri Metri",
+    3899927000000488938: "Nagaraj Hodmany",
+    3899927000000208140: "Shivaraj P N",
+    3899927000000647914: "Prajwal G P",
+    3899927000000498931: "Karthik H M",
+    3899927000000240595: "Chiranjeevi B S",
+    3899927000000319812: "Ashwini R",
+    3899927000000221552: "Sarada M",
+    3899927000000650180: "Pranay Kumar",
+    3899927000000795843: "Prashanth",
 }

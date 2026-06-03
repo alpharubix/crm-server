@@ -3,7 +3,7 @@ from datetime import date, datetime, timedelta, timezone
 
 from fastapi import HTTPException
 from fastapi.encoders import jsonable_encoder
-from sqlalchemy import and_
+from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session, selectinload
 
 from src.controllers.audit_log import log_action
@@ -21,8 +21,8 @@ def get_deals(
     deal_id: int | None = None,
     account_name: str | None = None,
     deal_status: str | None = None,
-    loan_type: str | None = None,
-    deal_owner_id: int | None = None,
+    loan_type: list[str] | None = None,
+    deal_owner_id: list[int] | None = None,
     lender_name: str | None = None,
     lender_login_type: str | None = None,
     ticket_login: str | None = None,
@@ -62,9 +62,14 @@ def get_deals(
         if deal_status:
             filters.append(Deal.deal_status.ilike(f"%{deal_status.strip()}%"))
         if loan_type:
-            filters.append(Deal.loan_type.ilike(f"%{loan_type.strip()}%"))
+            loan_types = loan_type if isinstance(loan_type, list) else [loan_type]
+            print("FILTERING BY:", loan_types)  # check this
+            filters.append(
+                or_(*[Deal.loan_type.ilike(lt.strip()) for lt in loan_types])
+            )
         if deal_owner_id:
-            filters.append(Deal.deal_owner_id == deal_owner_id)
+            print("Fitler - ", deal_owner_id)
+            filters.append(Deal.deal_owner_id.in_(deal_owner_id))
         if lender_name:
             filters.append(Deal.lender_name.ilike(f"%{lender_name.strip()}%"))
         if lender_login_type:

@@ -1,10 +1,15 @@
 from typing import Any, Dict
 
-from fastapi import APIRouter, Body, Depends, HTTPException
+from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from starlette.requests import Request
 
-from src.controllers.deals import create_deal, get_deals, update_deal_based_on_id,get_deal_id
+from src.controllers.deals import (
+    create_deal,
+    get_deal_id,
+    get_deals,
+    update_deal_based_on_id,
+)
 from src.database import get_db, get_mongodb
 from src.schemas.deals import DealCreationBody, DealListResponse, DealSchema
 
@@ -22,8 +27,8 @@ def get_deals_list(
     page: int = 1,
     deal_id: int | None = None,
     account_name: str | None = None,
-    loan_type: str | None = None,
-    deal_owner_id: int | None = None,
+    loan_type: list[str] | None = Query(default=None),
+    deal_owner_id: list[int] | None = Query(default=None),
     case_status: str | None = None,
     kanban: bool = False,
     created_from: str | None = None,
@@ -84,11 +89,13 @@ async def update_deal(
         payload=payload,
         db=db,
     )
+
+
 @deals_router.get("/hot-lookup")
-def deal_hot_lookup(request: Request, deal_name: str,db: Session = Depends(get_db)):
+def deal_hot_lookup(request: Request, deal_name: str, db: Session = Depends(get_db)):
     try:
         user_id = request.state.user_id
-        role=request.state.role
+        role = request.state.role
         return get_deal_id(user_id=int(user_id), role=role, deal_name=deal_name, db=db)
     except HTTPException as e:
         raise e

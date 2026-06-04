@@ -212,6 +212,7 @@ def get_deals(
                     for key in (
                         "id",
                         "deal_id",
+                        "account_id",
                         "created_by",
                         "modified_by",
                         "partner_code",

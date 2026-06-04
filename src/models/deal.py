@@ -47,8 +47,8 @@ class Deal(Base):
     processing_fees = Column(Numeric(15, 2), nullable=True)
     mm_charges = Column(Numeric(15, 2), nullable=True)
     insurance_amount = Column(Numeric(15, 2), nullable=True)
-    pf_percentage = Column(Numeric(5, 2), nullable=True)
-    rate_of_interest = Column(Numeric(5, 2), nullable=True)
+    pf_percentage = Column(Numeric(15, 2), nullable=True)
+    rate_of_interest = Column(Numeric(15, 2), nullable=True)
     interest_type = Column(String(50), nullable=True)
 
     # Dates

@@ -148,7 +148,7 @@ class DealCreationBody(BaseModel):
     # Primary Key
     id: Optional[int] = None
     # Relationship
-    account_id: int  # ← str → int
+    account_id: str
 
     # Deal & Ticket Info
     ticket_id: Optional[int] = None
@@ -220,7 +220,6 @@ class DealCreationBody(BaseModel):
     # ---- ID Validators ----
     @field_validator(
         "id",
-        "account_id",
         "ticket_id",
         "ticket_number",
         "assignee_id",

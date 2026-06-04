@@ -20,9 +20,12 @@ tickets_router = APIRouter(prefix="/tickets", tags=["tickets"])
 # Helper function to format the database model into a dictionary
 def format_ticket(t: Ticket) -> dict:
     data = {c.name: getattr(t, c.name) for c in t.__table__.columns}
-    for key in ("id", "deal_id", "created_by", "modified_by", "partner_code"):
+    for key in ("id", "deal_id", "account_id", "created_by", "modified_by", "partner_code"):
         if data.get(key) is not None:
             data[key] = str(data[key])
+    
+    # Ensure account_name is always included in the returned ticket dict
+    data["account_name"] = t.account.account_name if t.account else (t.deal.account_name if t.deal else "-")
     return data
 
 
@@ -108,14 +111,13 @@ def get_tickets_list(
         total_count = final_query.count()
 
         # 3. Fetch the data, but CAP it at 200 items max directly in the database
-        tickets = final_query.options(selectinload(Ticket.deal)).limit(200).all()
+        tickets = final_query.options(selectinload(Ticket.deal), selectinload(Ticket.account)).limit(200).all()
 
         # 4. Group your dataset by ticket status
         grouped_data = {}
         for t in tickets:
             status = t.ticket_status or "No Status"
             ticket_dict = format_ticket(t)
-            ticket_dict["account_name"] = t.deal.account_name if t.deal else "-"
             ticket_dict["deal_owner_id"] = (
                 str(t.deal.deal_owner_id) if t.deal and t.deal.deal_owner_id else None
             )
@@ -138,7 +140,7 @@ def get_tickets_list(
         query = query.filter(Deal.account_name.ilike(f"%{account_name.strip()}%"))
 
     total = query.count()
-    tickets = query.order_by(Ticket.created_at.desc()).offset(offset).limit(limit).all()
+    tickets = query.options(selectinload(Ticket.deal), selectinload(Ticket.account)).order_by(Ticket.created_at.desc()).offset(offset).limit(limit).all()
 
     return {
         "data": [format_ticket(t) for t in tickets],
@@ -181,6 +183,9 @@ async def create_ticket(request: Request, db: Session = Depends(get_db)):
         "interest_type",
         "lender_rejection_reason",
         "lender_rejection_status_explanation",
+        "account_id",
+        "customer_rejection_reason",
+        "customer_rejection_status_explanation",
     }
 
     filtered_body = {k: v for k, v in body.items() if k in allowed_fields}

@@ -1,4 +1,4 @@
-from sqlalchemy import (BigInteger, Column, Date, Integer, Numeric, String, Text, DateTime, func, ForeignKey)
+from sqlalchemy import (BigInteger, Column, Date, Integer, Numeric, String, Text, DateTime, func, ForeignKey, BIGINT)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship
 from ..database import Base
@@ -10,6 +10,8 @@ class Ticket(Base):
     id = Column(BigInteger, primary_key=True, autoincrement=True)
     deal_id = Column(BigInteger, ForeignKey("deals.id"), nullable=False)
     deal = relationship("Deal", back_populates="tickets")
+    account_id = Column(BIGINT, ForeignKey("accounts.id"), index=True)
+    account = relationship("Account", back_populates="tickets")
 
     # Ticket Information
     loan_account_status = Column(String(100))
@@ -30,17 +32,19 @@ class Ticket(Base):
     sanction_amount = Column(Numeric(15, 2))
     processing_fees = Column(Numeric(15, 2))
     disbursed_amount = Column(Numeric(15, 2))
-    pf_percentage = Column(Numeric(5, 2))
+    pf_percentage = Column(Numeric(8, 2))
     tenure = Column(Integer)
     insurance_amount = Column(Numeric(15, 2))
     loan_start_date = Column(Date)
-    rate_of_interest = Column(Numeric(5, 2))
+    rate_of_interest = Column(Numeric(8, 2))
     loan_end_date = Column(Date)
     interest_type = Column(String(50))
 
     # Rejection Status
     lender_rejection_reason = Column(JSONB) # Multi-select picklist
     lender_rejection_status_explanation = Column(Text)
+    customer_rejection_reason = Column(String(150), nullable=True)
+    customer_rejection_status_explanation = Column(Text, nullable=True)
 
     # Audit & Tracking
     created_by = Column(BigInteger)

@@ -27,6 +27,9 @@ class TicketCreationBody(BaseModel):
     rate_of_interest: Optional[float] = None
     loan_end_date: Optional[date] = None
     interest_type: Optional[str] = None
+    account_id: Optional[str] = None
+    customer_rejection_reason: Optional[str] = None
+    customer_rejection_status_explanation: Optional[str] = None
 
 class TicketSchema(TicketCreationBody):
     id: int

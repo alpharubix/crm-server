@@ -66,6 +66,8 @@ class Account(Base):
     )
     assignment_date = Column(DateTime(timezone=False), nullable=True)
 
+    tickets = relationship("Ticket", back_populates="account")
+
     # Self-referencing Foreign Keys
     created_by_id = Column(BIGINT, ForeignKey("users.id"), nullable=True)
     created_by = relationship(

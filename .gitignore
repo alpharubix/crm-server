@@ -12,3 +12,5 @@ crm/
 
 .env*
 zoho-crm-migration
+
+db.sql

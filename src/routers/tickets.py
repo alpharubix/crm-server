@@ -1,3 +1,4 @@
+import math
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -20,12 +21,26 @@ tickets_router = APIRouter(prefix="/tickets", tags=["tickets"])
 # Helper function to format the database model into a dictionary
 def format_ticket(t: Ticket) -> dict:
     data = {c.name: getattr(t, c.name) for c in t.__table__.columns}
-    for key in ("id", "deal_id", "account_id", "created_by", "modified_by", "partner_code"):
+    for key in (
+        "id",
+        "deal_id",
+        "account_id",
+        "created_by",
+        "modified_by",
+        "partner_code",
+    ):
         if data.get(key) is not None:
             data[key] = str(data[key])
-    
+
     # Ensure account_name is always included in the returned ticket dict
-    data["account_name"] = t.account.account_name if t.account else (t.deal.account_name if t.deal else "-")
+    data["account_name"] = (
+        t.account.account_name
+        if t.account
+        else (t.deal.account_name if t.deal else "-")
+    )
+    data["deal_owner_id"] = (
+        str(t.deal.deal_owner_id) if t.deal and t.deal.deal_owner_id else None
+    )
     return data
 
 
@@ -70,81 +85,123 @@ def get_tickets_list(
     if type_of_loan:
         filters.append(Ticket.type_of_loan.ilike(f"%{type_of_loan.strip()}%"))
 
-    # ------------------- KANBAN VIEW PROCESSOR -------------------
+    # ------------------- APPLY GLOBAL FILTERS -------------------
+    # Dates
+    if created_from:
+        try:
+            date_from = datetime.strptime(created_from, "%Y-%m-%d").replace(
+                tzinfo=timezone.utc
+            )
+            filters.append(Ticket.created_at >= date_from)
+        except ValueError:
+            pass
+    if created_to:
+        try:
+            date_to = (
+                datetime.strptime(created_to, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+                + timedelta(days=1)
+                - timedelta(seconds=1)
+            )
+            filters.append(Ticket.created_at <= date_to)
+        except ValueError:
+            pass
+
+    if lender_login_from:
+        try:
+            d_from = datetime.strptime(lender_login_from, "%Y-%m-%d").date()
+            filters.append(Ticket.lender_login_date >= d_from)
+        except ValueError:
+            pass
+    if lender_login_to:
+        try:
+            d_to = datetime.strptime(lender_login_to, "%Y-%m-%d").date()
+            filters.append(Ticket.lender_login_date <= d_to)
+        except ValueError:
+            pass
+
+    if targeted_disbursement_from:
+        try:
+            d_from = datetime.strptime(targeted_disbursement_from, "%Y-%m-%d").date()
+            filters.append(Ticket.targeted_disbursement_date >= d_from)
+        except ValueError:
+            pass
+    if targeted_disbursement_to:
+        try:
+            d_to = datetime.strptime(targeted_disbursement_to, "%Y-%m-%d").date()
+            filters.append(Ticket.targeted_disbursement_date <= d_to)
+        except ValueError:
+            pass
+
+    if disbursement_from:
+        try:
+            d_from = datetime.strptime(disbursement_from, "%Y-%m-%d").date()
+            filters.append(Ticket.disbursement_date >= d_from)
+        except ValueError:
+            pass
+    if disbursement_to:
+        try:
+            d_to = datetime.strptime(disbursement_to, "%Y-%m-%d").date()
+            filters.append(Ticket.disbursement_date <= d_to)
+        except ValueError:
+            pass
+
+    # Relationships filters
+    if allowed_owner_ids is not None:
+        filters.append(Deal.deal_owner_id.in_(allowed_owner_ids))
+    if deal_owner_id:
+        filters.append(Deal.deal_owner_id == deal_owner_id)
+    if account_name:
+        filters.append(Deal.account_name.ilike(f"%{account_name.strip()}%"))
+
+    # Build the final unified query structure
+    final_query = (
+        db.query(Ticket).join(Deal, Ticket.deal_id == Deal.id).filter(and_(*filters))
+    )
+
     if kanban:
-        # 1. Clean up the date filters so they don't force a 30-day limit unless requested
-        if created_from:
-            try:
-                date_from = datetime.strptime(created_from, "%Y-%m-%d").replace(
-                    tzinfo=timezone.utc
-                )
-                filters.append(Ticket.created_at >= date_from)
-            except ValueError:
-                pass
-        if created_to:
-            try:
-                date_to = (
-                    datetime.strptime(created_to, "%Y-%m-%d").replace(
-                        tzinfo=timezone.utc
-                    )
-                    + timedelta(days=1)
-                    - timedelta(seconds=1)
-                )
-                filters.append(Ticket.created_at <= date_to)
-            except ValueError:
-                pass
-
-        # Add the remaining late filters immediately to build the TRUE complete query
-        if allowed_owner_ids is not None:
-            filters.append(Deal.deal_owner_id.in_(allowed_owner_ids))
-        if account_name:
-            filters.append(Deal.account_name.ilike(f"%{account_name.strip()}%"))
-
-        # Build the final unified query structure
-        final_query = (
-            db.query(Ticket)
-            .join(Deal, Ticket.deal_id == Deal.id)
-            .filter(and_(*filters))
-        )
-
-        # 2. Get the real total count based on ALL combined filters (Can be > 200)
+        # 1. Get the real total count based on ALL combined filters (Can be > 200)
         total_count = final_query.count()
 
-        # 3. Fetch the data, but CAP it at 200 items max directly in the database
-        tickets = final_query.options(selectinload(Ticket.deal), selectinload(Ticket.account)).limit(200).all()
+        # 2. Fetch the data, but CAP it at 200 items max directly in the database
+        tickets = (
+            final_query.options(selectinload(Ticket.deal), selectinload(Ticket.account))
+            .limit(200)
+            .all()
+        )
 
-        # 4. Group your dataset by ticket status
+        # 3. Group your dataset by ticket status
         grouped_data = {}
         for t in tickets:
             status = t.ticket_status or "No Status"
             ticket_dict = format_ticket(t)
-            ticket_dict["deal_owner_id"] = (
-                str(t.deal.deal_owner_id) if t.deal and t.deal.deal_owner_id else None
-            )
             grouped_data.setdefault(status, []).append(ticket_dict)
 
-        # 5. Return matching the exact Deals structure perfectly
+        # 4. Return matching the exact Deals structure perfectly
         return {"data": grouped_data, "page_info": {"total": total_count}}
 
     # Standard list view
     limit = 100
     offset = (page - 1) * limit
 
-    query = (
-        db.query(Ticket).join(Deal, Ticket.deal_id == Deal.id).filter(and_(*filters))
+    total = final_query.count()
+    tickets = (
+        final_query.options(selectinload(Ticket.deal), selectinload(Ticket.account))
+        .order_by(Ticket.created_at.desc())
+        .offset(offset)
+        .limit(limit)
+        .all()
     )
 
-    if allowed_owner_ids is not None:
-        query = query.filter(Deal.deal_owner_id.in_(allowed_owner_ids))
-    if account_name:
-        query = query.filter(Deal.account_name.ilike(f"%{account_name.strip()}%"))
-
-    total = query.count()
-    tickets = query.options(selectinload(Ticket.deal), selectinload(Ticket.account)).order_by(Ticket.created_at.desc()).offset(offset).limit(limit).all()
+    total_pages = math.ceil(total / limit) if limit > 0 else 1
 
     return {
         "data": [format_ticket(t) for t in tickets],
-        "page_info": {"page": page, "total": total},
+        "page_info": {
+            "page": page, 
+            "total_pages": total_pages, 
+            "data_size": total,
+            "has_more": page < total_pages
+        },
     }
 
 

@@ -382,20 +382,20 @@ def create_deal(deal, db: Session, user_id, user_role):
                 "pranay.kumar@r1xchange.com",
             ]
 
-            from src.controllers.Background_threads import BackgroundThreadPool
-            from src.controllers.mail import notify_deal_created_approval
-
-            # Inform terminal precisely about the trigger firing
-            print(
-                f"!!! DISPATCHING DEAL NOTIFICATION TO BANKING TEAM: {notification_emails} !!!"
-            )
-
-            BackgroundThreadPool.execute_task(
-                notify_deal_created_approval,
-                notification_emails,
-                created_deal.account_name or "Unknown Account",
-                created_deal.id,
-            )
+            # from src.controllers.Background_threads import BackgroundThreadPool
+            # from src.controllers.mail import notify_deal_created_approval
+            #
+            # # Inform terminal precisely about the trigger firing
+            # print(
+            #     f"!!! DISPATCHING DEAL NOTIFICATION TO BANKING TEAM: {notification_emails} !!!"
+            # )
+            #
+            # BackgroundThreadPool.execute_task(
+            #     notify_deal_created_approval,
+            #     notification_emails,
+            #     created_deal.account_name or "Unknown Account",
+            #     created_deal.id,
+            # )
         except Exception as mail_trigger_err:
             print(f"Warning: Deal approval email trigger failed: {mail_trigger_err}")
 

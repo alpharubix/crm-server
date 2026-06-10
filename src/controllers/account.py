@@ -17,7 +17,7 @@ from starlette.responses import JSONResponse
 
 from src.controllers.audit_log import log_action
 from src.controllers.auth import MANAGERID
-from src.controllers.Background_threads import BackgroundThreadPool
+# from src.controllers.Background_threads import BackgroundThreadPool
 from src.controllers.notes import get_notes
 from src.models.ticket import Ticket
 from src.utility.utils import get_account_headers
@@ -65,37 +65,37 @@ def create_account(
     )
 
     # --- NEW: ACCOUNT CREATED NOTIFICATION ROUTINE ---
-    owner = new_account.owner
-    if owner and owner.email:
-        notification_emails = [owner.email]
+    # owner = new_account.owner
+    # if owner and owner.email:
+    #     notification_emails = [owner.email]
 
-        # Look up Reporting Manager via your class dictionary mapping configuration
-        MANAGER_EXECUTIVES_MAP = MANAGERID().MANAGER_EXECUTIVES_MAP
-        reporting_manager_id = None
+    #     # Look up Reporting Manager via your class dictionary mapping configuration
+    #     MANAGER_EXECUTIVES_MAP = MANAGERID().MANAGER_EXECUTIVES_MAP
+    #     reporting_manager_id = None
 
-        # Traverse map keys (managers) to find which array contains this owner's ID
-        for mgr_id, executive_ids in MANAGER_EXECUTIVES_MAP.items():
-            if owner.id in executive_ids:
-                reporting_manager_id = mgr_id
-                break
+    #     # Traverse map keys (managers) to find which array contains this owner's ID
+    #     for mgr_id, executive_ids in MANAGER_EXECUTIVES_MAP.items():
+    #         if owner.id in executive_ids:
+    #             reporting_manager_id = mgr_id
+    #             break
 
-        if reporting_manager_id:
-            manager_user = (
-                db.query(User).filter(User.id == reporting_manager_id).first()
-            )
-            if manager_user and manager_user.email:
-                notification_emails.append(manager_user.email)
+    #     if reporting_manager_id:
+    #         manager_user = (
+    #             db.query(User).filter(User.id == reporting_manager_id).first()
+    #         )
+    #         if manager_user and manager_user.email:
+    #             notification_emails.append(manager_user.email)
 
         # Offload safely into your Background Thread Pool
-        from src.controllers.mail import notify_account_assigned
-
-        BackgroundThreadPool.execute_task(
-            notify_account_assigned,
-            list(set(notification_emails)),  # Duplication filtering safe safeguard
-            owner.full_name,
-            new_account.account_name,
-            new_account.id,
-        )
+        # from src.controllers.mail import notify_account_assigned
+        #
+        # BackgroundThreadPool.execute_task(
+        #     notify_account_assigned,
+        #     list(set(notification_emails)),  # Duplication filtering safe safeguard
+        #     owner.full_name,
+        #     new_account.account_name,
+        #     new_account.id,
+        # )
 
     return new_account
 
@@ -194,35 +194,35 @@ def update_account(
         log_action(db, user_id, user_role, "UPDATED", "Account", account_id, payload)
 
         # --- NEW: ACCOUNT REASSIGNMENT TRIGGER ROUTINE ---
-        if is_reassigned:
-            new_owner = db.query(User).filter(User.id == int(new_owner_id)).first()
-            if new_owner and new_owner.email:
-                reassign_emails = [new_owner.email]
+        # if is_reassigned:
+        #     new_owner = db.query(User).filter(User.id == int(new_owner_id)).first()
+        #     if new_owner and new_owner.email:
+        #         reassign_emails = [new_owner.email]
 
-                # Fetch reporting manager mapping for the new owner assignment configuration
-                MANAGER_EXECUTIVES_MAP = MANAGERID().MANAGER_EXECUTIVES_MAP
-                reporting_manager_id = None
-                for mgr_id, executive_ids in MANAGER_EXECUTIVES_MAP.items():
-                    if new_owner.id in executive_ids:
-                        reporting_manager_id = mgr_id
-                        break
+        #         # Fetch reporting manager mapping for the new owner assignment configuration
+        #         MANAGER_EXECUTIVES_MAP = MANAGERID().MANAGER_EXECUTIVES_MAP
+        #         reporting_manager_id = None
+        #         for mgr_id, executive_ids in MANAGER_EXECUTIVES_MAP.items():
+        #             if new_owner.id in executive_ids:
+        #                 reporting_manager_id = mgr_id
+        #                 break
 
-                if reporting_manager_id:
-                    manager_user = (
-                        db.query(User).filter(User.id == reporting_manager_id).first()
-                    )
-                    if manager_user and manager_user.email:
-                        reassign_emails.append(manager_user.email)
+        #         if reporting_manager_id:
+        #             manager_user = (
+        #                 db.query(User).filter(User.id == reporting_manager_id).first()
+        #             )
+        #             if manager_user and manager_user.email:
+        #                 reassign_emails.append(manager_user.email)
 
-                from src.controllers.mail import notify_account_assigned
-
-                BackgroundThreadPool.execute_task(
-                    notify_account_assigned,
-                    list(set(reassign_emails)),
-                    new_owner.full_name,
-                    db_account.account_name,
-                    db_account.id,
-                )
+                # from src.controllers.mail import notify_account_assigned
+                #
+                # BackgroundThreadPool.execute_task(
+                #     notify_account_assigned,
+                #     list(set(reassign_emails)),
+                #     new_owner.full_name,
+                #     db_account.account_name,
+                #     db_account.id,
+                # )
 
         return db_account
     except HTTPException as e:

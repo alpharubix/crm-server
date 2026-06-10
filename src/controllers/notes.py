@@ -1,7 +1,7 @@
 import re
 from datetime import datetime, timezone
 from typing import Any, List, Dict
-from fastapi.exceptions import HTTPException
+# from fastapi.exceptions import HTTPException
 from pymongo.synchronous.collection import Collection
 from sqlalchemy.orm import Session
 from starlette.responses import JSONResponse
@@ -14,7 +14,7 @@ from src.models.ticket import Ticket
 from .audit_log import log_action
 from zoneinfo import ZoneInfo
 from src.controllers import auth,mail
-from src.controllers.Background_threads import BackgroundThreadPool
+# from src.controllers.Background_threads import BackgroundThreadPool
 IST = ZoneInfo("Asia/Kolkata")
 
 def insert_notes(user_id, user_role, note, parent_id, db, module_name, pg_db: Session):
@@ -77,12 +77,12 @@ def insert_notes(user_id, user_role, note, parent_id, db, module_name, pg_db: Se
             {"note": note, "parent_id": parent_id},
         )
         #create a background worker to send mention emails in a separate eventloop
-        BackgroundThreadPool.execute_task(
-            mentions,
-            note,
-            module_name,
-            parent_id,
-        )
+        # BackgroundThreadPool.execute_task(
+        #     mentions,
+        #     note,
+        #     module_name,
+        #     parent_id,
+        # )
 
         return JSONResponse(
             status_code=201, content={"message": "Note saved successfully"}

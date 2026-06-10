@@ -261,50 +261,50 @@ async def create_ticket(request: Request, db: Session = Depends(get_db)):
     log_action(db, user_id, user_role, "CREATED", "Ticket", ticket.id, safe_payload)
 
     # ─── CONDITION 1 TRIGGER: TICKET CREATION NOTIFICATION ───
-    try:
-        # Fetch the Deal to identify the Deal Owner entity
-        deal_record = db.query(Deal).filter(Deal.id == int(ticket.deal_id)).first()
-        if deal_record and deal_record.deal_owner_id:
-            from src.models.user import User
+    # try:
+    #     # Fetch the Deal to identify the Deal Owner entity
+    #     deal_record = db.query(Deal).filter(Deal.id == int(ticket.deal_id)).first()
+    #     if deal_record and deal_record.deal_owner_id:
+    #         from src.models.user import User
 
-            deal_owner = (
-                db.query(User).filter(User.id == int(deal_record.deal_owner_id)).first()
-            )
+    #         deal_owner = (
+    #             db.query(User).filter(User.id == int(deal_record.deal_owner_id)).first()
+    #         )
 
-            if deal_owner and deal_owner.email:
-                recipient_emails = [deal_owner.email]
+    #         if deal_owner and deal_owner.email:
+    #             recipient_emails = [deal_owner.email]
 
-                # Dynamic Supervisor Registry Mapping Lookup Loop
-                reporting_manager_id = None
-                for mgr_id, executive_ids in MANAGERID.MANAGER_EXECUTIVES_MAP.items():
-                    if deal_owner.id in executive_ids:
-                        reporting_manager_id = mgr_id
-                        break
+    #             # Dynamic Supervisor Registry Mapping Lookup Loop
+    #             reporting_manager_id = None
+    #             for mgr_id, executive_ids in MANAGERID.MANAGER_EXECUTIVES_MAP.items():
+    #                 if deal_owner.id in executive_ids:
+    #                     reporting_manager_id = mgr_id
+    #                     break
 
-                if reporting_manager_id:
-                    manager_user = (
-                        db.query(User)
-                        .filter(User.id == int(reporting_manager_id))
-                        .first()
-                    )
-                    if manager_user and manager_user.email:
-                        recipient_emails.append(manager_user.email)
+    #             if reporting_manager_id:
+    #                 manager_user = (
+    #                     db.query(User)
+    #                     .filter(User.id == int(reporting_manager_id))
+    #                     .first()
+    #                 )
+    #                 if manager_user and manager_user.email:
+    #                     recipient_emails.append(manager_user.email)
 
-                from src.controllers.Background_threads import BackgroundThreadPool
-                from src.controllers.mail import notify_ticket_created
-
-                clean_targets = list(
-                    {email.strip() for email in recipient_emails if email}
-                )
-
-                BackgroundThreadPool.execute_task(
-                    notify_ticket_created,
-                    clean_targets,
-                    deal_record.account_name or "Unknown Account",
-                    ticket.id,
-                )
-    except Exception as create_mail_err:
-        print(f"Warning: Ticket creation notification loop bypassed: {create_mail_err}")
+                # from src.controllers.Background_threads import BackgroundThreadPool
+                # from src.controllers.mail import notify_ticket_created
+                #
+                # clean_targets = list(
+                #     {email.strip() for email in recipient_emails if email}
+                # )
+                #
+                # BackgroundThreadPool.execute_task(
+                #     notify_ticket_created,
+                #     clean_targets,
+                #     deal_record.account_name or "Unknown Account",
+                #     ticket.id,
+                # )
+    # except Exception as create_mail_err:
+    #     print(f"Warning: Ticket creation notification loop bypassed: {create_mail_err}")
 
     return ticket_dict
 
@@ -387,29 +387,29 @@ async def update_ticket(
                         {email.strip() for email in recipient_emails if email}
                     )
 
-                    from src.controllers.Background_threads import BackgroundThreadPool
-                    from src.controllers.mail import (
-                        notify_ticket_approved,
-                        notify_ticket_disapproved,
-                    )
-
-                    # Evaluate Condition 2: Field is modified to Approved
-                    if str(new_ticket_login).strip().lower() == "approved":
-                        BackgroundThreadPool.execute_task(
-                            notify_ticket_approved,
-                            clean_targets,
-                            ticket.lender_name,
-                            ticket.id,
-                        )
-
-                    # Evaluate Condition 3: Field is modified to Disapproved
-                    elif str(new_ticket_login).strip().lower() == "disapproved":
-                        BackgroundThreadPool.execute_task(
-                            notify_ticket_disapproved,
-                            clean_targets,
-                            ticket.lender_name,
-                            ticket.id,
-                        )
+                    # from src.controllers.Background_threads import BackgroundThreadPool
+                    # from src.controllers.mail import (
+                    #     notify_ticket_approved,
+                    #     notify_ticket_disapproved,
+                    # )
+                    #
+                    # # Evaluate Condition 2: Field is modified to Approved
+                    # if str(new_ticket_login).strip().lower() == "approved":
+                    #     BackgroundThreadPool.execute_task(
+                    #         notify_ticket_approved,
+                    #         clean_targets,
+                    #         ticket.lender_name,
+                    #         ticket.id,
+                    #     )
+                    #
+                    # # Evaluate Condition 3: Field is modified to Disapproved
+                    # elif str(new_ticket_login).strip().lower() == "disapproved":
+                    #     BackgroundThreadPool.execute_task(
+                    #         notify_ticket_disapproved,
+                    #         clean_targets,
+                    #         ticket.lender_name,
+                    #         ticket.id,
+                    #     )
         except Exception as update_mail_err:
             print(
                 f"Warning: Ticket update transactional alert skipped: {update_mail_err}"

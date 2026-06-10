@@ -56,12 +56,12 @@ def check_overdue_projects(db: Session):
 
             try:
                 # This sends a single email layout to all stakeholders safely spaced out
-                notify_project_overdue(
-                    emails=emails,
-                    project_name=project.name,
-                    project_id=project.id,
-                    overdue_days=overdue_days,
-                )
+                # notify_project_overdue(
+                #     emails=emails,
+                #     project_name=project.name,
+                #     project_id=project.id,
+                #     overdue_days=overdue_days,
+                # )
                 logger.info(
                     f"Overdue mail sent to stakeholders for project: {project.name}"
                 )

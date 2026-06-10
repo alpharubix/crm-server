@@ -88,12 +88,12 @@ async def create_project(request: Request, db: Session = Depends(get_db)):
 
         if team_emails:
             # We pass the list to our non-blocking pool so the user doesn't face API delays
-            BackgroundThreadPool.execute_task(
-                notify_project_approved,  # Reusing your list engine function to mail the team
-                emails=team_emails,
-                project_name=project.name,
-                project_id=project.id,
-            )
+            # BackgroundThreadPool.execute_task(
+            #     notify_project_approved,  # Reusing your list engine function to mail the team
+            #     emails=team_emails,
+            #     project_name=project.name,
+            #     project_id=project.id,
+            # )
             logger.info(
                 f"Dispatched background creation alerts to team members: {team_emails}"
             )
@@ -258,26 +258,26 @@ async def update_project(
         actioners = db.query(User).filter(User.id.in_(project.actioner_ids)).all()
         emails = list({user.email for user in actioners if user.email})
 
-        if emails:
-            BackgroundThreadPool.execute_task(
-                notify_project_approved,
-                emails=emails,
-                project_name=project.name,
-                project_id=project.id,
-            )
+        # if emails:
+            # BackgroundThreadPool.execute_task(
+            #     notify_project_approved,
+            #     emails=emails,
+            #     project_name=project.name,
+            #     project_id=project.id,
+            # )
 
     # Trigger B: Project Pending Review
-    if project.status == StatusEnum.pending_for_review:
-        approver = db.query(User).filter(User.id == project.approver_id).first()
+    # if project.status == StatusEnum.pending_for_review:
+    #     approver = db.query(User).filter(User.id == project.approver_id).first()
 
-        if approver and approver.email:
-            BackgroundThreadPool.execute_task(
-                notify_project_pending_review,
-                approver_email=approver.email,
-                approver_name=approver.full_name,
-                project_name=project.name,
-                project_id=project.id,
-            )
+    #     if approver and approver.email:
+            # BackgroundThreadPool.execute_task(
+            #     notify_project_pending_review,
+            #     approver_email=approver.email,
+            #     approver_name=approver.full_name,
+            #     project_name=project.name,
+            #     project_id=project.id,
+            # )
 
     # Trigger C: NEW REQUIRED STATUS - Project Completed
     # Notifies: Team Members (actioners) + Approver + Initiator (created_by)
@@ -294,17 +294,17 @@ async def update_project(
             stakeholder_ids.add(project.created_by)
 
         # Extract unique emails from database
-        stakeholders = db.query(User).filter(User.id.in_(list(stakeholder_ids))).all()
-        notification_emails = list({u.email for u in stakeholders if u.email})
+        # stakeholders = db.query(User).filter(User.id.in_(list(stakeholder_ids))).all()
+        # notification_emails = list({u.email for u in stakeholders if u.email})
 
-        if notification_emails:
-            BackgroundThreadPool.execute_task(
-                notify_project_completed,  # Extracted to the thread pool cleanly
-                emails=notification_emails,
-                project_name=project.name,
-                project_id=project.id,
-            )
-            logger.info(f"Dispatched completion alerts to: {notification_emails}")
+        # if notification_emails:
+            # BackgroundThreadPool.execute_task(
+            #     notify_project_completed,  # Extracted to the thread pool cleanly
+            #     emails=notification_emails,
+            #     project_name=project.name,
+            #     project_id=project.id,
+            # )
+            # logger.info(f"Dispatched completion alerts to: {notification_emails}")
 
     # 4. Audit Logging
     log_project_action(

@@ -1,6 +1,6 @@
 import logging
 import os
-from contextlib import asynccontextmanager
+# from contextlib import asynccontextmanager
 
 import uvicorn
 from dotenv import load_dotenv
@@ -11,11 +11,11 @@ from fastapi.middleware.cors import CORSMiddleware
 load_dotenv(override=True)
 
 # 2. Local imports
-from apscheduler.schedulers.background import BackgroundScheduler
+# from apscheduler.schedulers.background import BackgroundScheduler
 
-from src.controllers.Background_threads import BackgroundThreadPool
-from src.database import SessionLocal
-from src.jobs.project_overdue import check_overdue_projects
+# from src.controllers.Background_threads import BackgroundThreadPool
+# from src.database import SessionLocal
+# from src.jobs.project_overdue import check_overdue_projects
 
 # Router imports
 from src.routers import account as account_router
@@ -39,65 +39,66 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Initialize scheduler globally, but DO NOT start it here
-scheduler = BackgroundScheduler()
+# scheduler = BackgroundScheduler()
 
 
-def run_overdue_check():
-    # Session is created inside the job context, which is good
-    db = SessionLocal()
-    try:
-        check_overdue_projects(db)
-    except Exception as e:
-        logger.error(f"Error running overdue check: {e}")
-    finally:
-        db.close()
+# def run_overdue_check():
+#     # Session is created inside the job context, which is good
+#     db = SessionLocal()
+#     try:
+#         check_overdue_projects(db)
+#     except Exception as e:
+#         logger.error(f"Error running overdue check: {e}")
+#     finally:
+#         db.close()
 
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    # FIX 1: Run blocking/heavy initializations in the background
-    # so FastAPI can finish starting up and pass the Cloud Run health check.
-    import asyncio
+# @asynccontextmanager
+# async def lifespan(app: FastAPI):
+#     # FIX 1: Run blocking/heavy initializations in the background
+#     # so FastAPI can finish starting up and pass the Cloud Run health check.
+#     import asyncio
 
-    async def start_background_services():
-        try:
-            # Add a small delay to let Uvicorn bind to the port first
-            await asyncio.sleep(1)
+#     async def start_background_services():
+#         try:
+#             # Add a small delay to let Uvicorn bind to the port first
+#             await asyncio.sleep(1)
 
-            logger.info("Initializing Thread Pool...")
-            BackgroundThreadPool.initialize_thread_pool()
+#             logger.info("Initializing Thread Pool...")
+#             BackgroundThreadPool.initialize_thread_pool()
 
-            logger.info("Starting Scheduler...")
-            scheduler.add_job(
-                run_overdue_check,
-                trigger="cron",
-                hour=9,
-                minute=0,
-                id="project_overdue_job",
-                replace_existing=True,
-            )
-            if not scheduler.running:
-                scheduler.start()
-                logger.info("Overdue project scheduler started successfully")
-        except Exception as e:
-            logger.error(f"Failed to initialize background services: {e}")
+#             logger.info("Starting Scheduler...")
+#             scheduler.add_job(
+#                 run_overdue_check,
+#                 trigger="cron",
+#                 hour=9,
+#                 minute=0,
+#                 id="project_overdue_job",
+#                 replace_existing=True,
+#             )
+#             if not scheduler.running:
+#                 scheduler.start()
+#                 logger.info("Overdue project scheduler started successfully")
+#         except Exception as e:
+#             logger.error(f"Failed to initialize background services: {e}")
 
-    # Fire and forget the initialization task so it doesn't block startup
-    asyncio.create_task(start_background_services())
+#     # Fire and forget the initialization task so it doesn't block startup
+#     asyncio.create_task(start_background_services())
 
-    yield
+#     yield
 
-    # Shutdown logic remains the same
-    try:
-        scheduler.shutdown()
-        BackgroundThreadPool.shutdown()
-        logger.info("Scheduler and Thread Pool shutdown complete")
-    except Exception as e:
-        logger.error(f"Error during shutdown: {e}")
+#     # Shutdown logic remains the same
+#     try:
+#         scheduler.shutdown()
+#         BackgroundThreadPool.shutdown()
+#         logger.info("Scheduler and Thread Pool shutdown complete")
+#     except Exception as e:
+#         logger.error(f"Error during shutdown: {e}")
 
 
 # 4. Single App initialization
-app = FastAPI(lifespan=lifespan)
+# app = FastAPI(lifespan=lifespan)
+app = FastAPI()
 
 from src.middleware.auth import authorization
 

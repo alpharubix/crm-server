@@ -20,14 +20,14 @@ def export_accounts_csv(
     request: Request,
     db: Session,
     account_name: Optional[str] = None,
-    account_status: Optional[str] = None,
+    account_status: Optional[list[str]] = None,
     account_stage: Optional[str] = None,
-    source: Optional[str] = None,
-    industry: Optional[str] = None,
+    source: Optional[list[str]] = None,
+    industry: Optional[list[str]] = None,
     city: Optional[str] = None,
     state: Optional[str] = None,
     phone_number: Optional[str] = None,
-    account_owner_id: Optional[int] = None,
+    account_owner_id: Optional[list[int]] = None,
     call_back_date_time: Optional[str] = None,
 ):
 
@@ -38,13 +38,15 @@ def export_accounts_csv(
 
     filters = []
 
+    allowed_owner_ids = None
     if role in ("super_admin", "admin"):
         pass
     elif role == "manager":
         allowed_owner_ids = [user_id] + MANAGER_EXECUTIVES_MAP.get(user_id, [])
         filters.append(Account.account_owner_id.in_(allowed_owner_ids))
     elif role == "executive":
-        filters.append(Account.account_owner_id == user_id)
+        allowed_owner_ids = [user_id]
+        filters.append(Account.account_owner_id.in_(allowed_owner_ids))
 
     # --- . Block bulk export FIRST, before anything else ---
     no_filters_applied = not any(
@@ -65,13 +67,27 @@ def export_accounts_csv(
     if account_name:
         filters.append(Account.account_name.ilike(f"%{account_name.strip()}%"))
     if account_status:
-        filters.append(Account.account_status.ilike(f"{account_status.strip()}%"))
+        status_list = [s.strip() for s in (account_status if isinstance(account_status, list) else [account_status]) if s and s.strip()]
+        if status_list:
+            filters.append(
+                or_(*[Account.account_status.ilike(f"{status}%") for status in status_list])
+            )
     if account_stage:
         filters.append(Account.account_stage.ilike(f"{account_stage.strip()}%"))
     if source:
-        filters.append(Account.source.ilike(f"{source.strip()}%"))
+        source_list = [s.strip() for s in (source if isinstance(source, list) else [source]) if s and s.strip()]
+        if source_list:
+            filters.append(
+                or_(*[Account.source.ilike(f"{src}%") for src in source_list])
+            )
+    # if type_of_business:
+    #     pass  # Just in case we need it, but type_of_business is not in export_accounts_csv parameters
     if industry:
-        filters.append(Account.industry == industry)
+        industry_list = [ind.strip() for ind in (industry if isinstance(industry, list) else [industry]) if ind and ind.strip()]
+        if industry_list:
+            filters.append(
+                or_(*[Account.industry.ilike(ind) for ind in industry_list])
+            )
     if city:
         filters.append(Account.city.ilike(f"%{city.strip()}%"))
     if state:
@@ -85,14 +101,21 @@ def export_accounts_csv(
             )
         )
     if account_owner_id:
-        if role in ("super_admin", "admin"):
-            filters.append(Account.account_owner_id == int(account_owner_id))
-        elif user_id not in MANAGER_EXECUTIVES_MAP:
-            raise HTTPException(status_code=403, detail="No permission for this owner")
-        elif account_owner_id in MANAGER_EXECUTIVES_MAP.get(user_id, []):
-            filters.append(Account.account_owner_id == int(account_owner_id))
-        else:
-            raise HTTPException(status_code=403, detail="No permission for this owner")
+        owner_ids = [int(oid) for oid in (account_owner_id if isinstance(account_owner_id, list) else [account_owner_id]) if oid is not None]
+        if owner_ids:
+            if role in ("super_admin", "admin"):
+                filters.append(Account.account_owner_id.in_(owner_ids))
+            else:
+                allowed_set = {int(x) for x in (allowed_owner_ids or [])}
+                if not all(oid in allowed_set for oid in owner_ids):
+                    raise HTTPException(
+                        status_code=403,
+                        detail={
+                            "message": "You do not have permission to access records for this owner",
+                            "success": False,
+                        },
+                    )
+                filters.append(Account.account_owner_id.in_(owner_ids))
     if call_back_date_time:
         try:
             dt = datetime.fromisoformat(call_back_date_time)
@@ -271,12 +294,12 @@ def export_deals_csv(
     request: Request,
     db: Session,
     account_name: Optional[str] = None,
-    lender_name: Optional[str] = None,
-    case_status: Optional[str] = None,
-    ticket_login: Optional[str] = None,
-    loan_type: Optional[str] = None,
-    type_of_case_login: Optional[str] = None,
-    deal_owner_id: Optional[int] = None,
+    lender_name: Optional[list[str]] = None,
+    case_status: Optional[list[str]] = None,
+    ticket_login: Optional[list[str]] = None,
+    loan_type: Optional[list[str]] = None,
+    type_of_case_login: Optional[list[str]] = None,
+    deal_owner_id: Optional[list[int]] = None,
 ):
     # 1. RBAC first
     MANAGER_EXECUTIVES_MAP = (
@@ -287,13 +310,15 @@ def export_deals_csv(
 
     filters = []
 
+    allowed_owner_ids = None
     if role in ("super_admin", "admin"):
         pass
     elif role == "manager":
         allowed_owner_ids = [user_id] + MANAGER_EXECUTIVES_MAP.get(user_id, [])
         filters.append(Deal.deal_owner_id.in_(allowed_owner_ids))
     elif role == "executive":
-        filters.append(Deal.deal_owner_id == user_id)
+        allowed_owner_ids = [user_id]
+        filters.append(Deal.deal_owner_id.in_(allowed_owner_ids))
 
     # 2. Block bulk export
     no_filters_applied = not any(
@@ -312,24 +337,51 @@ def export_deals_csv(
     if account_name:
         filters.append(Deal.account_name.ilike(f"%{account_name.strip()}%"))
     if lender_name:
-        filters.append(Deal.lender_name.ilike(f"%{lender_name.strip()}%"))
+        lenders = [l.strip() for l in (lender_name if isinstance(lender_name, list) else [lender_name]) if l and l.strip()]
+        if lenders:
+            filters.append(
+                or_(*[Deal.lender_name.ilike(f"%{l}%") for l in lenders])
+            )
     if case_status:
-        filters.append(Deal.deal_status.ilike(f"{case_status.strip()}%"))
+        statuses = [s.strip() for s in (case_status if isinstance(case_status, list) else [case_status]) if s and s.strip()]
+        if statuses:
+            filters.append(
+                or_(*[Deal.deal_status.ilike(f"%{s}%") for s in statuses])
+            )
     if ticket_login:
-        filters.append(Deal.ticket_login.ilike(f"{ticket_login.strip()}%"))
+        tickets = [t.strip() for t in (ticket_login if isinstance(ticket_login, list) else [ticket_login]) if t and t.strip()]
+        if tickets:
+            filters.append(
+                or_(*[Deal.ticket_login.ilike(f"%{t}%") for t in tickets])
+            )
     if loan_type:
-        filters.append(Deal.loan_type.ilike(f"{loan_type.strip()}%"))
+        loan_types = [lt.strip() for lt in (loan_type if isinstance(loan_type, list) else [loan_type]) if lt and lt.strip()]
+        if loan_types:
+            filters.append(
+                or_(*[Deal.loan_type.ilike(f"%{lt}%") for lt in loan_types])
+            )
     if type_of_case_login:
-        filters.append(Deal.type_of_case_login.ilike(f"{type_of_case_login.strip()}%"))
+        cases = [c.strip() for c in (type_of_case_login if isinstance(type_of_case_login, list) else [type_of_case_login]) if c and c.strip()]
+        if cases:
+            filters.append(
+                or_(*[Deal.type_of_case_login.ilike(f"%{c}%") for c in cases])
+            )
     if deal_owner_id:
-        if role in ("super_admin", "admin"):
-            filters.append(Deal.deal_owner_id == int(deal_owner_id))
-        elif user_id not in MANAGER_EXECUTIVES_MAP:
-            raise HTTPException(status_code=403, detail="No permission for this owner")
-        elif deal_owner_id in MANAGER_EXECUTIVES_MAP.get(user_id, []):
-            filters.append(Deal.deal_owner_id == int(deal_owner_id))
-        else:
-            raise HTTPException(status_code=403, detail="No permission for this owner")
+        owner_ids = [int(oid) for oid in (deal_owner_id if isinstance(deal_owner_id, list) else [deal_owner_id]) if oid is not None]
+        if owner_ids:
+            if role in ("super_admin", "admin"):
+                filters.append(Deal.deal_owner_id.in_(owner_ids))
+            else:
+                allowed_set = {int(x) for x in (allowed_owner_ids or [])}
+                if not all(oid in allowed_set for oid in owner_ids):
+                    raise HTTPException(
+                        status_code=403,
+                        detail={
+                            "message": "You do not have permission to access records for this owner",
+                            "success": False,
+                        },
+                    )
+                filters.append(Deal.deal_owner_id.in_(owner_ids))
 
     # 4. Count gate
     count = db.query(Deal.id).filter(*filters).count()

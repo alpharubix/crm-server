@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy.orm import Session
 from typing import Optional
 from ..database import get_db
@@ -13,14 +13,14 @@ def export_accounts_csv(
     request: Request,
     db: Session = Depends(get_db),
     account_name: Optional[str] = None,
-    account_status: Optional[str] = None,
+    account_status: list[str] | None = Query(default=None),
     account_stage: Optional[str] = None,
-    source: Optional[str] = None,
-    industry: Optional[str] = None,
+    source: list[str] | None = Query(default=None),
+    industry: list[str] | None = Query(default=None),
     city: Optional[str] = None,
     state: Optional[str] = None,
     phone: Optional[str] = None,
-    account_owner_id: Optional[int] = None,
+    account_owner_id: list[int] | None = Query(default=None),
     call_back_date_time: Optional[str] = None,
 ):
     return repo.export_accounts_csv(
@@ -45,12 +45,12 @@ def export_deals(
     request: Request,
     db: Session = Depends(get_db),
     account_name: Optional[str] = None,
-    lender_name: Optional[str] = None,
-    case_status: Optional[str] = None,
-    ticket_login: Optional[str] = None,
-    loan_type: Optional[str] = None,
-    type_of_case_login: Optional[str] = None,
-    deal_owner_id: Optional[int] = None,
+    lender_name: list[str] | None = Query(default=None),
+    case_status: list[str] | None = Query(default=None),
+    ticket_login: list[str] | None = Query(default=None),
+    loan_type: list[str] | None = Query(default=None),
+    type_of_case_login: list[str] | None = Query(default=None),
+    deal_owner_id: list[int] | None = Query(default=None),
 ):
     return repo.export_deals_csv(
         request=request,

@@ -239,18 +239,18 @@ def get_all_accounts(
     page: int,
     account_name: Optional[str] = None,
     account_id: Optional[int] = None,
-    account_status: Optional[str] = None,
+    account_status: Optional[list[str]] = None,
     account_stage: Optional[str] = None,
-    source: Optional[str] = None,
+    source: Optional[list[str]] = None,
     type_of_business: Optional[str] = None,
-    industry: Optional[str] = None,
+    industry: Optional[list[str]] = None,
     city: Optional[str] = None,
     state: Optional[str] = None,
     pincode: Optional[str] = None,
     waba_interested: Optional[bool] = None,
     business_status: Optional[str] = None,
     call_back_date_time: Optional[datetime] = None,
-    account_owner_id: Optional[int] = None,
+    account_owner_id: Optional[list[int]] = None,
     phone_number: Optional[str] = None,
 ):
     MANAGER_EXECUTIVES_MAP = MANAGERID().MANAGER_EXECUTIVES_MAP
@@ -282,15 +282,27 @@ def get_all_accounts(
     if account_name:
         filters.append(Account.account_name.ilike(f"%{account_name.strip()}%"))
     if account_status:
-        filters.append(Account.account_status.ilike(f"{account_status.strip()}%"))
+        status_list = [s.strip() for s in (account_status if isinstance(account_status, list) else [account_status]) if s and s.strip()]
+        if status_list:
+            filters.append(
+                or_(*[Account.account_status.ilike(f"{status}%") for status in status_list])
+            )
     if account_stage:
         filters.append(Account.account_stage.ilike(f"{account_stage.strip()}%"))
     if source:
-        filters.append(Account.source.ilike(f"{source.strip()}%"))
+        source_list = [s.strip() for s in (source if isinstance(source, list) else [source]) if s and s.strip()]
+        if source_list:
+            filters.append(
+                or_(*[Account.source.ilike(f"{src}%") for src in source_list])
+            )
     if type_of_business:
         filters.append(Account.type_of_business == type_of_business)
     if industry:
-        filters.append(Account.industry == industry)
+        industry_list = [ind.strip() for ind in (industry if isinstance(industry, list) else [industry]) if ind and ind.strip()]
+        if industry_list:
+            filters.append(
+                or_(*[Account.industry.ilike(ind) for ind in industry_list])
+            )
     if city:
         filters.append(Account.city.ilike(f"%{city.strip()}%"))
     if state:
@@ -313,26 +325,21 @@ def get_all_accounts(
             )
         )
     if account_owner_id:
-        if role in ("super_admin", "admin"):
-            filters.append(Account.account_owner_id == int(account_owner_id))
-        elif user_id not in MANAGER_EXECUTIVES_MAP:
-            raise HTTPException(
-                status_code=403,
-                detail={
-                    "message": "You do not have permission to access records for this owner",
-                    "success": False,
-                },
-            )
-        elif account_owner_id in MANAGER_EXECUTIVES_MAP.get(user_id):
-            filters.append(Account.account_owner_id == int(account_owner_id))
-        else:
-            raise HTTPException(
-                status_code=403,
-                detail={
-                    "message": "You do not have permission to access records for this owner",
-                    "success": False,
-                },
-            )
+        owner_ids = [int(oid) for oid in (account_owner_id if isinstance(account_owner_id, list) else [account_owner_id]) if oid is not None]
+        if owner_ids:
+            if role in ("super_admin", "admin"):
+                filters.append(Account.account_owner_id.in_(owner_ids))
+            else:
+                allowed_set = {int(x) for x in (allowed_owner_ids or [])}
+                if not all(oid in allowed_set for oid in owner_ids):
+                    raise HTTPException(
+                        status_code=403,
+                        detail={
+                            "message": "You do not have permission to access records for this owner",
+                            "success": False,
+                        },
+                    )
+                filters.append(Account.account_owner_id.in_(owner_ids))
 
     if single_id_request:
         base_query = query.filter(and_(*filters)) if filters else query

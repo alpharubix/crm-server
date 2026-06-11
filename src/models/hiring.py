@@ -103,6 +103,7 @@ class Candidate(Base):
     phone_no = Column(String, nullable=True)
     email = Column(String, nullable=True, index=True)
     resume = Column(String, nullable=True)
+    assessment = Column(String, nullable=True)
     data_source = Column(String, nullable=True)
 
     # --- Section: Education ---
@@ -125,6 +126,9 @@ class Candidate(Base):
     feedback_status = Column(String, nullable=True)
     feedback_form_link = Column(String, nullable=True)
     rating_submitted_by = Column(BIGINT, ForeignKey("users.id"), nullable=True)
+
+    # --- Section: Compensation ---
+    approved_salary = Column(String, nullable=True)
 
     # --- Section: Ownership ---
     assignee_id = Column(BIGINT, ForeignKey("users.id"), nullable=True)

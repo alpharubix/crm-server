@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import (
@@ -119,6 +119,8 @@ class AccountBase(BaseModel):
     mothers_name: Optional[str] = None
     preferred_languages: Optional[List[str]] = Field(default_factory=list)
     parent_account_id: Optional[str] = None
+    source_date: Optional[date] = None
+    source_description: Optional[str] = None
 
     # New JSONB fields (will be handled in controller, but add to schema)
     business_details: Optional[Dict[str, Any]] = Field(default_factory=dict)
@@ -175,6 +177,8 @@ class AccountResponse(BaseModel):
     preferred_languages: Optional[List[str]] = Field(default_factory=list)
     parent_account_id: Optional[str] = None
     parent_account: Optional["AccountResponse"] = None  # For nested parent account
+    source_date: Optional[date] = None
+    source_description: Optional[str] = None
 
     # New JSONB fields
     business_details: Optional[Dict[str, Any]] = Field(default_factory=dict)

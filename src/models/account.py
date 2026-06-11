@@ -7,6 +7,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    Date,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 
@@ -84,6 +85,8 @@ class Account(Base):
     mothers_name = Column(String, nullable=True)
     preferred_languages = Column(JSONB, default=list)
     parent_account_id = Column(BIGINT, nullable=True, index=True)
+    source_date = Column(Date, nullable=True)
+    source_description = Column(Text, nullable=True)
 
     # New JSONB columns
     business_details = Column(JSONB, default={}, nullable=False)

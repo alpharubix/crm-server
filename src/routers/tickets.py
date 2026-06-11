@@ -1,9 +1,9 @@
 import math
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.encoders import jsonable_encoder
-from sqlalchemy import and_
+from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session, selectinload
 
 from src.controllers.audit_log import log_action
@@ -54,7 +54,7 @@ def get_tickets_list(
     kanban: bool = False,
     created_from: str | None = None,
     created_to: str | None = None,
-    ticket_status: str | None = None,
+    ticket_status: list[str] | None = Query(default=None),
     type_of_loan: str | None = None,
     account_name: str | None = None,
     lender_login_from: str | None = None,
@@ -81,7 +81,11 @@ def get_tickets_list(
     if deal_id:
         filters.append(Ticket.deal_id == deal_id)
     if ticket_status:
-        filters.append(Ticket.ticket_status.ilike(f"%{ticket_status.strip()}%"))
+        statuses = [s.strip() for s in (ticket_status if isinstance(ticket_status, list) else [ticket_status]) if s and s.strip()]
+        if statuses:
+            filters.append(
+                or_(*[Ticket.ticket_status.ilike(f"%{s}%") for s in statuses])
+            )
     if type_of_loan:
         filters.append(Ticket.type_of_loan.ilike(f"%{type_of_loan.strip()}%"))
 

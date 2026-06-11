@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from fastapi.params import Body
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
@@ -36,11 +36,11 @@ def list_all(
     db: Session = Depends(get_db),
     mongodb=Depends(get_mongodb),
     account_stage: str | None = None,
-    account_status: str | None = None,
+    account_status: list[str] | None = Query(default=None),
     account_name: Optional[str] = None,
-    account_owner_id: Optional[int] = None,
-    industry: str | None = None,
-    source: Optional[str] = None,
+    account_owner_id: list[int] | None = Query(default=None),
+    industry: list[str] | None = Query(default=None),
+    source: list[str] | None = Query(default=None),
     phone: str | None = None,
     call_back_date_time: str = None,
 ):
@@ -60,7 +60,6 @@ def list_all(
         phone_number=phone,
         industry=industry,
         call_back_date_time=call_back_date_time,
-        # map others only if they exist in repo
     )
 
 

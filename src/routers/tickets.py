@@ -254,6 +254,40 @@ async def create_ticket(request: Request, db: Session = Depends(get_db)):
     user_id = request.state.user_id
     user_role = request.state.role
 
+    # --- Auto-generate ticket_name: {deal_name}/T{seq} ---
+    deal_id_val = body.get("deal_id")
+    parent_deal = db.query(Deal).filter(Deal.id == int(deal_id_val)).first()
+    if not parent_deal:
+        raise HTTPException(status_code=404, detail="Parent deal not found")
+
+    existing_ticket_count = (
+        db.query(Ticket).filter(Ticket.deal_id == int(deal_id_val)).count()
+    )
+    ticket_sequence = existing_ticket_count + 1
+    parent_deal_name = parent_deal.deal_name or parent_deal.account_name or str(deal_id_val)
+    generated_ticket_name = f"{parent_deal_name}/T{ticket_sequence:02d}"
+    filtered_body["ticket_name"] = generated_ticket_name
+
+    # --- Duplicate ticket check: same deal + lender_name ---
+    new_lender_name = body.get("lender_name")
+    if new_lender_name:
+        duplicate_ticket = (
+            db.query(Ticket)
+            .filter(
+                Ticket.deal_id == int(deal_id_val),
+                Ticket.lender_name == new_lender_name,
+            )
+            .first()
+        )
+        if duplicate_ticket:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    'A similar ticket with same "Lender Name" already exist, '
+                    'Please try changing the "Lender Name" else refer to the existing tickets'
+                ),
+            )
+
     ticket = Ticket(**filtered_body, created_by=user_id)
     db.add(ticket)
     db.commit()
@@ -332,6 +366,27 @@ async def update_ticket(
     body.pop("deal_id", None)
     body.pop("created_at", None)
     body.pop("created_by", None)
+
+    # --- Duplicate ticket check on UPDATE: same deal + lender_name (excluding self) ---
+    new_lender_name = body.get("lender_name")
+    if new_lender_name and new_lender_name != ticket.lender_name:
+        duplicate_ticket = (
+            db.query(Ticket)
+            .filter(
+                Ticket.deal_id == ticket.deal_id,
+                Ticket.lender_name == new_lender_name,
+                Ticket.id != ticket_id,  # exclude self
+            )
+            .first()
+        )
+        if duplicate_ticket:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    'A similar ticket with same "Lender Name" already exist, '
+                    'Please try changing the "Lender Name" else refer to the existing tickets'
+                ),
+            )
 
     for key, value in body.items():
         if hasattr(ticket, key):

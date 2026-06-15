@@ -2,7 +2,7 @@ import csv
 import io
 import logging
 import math
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import Any, Dict, Optional
 
 import pandas as pd
@@ -124,10 +124,24 @@ def update_account(
         "customer_references",
     ]
 
+    # Pure Date columns — must be parsed separately before the generic datetime branch
+    DATE_ONLY_COLUMNS = {"source_date"}
+
     for key, value in payload.items():
         if hasattr(db_account, key):
             if value == "" or value is None:
                 setattr(db_account, key, None)
+            elif key in DATE_ONLY_COLUMNS:
+                # Parse as a date-only value (YYYY-MM-DD string or already a date)
+                if isinstance(value, str):
+                    try:
+                        value = date.fromisoformat(value[:10])
+                    except ValueError as e:
+                        raise HTTPException(
+                            status_code=400,
+                            detail={"message": f"Invalid date format for {key}: {str(e)}"},
+                        )
+                setattr(db_account, key, value)
             elif "time" in key or "date" in key:
                 if isinstance(value, str):
                     try:
@@ -141,8 +155,13 @@ def update_account(
                                 status_code=400,
                                 detail={"message": "Date should not be in the past"},
                             )
+                    except HTTPException:
+                        raise
                     except Exception as e:
-                        raise e
+                        raise HTTPException(
+                            status_code=400,
+                            detail={"message": f"Invalid datetime format for {key}: {str(e)}"},
+                        )
                 setattr(db_account, key, value)
             elif key in jsonb_columns:
                 current_dict = getattr(db_account, key) or {}

@@ -26,6 +26,7 @@ class Ticket(Base):
     disbursement_date = Column(Date)
     ticket_status = Column(String(50))
     ticket_stage = Column(String(50))
+    ticket_name = Column(String, nullable=True, index=True)  # Auto-generated: {deal_name}/T{seq}
 
     # Funding & Commercials
     approved_amount = Column(Numeric(15, 2))

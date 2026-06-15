@@ -29,6 +29,7 @@ class Deal(Base):
     ticket_id = Column(BIGINT, index=True)
     ticket_number = Column(BIGINT)
     account_name = Column(String, nullable=True, index=True)
+    deal_name = Column(String, nullable=True, index=True)  # Auto-generated: {account_name}/{account_id}/D{seq}
     deal_type = Column(String(100), nullable=True)
     loan_type = Column(String(150), nullable=True, index=True)
     type_of_login = Column(String(100), nullable=True)

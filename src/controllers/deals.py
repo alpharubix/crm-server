@@ -345,9 +345,41 @@ def get_deals(
 
 def create_deal(deal, db: Session, user_id, user_role):
     try:
+        # --- Duplicate deal check: same account + deal_type + loan_type ---
+        if deal.deal_type and deal.loan_type:
+            duplicate = (
+                db.query(Deal)
+                .filter(
+                    Deal.account_id == int(deal.account_id),
+                    Deal.deal_type == deal.deal_type,
+                    Deal.loan_type == deal.loan_type,
+                )
+                .first()
+            )
+            if duplicate:
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        'A similar deal with same "Deal Type" and "Type of Loan" already exist, '
+                        'Please try changing the "Deal Type" and "Type of Loan" else refer to the existing deals'
+                    ),
+                )
+
+        # --- Auto-generate deal_name: {account_name}/{account_id}/D{seq} ---
+        existing_deal_count = (
+            db.query(Deal)
+            .filter(Deal.account_id == int(deal.account_id))
+            .count()
+        )
+        sequence = existing_deal_count + 1
+        generated_deal_name = (
+            f"{deal.account_name}/{deal.account_id}/D{sequence:02d}"
+        )
+
         created_deal = Deal(
             account_id=deal.account_id,
             account_name=deal.account_name,
+            deal_name=generated_deal_name,
             deal_type=deal.deal_type,
             loan_type=deal.loan_type,
             type_of_login=deal.type_of_login,
@@ -426,6 +458,30 @@ def update_deal_based_on_id(user_id, user_role, db: Session, deal_id: int, paylo
     db_deal = db.query(Deal).filter(Deal.id == deal_id).first()
     if not db_deal:
         raise HTTPException(status_code=404, detail={"msg": "Deal not found"})
+
+    # --- Duplicate deal check on UPDATE: same account + deal_type + loan_type ---
+    new_deal_type = payload.get("deal_type", db_deal.deal_type)
+    new_loan_type = payload.get("loan_type", db_deal.loan_type)
+    if new_deal_type and new_loan_type:
+        duplicate = (
+            db.query(Deal)
+            .filter(
+                Deal.account_id == db_deal.account_id,
+                Deal.deal_type == new_deal_type,
+                Deal.loan_type == new_loan_type,
+                Deal.id != deal_id,  # exclude self
+            )
+            .first()
+        )
+        if duplicate:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    'A similar deal with same "Deal Type" and "Type of Loan" already exist, '
+                    'Please try changing the "Deal Type" and "Type of Loan" else refer to the existing deals'
+                ),
+            )
+
 
     for key, value in payload.items():
         if hasattr(db_deal, key):

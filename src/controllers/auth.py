@@ -24,7 +24,7 @@ def validate_login(body: Login, db: Session):
             ):
                 raise HTTPException(status_code=401, detail="Invalid Credentials")
             else:
-                token = get_jwt_token(user.id, user.role)
+                token = get_jwt_token(user.id, user.role, user.full_name, user.email)
                 response = JSONResponse(
                     status_code=200, content={"message": "Login Successful"}
                 )

@@ -25,6 +25,6 @@ def logout(response: Response):
     return {"message": "Logout successful"}
 
 @authentication_router.get("/me")
-def get_user(request:Request,db: Session = Depends(get_db)):
-    return get_me(request,db)
+def get_user(request: Request):
+    return get_me(request)
 

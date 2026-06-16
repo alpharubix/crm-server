@@ -32,7 +32,7 @@ def export_accounts_csv(
 ):
 
     # --- . RBAC ---
-    MANAGER_EXECUTIVES_MAP = MANAGERID().MANAGER_EXECUTIVES_MAP
+    MANAGER_EXECUTIVES_MAP = MANAGERID.MANAGER_EXECUTIVES_MAP  # ✅ class attr, no instantiation
     user_id = request.state.user_id
     role = request.state.role
 

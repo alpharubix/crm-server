@@ -49,6 +49,7 @@ def insert_revenue(user_id, user_role,data, db: Session):
             revenue.id,
             updated_revenue
         )
+        db.commit()  # ✅ commit audit log (log_action no longer self-commits)
 
         return {
             "success": True,
@@ -79,7 +80,7 @@ def fetch_revenue(
     gst_amount: float = None,
 ):
     try:
-        MANAGER_EXECUTIVES_MAP = MANAGERID().MANAGER_EXECUTIVES_MAP
+        MANAGER_EXECUTIVES_MAP = MANAGERID.MANAGER_EXECUTIVES_MAP  # ✅ class attr, no instantiation
 
         limit = 30
         offset = (page - 1) * limit
@@ -190,11 +191,9 @@ def fetch_revenue(
                 },
             }
 
-        # ---------------- LIGHTWEIGHT FETCH ---------------- #
-
+        # ✅ Use same filter chain for count and data — eliminates duplicate round-trip
         else:
-
-            data = (
+            base_list_query = (
                 db.query(
                     Revenue.id,
                     Revenue.account_name,
@@ -206,17 +205,11 @@ def fetch_revenue(
                     Revenue.gst_amount,
                 )
                 .filter(and_(*filters))
-                .offset(offset)
-                .limit(limit)
-                .all()
             )
 
-            total_data_size = (
-                query.filter(and_(*filters)).count()
-            )
-
+            total_data_size = base_list_query.count()
+            data = base_list_query.offset(offset).limit(limit).all()
             total_pages = math.ceil(total_data_size / limit)
-
             data = [dict(row._mapping) for row in data]
 
             return {
@@ -266,8 +259,9 @@ def update_revenue_controller(
         db.commit()
         db.refresh(revenue)
         log_action(
-            db, user_id, role, "UPDATE", "Revenue",revenue.id, data.model_dump(mode="json")
+            db, user_id, role, "UPDATE", "Revenue", revenue.id, data.model_dump(mode="json")
         )
+        db.commit()  # ✅ commit audit log (log_action no longer self-commits)
         updated_revenue = {
             column.name: getattr(revenue, column.name)
             for column in revenue.__table__.columns

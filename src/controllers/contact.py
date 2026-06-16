@@ -44,6 +44,7 @@ def create_contact(db: Session, data: ContactBase, user_id: int, user_role: str)
     log_action(
         db, user_id, user_role, "CREATED", "Contact", new_contact.id, data.model_dump(mode="json")
     )
+    db.commit()  # ✅ commit audit log (log_action no longer self-commits)
     return new_contact
 
 
@@ -59,8 +60,7 @@ def get_all_contacts(
     email: str = "",
     full_name: str = "",
 ):
-    MANAGER_EXECUTIVES_MAP = MANAGERID().MANAGER_EXECUTIVES_MAP
-    print(page)
+    MANAGER_EXECUTIVES_MAP = MANAGERID.MANAGER_EXECUTIVES_MAP  # ✅ class attr, no instantiation
     limit = 30
     offset = (page - 1) * limit
     query = db.query(Contact)
@@ -196,6 +196,7 @@ def update_contacts(request: Request, contact_id: int, body: dict, db: Session):
         db.refresh(contact)
 
         log_action(db, user_id, user_role, "UPDATED", "Contact", contact_id, body)
+        db.commit()  # ✅ commit audit log (log_action no longer self-commits)
         return {"message": "update-success", "updated_contact": contact}
 
     except HTTPException as e:

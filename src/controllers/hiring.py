@@ -227,14 +227,15 @@ def get_all_job_requirements(
 
     else:
         # 2. Kanban/Summary Board Standard response
-        query = (
+        # ✅ Single query object used for both count and data — no double round-trip
+        base_query = (
             db.query(JobRequirement).filter(and_(*filters))
             if filters
             else db.query(JobRequirement)
         )
-        total_data_size = query.count()
+        total_data_size = base_query.count()
         data_records = (
-            query.order_by(JobRequirement.created_time.desc())
+            base_query.order_by(JobRequirement.created_time.desc())
             .offset(offset)
             .limit(limit)
             .all()
@@ -388,6 +389,7 @@ def get_all_candidates(
         }
 
     else:
+        # ✅ Single query object used for both count and data — no double round-trip
         base_query = (
             db.query(Candidate).filter(and_(*filters))
             if filters

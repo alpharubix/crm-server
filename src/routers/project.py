@@ -109,6 +109,7 @@ async def create_project(request: Request, db: Session = Depends(get_db)):
         None,
         changes=body,
     )
+    db.commit()  # ✅ commit project log (log_project_action no longer self-commits)
     return format_project(project)
 
 
@@ -317,6 +318,7 @@ async def update_project(
         None,
         body,
     )
+    db.commit()  # ✅ commit project log (log_project_action no longer self-commits)
     return format_project(project)
 
 
@@ -378,6 +380,7 @@ async def add_project_comment(
         None,
         changes={"content": body["content"]},
     )
+    db.commit()  # ✅ commit project log (log_project_action no longer self-commits)
     return format_project_comment(comment)
 
 
@@ -497,6 +500,7 @@ async def create_task(project_id: int, request: Request, db: Session = Depends(g
         task.id,
         changes=body,
     )
+    db.commit()  # ✅ commit project log (log_project_action no longer self-commits)
     return format_task(task)
 
 
@@ -601,6 +605,7 @@ async def update_task(
         task.id,
         body,
     )
+    db.commit()  # ✅ commit project log (log_project_action no longer self-commits)
     return format_task(task)
 
 
@@ -677,6 +682,7 @@ async def add_task_comment(
         task_id,
         changes={"content": body["content"]},
     )
+    db.commit()  # ✅ commit project log (log_project_action no longer self-commits)
     return format_comment(comment)
 
 

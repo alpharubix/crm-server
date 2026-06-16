@@ -67,12 +67,12 @@ def get_deals(
                 )
         if loan_type:
             loan_types = loan_type if isinstance(loan_type, list) else [loan_type]
-            print("FILTERING BY:", loan_types)  # check this
-            filters.append(
-                or_(*[Deal.loan_type.ilike(lt.strip()) for lt in loan_types])
-            )
+            loan_types = [lt.strip() for lt in loan_types if lt and lt.strip()]
+            if loan_types:
+                filters.append(
+                    or_(*[Deal.loan_type.ilike(lt) for lt in loan_types])
+                )
         if deal_owner_id:
-            print("Fitler - ", deal_owner_id)
             filters.append(Deal.deal_owner_id.in_(deal_owner_id))
         if lender_name:
             lenders = [l.strip() for l in (lender_name if isinstance(lender_name, list) else [lender_name]) if l and l.strip()]
@@ -298,6 +298,7 @@ def get_deals(
             }
 
         # Standard List View Paginated Scenario
+        # ✅ Use base_query for BOTH count and data — eliminates duplicate round-trip
         total_records = base_query.count()
         deals = (
             base_query.with_entities(
@@ -419,6 +420,7 @@ def create_deal(deal, db: Session, user_id, user_role):
             created_deal.id,
             sanitized_payload,
         )
+        db.commit()  # ✅ commit audit log (log_action no longer self-commits)
 
         # ─── FIXED: CLEAN HARDCODED EMAIL TRIGGER BLOCK ───
         try:
@@ -509,6 +511,7 @@ def update_deal_based_on_id(user_id, user_role, db: Session, deal_id: int, paylo
         db.commit()
         db.refresh(db_deal)
         log_action(db, user_id, user_role, "UPDATED", "Deal", deal_id, payload)
+        db.commit()  # ✅ commit audit log (log_action no longer self-commits)
         return {"message": "update-success", "updated_deal_id": str(db_deal.id)}
     except Exception as e:
         db.rollback()

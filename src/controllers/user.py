@@ -72,7 +72,7 @@ def get_user_filter(request: Request, db):
     user_id = int(request.state.user_id)
     role = request.state.role
     # print(role)
-    MANAGER_EXECUTIVE_MAP = MANAGERID().MANAGER_EXECUTIVES_MAP
+    MANAGER_EXECUTIVE_MAP = MANAGERID.MANAGER_EXECUTIVES_MAP  # ✅ class attr, no instantiation
     try:
         if user_id in MANAGER_EXECUTIVE_MAP:
             executive_id = MANAGER_EXECUTIVE_MAP.get(user_id)

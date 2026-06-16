@@ -63,6 +63,7 @@ def create_account(
         new_account.id,
         data.model_dump(mode="json"),
     )
+    db.commit()  # ✅ commit audit log (log_action no longer self-commits)
 
     # --- NEW: ACCOUNT CREATED NOTIFICATION ROUTINE ---
     # owner = new_account.owner
@@ -211,6 +212,7 @@ def update_account(
         db.commit()
         db.refresh(db_account)
         log_action(db, user_id, user_role, "UPDATED", "Account", account_id, payload)
+        db.commit()  # ✅ commit audit log (log_action no longer self-commits)
 
         # --- NEW: ACCOUNT REASSIGNMENT TRIGGER ROUTINE ---
         # if is_reassigned:
@@ -272,7 +274,7 @@ def get_all_accounts(
     account_owner_id: Optional[list[int]] = None,
     phone_number: Optional[str] = None,
 ):
-    MANAGER_EXECUTIVES_MAP = MANAGERID().MANAGER_EXECUTIVES_MAP
+    MANAGER_EXECUTIVES_MAP = MANAGERID.MANAGER_EXECUTIVES_MAP  # ✅ class attr, no instantiation
 
     limit = 30
     offset = (page - 1) * limit
@@ -440,27 +442,25 @@ def get_all_accounts(
         }
 
     else:
-        # Standard list view query
-        data = (
-            db.query(
-                Account.id,
-                Account.account_name,
-                Account.account_owner_id,
-                Account.account_status,
-                Account.source,
-                Account.type_of_business,
-                Account.industry,
-                Account.state,
-                Account.city,
-                Account.call_back_date_time,
-                Account.phone,
-            )
-            .filter(and_(*filters))
-            .offset(offset)
-            .limit(limit)
-            .all()
-        )
-        total_data_size = query.filter(*filters).count()
+        # Standard list view query — use ONE base_query for both count and data (eliminates double round-trip)
+        base_query = db.query(
+            Account.id,
+            Account.account_name,
+            Account.account_owner_id,
+            Account.account_status,
+            Account.source,
+            Account.type_of_business,
+            Account.industry,
+            Account.state,
+            Account.city,
+            Account.call_back_date_time,
+            Account.phone,
+        ).filter(and_(*filters))
+
+        # ✅ Single count query using the same filtered base_query
+        total_data_size = base_query.count()
+        data = base_query.offset(offset).limit(limit).all()
+
         total_pages = math.ceil(total_data_size / limit)
         return {
             "data": data,
@@ -564,36 +564,50 @@ def update_and_insert_accounts(insertion_accounts, updation_accounts, db: Sessio
     updated = 0
     failed_accounts = []
 
+    # ✅ Batch inserts: accumulate valid Account objects, flush per-row to catch
+    # individual failures, then do a SINGLE commit at the end — instead of N commits.
     for acc in insertion_accounts:
         try:
             account = Account(**acc)
             db.add(account)
-            db.commit()
-            db.refresh(account)
+            db.flush()  # assigns DB-generated id; raises error early if constraint fails
             inserted += 1
         except SQLAlchemyError as e:
             db.rollback()
             failed_accounts.append({"type": "insert", "data": acc, "error": str(e)})
+
+    if inserted > 0:
+        try:
+            db.commit()  # ✅ Single commit for all successful inserts
+        except SQLAlchemyError as e:
+            db.rollback()
+            failed_accounts.append({"type": "insert_batch_commit", "error": str(e)})
+            inserted = 0
+
+    # ✅ Batch updates: accumulate changes, single commit at end
     for acc in updation_accounts:
         try:
             account = db.query(Account).filter(Account.id == acc["id"]).first()
             if not account:
                 raise ValueError("Account ID not found")
-
             for key, value in acc.items():
                 setattr(account, key, value)
-            try:
-                db.commit()
-                db.refresh(account)
-                updated += 1
-            except SQLAlchemyError as e:
-                raise e
+            db.flush()  # raises error early if constraint fails
+            updated += 1
         except Exception as e:
             print(e, acc.get("id"))
             db.rollback()
             failed_accounts.append(
                 {"type": "update", "id": acc.get("id"), "error": str(e)}
             )
+
+    if updated > 0:
+        try:
+            db.commit()  # ✅ Single commit for all successful updates
+        except SQLAlchemyError as e:
+            db.rollback()
+            failed_accounts.append({"type": "update_batch_commit", "error": str(e)})
+            updated = 0
 
     return {"inserted": inserted, "updated": updated, "failed": failed_accounts}
 

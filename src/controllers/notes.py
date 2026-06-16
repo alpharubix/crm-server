@@ -21,9 +21,15 @@ def insert_notes(user_id, user_role, note, parent_id, db, module_name, pg_db: Se
     try:
         user_coll = db["users"]
         notes_coll = db["Notes"]
-        Owner = user_coll.find_one(
+
+        # ✅ Fetch user ONCE and reuse — was two identical find_one calls before
+        user_doc = user_coll.find_one(
             {"id": str(user_id)}, {"_id": 0, "id": 1, "first_name": 1, "email": 1}
         )
+        Owner = user_doc
+        Created_By = dict(user_doc) if user_doc else None
+        if Created_By and "first_name" in Created_By:
+            Created_By["name"] = Created_By.pop("first_name")
         if module_name == 'Accounts':
             raw_parent_acc = pg_db.query(Account.id,Account.account_name).filter(Account.id == int(parent_id)).first()
             Parent_Id = {
@@ -49,12 +55,6 @@ def insert_notes(user_id, user_role, note, parent_id, db, module_name, pg_db: Se
                 "deal_name": raw_parent_deal.account_name,
             }
         Modified_By = None
-        Created_By = user_coll.find_one(
-            {"id": str(user_id)}, {"_id": 0, "id": 1, "first_name": 1, "email": 1}
-        )
-        if Created_By and "first_name" in Created_By:
-            Created_By["name"] = Created_By.pop("first_name")
-
         result = notes_coll.insert_one({
             "Owner": Owner,
             "Created_By": Created_By,
@@ -76,6 +76,7 @@ def insert_notes(user_id, user_role, note, parent_id, db, module_name, pg_db: Se
             int(parent_id),
             {"note": note, "parent_id": parent_id},
         )
+        pg_db.commit()  # ✅ commit audit log (log_action no longer self-commits)
         #create a background worker to send mention emails in a separate eventloop
         # BackgroundThreadPool.execute_task(
         #     mentions,

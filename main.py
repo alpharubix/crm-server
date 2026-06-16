@@ -1,11 +1,13 @@
 import logging
 import os
-# from contextlib import asynccontextmanager
+import time
 
+# from contextlib import asynccontextmanager
 import uvicorn
 from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 
 # 1. Load env vars BEFORE importing modules that rely on them
 load_dotenv(override=True)
@@ -116,6 +118,20 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# ✅ GZip: compresses responses >1KB by 60-80% — reduces payload size for all list views
+app.add_middleware(GZipMiddleware, minimum_size=1000)
+
+
+@app.middleware("http")
+async def timing_middleware(request, call_next):
+    # ✅ import time is at module level now — not re-resolved on every request
+    start = time.perf_counter()
+    response = await call_next(request)
+    total = time.perf_counter() - start
+    print(f"{request.method} {request.url.path} => {total:.3f}s")
+    return response
+
 
 # Include Routers
 app.include_router(account_router.router)

@@ -81,7 +81,13 @@ def get_tickets_list(
     if deal_id:
         filters.append(Ticket.deal_id == deal_id)
     if ticket_status:
-        statuses = [s.strip() for s in (ticket_status if isinstance(ticket_status, list) else [ticket_status]) if s and s.strip()]
+        statuses = [
+            s.strip()
+            for s in (
+                ticket_status if isinstance(ticket_status, list) else [ticket_status]
+            )
+            if s and s.strip()
+        ]
         if statuses:
             filters.append(
                 or_(*[Ticket.ticket_status.ilike(f"%{s}%") for s in statuses])
@@ -163,24 +169,20 @@ def get_tickets_list(
     )
 
     if kanban:
-        # 1. Get the real total count based on ALL combined filters (Can be > 200)
         total_count = final_query.count()
 
-        # 2. Fetch the data, but CAP it at 200 items max directly in the database
         tickets = (
             final_query.options(selectinload(Ticket.deal), selectinload(Ticket.account))
             .limit(200)
             .all()
         )
 
-        # 3. Group your dataset by ticket status
         grouped_data = {}
         for t in tickets:
             status = t.ticket_status or "No Status"
             ticket_dict = format_ticket(t)
             grouped_data.setdefault(status, []).append(ticket_dict)
 
-        # 4. Return matching the exact Deals structure perfectly
         return {"data": grouped_data, "page_info": {"total": total_count}}
 
     # Standard list view
@@ -201,10 +203,10 @@ def get_tickets_list(
     return {
         "data": [format_ticket(t) for t in tickets],
         "page_info": {
-            "page": page, 
-            "total_pages": total_pages, 
+            "page": page,
+            "total_pages": total_pages,
             "data_size": total,
-            "has_more": page < total_pages
+            "has_more": page < total_pages,
         },
     }
 
@@ -264,7 +266,9 @@ async def create_ticket(request: Request, db: Session = Depends(get_db)):
         db.query(Ticket).filter(Ticket.deal_id == int(deal_id_val)).count()
     )
     ticket_sequence = existing_ticket_count + 1
-    parent_deal_name = parent_deal.deal_name or parent_deal.account_name or str(deal_id_val)
+    parent_deal_name = (
+        parent_deal.deal_name or parent_deal.account_name or str(deal_id_val)
+    )
     generated_ticket_name = f"{parent_deal_name}/T{ticket_sequence:02d}"
     filtered_body["ticket_name"] = generated_ticket_name
 
@@ -297,6 +301,7 @@ async def create_ticket(request: Request, db: Session = Depends(get_db)):
     safe_payload = jsonable_encoder(ticket_dict)
 
     log_action(db, user_id, user_role, "CREATED", "Ticket", ticket.id, safe_payload)
+    db.commit()  # ✅ commit audit log (log_action no longer self-commits)
 
     # ─── CONDITION 1 TRIGGER: TICKET CREATION NOTIFICATION ───
     # try:
@@ -328,19 +333,19 @@ async def create_ticket(request: Request, db: Session = Depends(get_db)):
     #                 if manager_user and manager_user.email:
     #                     recipient_emails.append(manager_user.email)
 
-                # from src.controllers.Background_threads import BackgroundThreadPool
-                # from src.controllers.mail import notify_ticket_created
-                #
-                # clean_targets = list(
-                #     {email.strip() for email in recipient_emails if email}
-                # )
-                #
-                # BackgroundThreadPool.execute_task(
-                #     notify_ticket_created,
-                #     clean_targets,
-                #     deal_record.account_name or "Unknown Account",
-                #     ticket.id,
-                # )
+    # from src.controllers.Background_threads import BackgroundThreadPool
+    # from src.controllers.mail import notify_ticket_created
+    #
+    # clean_targets = list(
+    #     {email.strip() for email in recipient_emails if email}
+    # )
+    #
+    # BackgroundThreadPool.execute_task(
+    #     notify_ticket_created,
+    #     clean_targets,
+    #     deal_record.account_name or "Unknown Account",
+    #     ticket.id,
+    # )
     # except Exception as create_mail_err:
     #     print(f"Warning: Ticket creation notification loop bypassed: {create_mail_err}")
 
@@ -400,6 +405,7 @@ async def update_ticket(
     db.refresh(ticket)
 
     log_action(db, user_id, user_role, "UPDATED", "Ticket", ticket.id, body)
+    db.commit()  # ✅ commit audit log (log_action no longer self-commits)
 
     # ─── CONDITIONS 2 & 3 TRIGGER: TICKET LOGIN FIELDS STATUS MODIFICATIONS ───
     new_ticket_login = body.get("ticket_login")

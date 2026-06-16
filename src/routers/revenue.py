@@ -9,15 +9,15 @@ from src.schemas.revenue import Revenue,RevenueUpdateSchema
 revenue_router = APIRouter(prefix="/revenue", tags=["revenue"])
 
 @revenue_router.post('')
-async def creat_revenue(request:Request,body:Revenue,pg_db_session: Session = Depends(get_db)):
+def creat_revenue(request: Request, body: Revenue, pg_db_session: Session = Depends(get_db)):
    try:
        user_id = request.state.user_id
        role = request.state.role
-       return insert_revenue(user_id=user_id,user_role=role,data=vars(body),db=pg_db_session)
+       return insert_revenue(user_id=user_id, user_role=role, data=vars(body), db=pg_db_session)
    except HTTPException as e:
        raise e
 @revenue_router.get("")
-async def get_revenue(
+def get_revenue(
     request: Request,
     pg_db_session: Session = Depends(get_db),
 

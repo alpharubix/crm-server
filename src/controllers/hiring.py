@@ -50,7 +50,8 @@ def stringify_ids(data):
 HR_USER_IDS = [
     "3899927000000318361",
     "3899927000000221552",
-]  # Namrata and Sarada strings
+    "3899927000000527649",
+]  # Namrata, Sarada, Ambika strings
 
 
 def create_job_requirement(

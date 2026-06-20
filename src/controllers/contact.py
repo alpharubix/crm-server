@@ -132,6 +132,7 @@ def get_all_contacts(
             notes = get_notes(
                 id_list=ids_list,
                 notes_collection=mongodb_conn["Notes"],
+                module_name="Contacts",
             )
             contact.notes = notes  # attach to the object, not the list
 

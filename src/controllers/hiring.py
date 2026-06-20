@@ -162,7 +162,11 @@ def get_all_job_requirements(
     if department:
         filters.append(JobRequirement.department == department.strip())
     if hiring_location_city:
-        filters.append(JobRequirement.hiring_location_city.ilike(f"%{hiring_location_city.strip()}%"))
+        filters.append(
+            JobRequirement.hiring_location_city.ilike(
+                f"%{hiring_location_city.strip()}%"
+            )
+        )
     if tentative_joining_date:
         filters.append(JobRequirement.tentative_joining_date <= tentative_joining_date)
 

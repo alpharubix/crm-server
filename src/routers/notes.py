@@ -27,6 +27,6 @@ def create_notes(
         pg_db=pg_db_session,
     )
 @notes_router.get("/{notes_id}")
-def notes(request: Request,notes_id:str,db:Collection=Depends(get_mongodb)):
-    result=get_notes(notes_id,db['Notes'])
-    return {"data":result}
+def notes(request: Request, notes_id: str, db: Collection = Depends(get_mongodb)):
+    result = get_notes(id_list=notes_id, notes_collection=db["Notes"])
+    return {"data": result}

@@ -47,6 +47,7 @@ def validate_login(body: Login, db: Session):
 
 
 class MANAGERID:
+    BYPASS_USER_IDS = {3899927000000650180, 3899927000005114050}
     MANAGER_EXECUTIVES_MAP = {
         # Namrata
         3899927000000318361: [

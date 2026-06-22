@@ -71,7 +71,9 @@ def get_tickets_list(
     user_role = request.state.role
 
     allowed_owner_ids = None
-    if user_role == "manager":
+    if int(user_id) in MANAGERID.BYPASS_USER_IDS:
+        pass
+    elif user_role == "manager":
         allowed_owner_ids = [user_id] + MANAGER_EXECUTIVES_MAP.get(user_id, [])
     elif user_role == "executive":
         allowed_owner_ids = [user_id]

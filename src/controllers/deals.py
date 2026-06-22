@@ -46,7 +46,9 @@ def get_deals(
 
         # 1. Role-Based Access Scoping
         allowed_owner_ids = None
-        if user_role == "manager":
+        if user_id in MANAGERID.BYPASS_USER_IDS:
+            pass
+        elif user_role == "manager":
             allowed_owner_ids = [user_id] + MANAGER_EXECUTIVES_MAP.get(user_id, [])
         elif user_role == "executive":
             allowed_owner_ids = [user_id]
@@ -523,7 +525,9 @@ def get_deal_id(user_id: int, role: str, deal_name: str, db: Session):
 
         # ---------------- ROLE BASED ACCESS ---------------- #
 
-        if role in ("super_admin", "admin"):
+        if user_id in MANAGERID.BYPASS_USER_IDS:
+            pass
+        elif role in ("super_admin", "admin"):
             pass
 
         elif role == "manager":

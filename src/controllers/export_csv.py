@@ -311,7 +311,9 @@ def export_deals_csv(
     filters = []
 
     allowed_owner_ids = None
-    if role in ("super_admin", "admin"):
+    if user_id in MANAGERID.BYPASS_USER_IDS:
+        pass
+    elif role in ("super_admin", "admin"):
         pass
     elif role == "manager":
         allowed_owner_ids = [user_id] + MANAGER_EXECUTIVES_MAP.get(user_id, [])
@@ -369,7 +371,7 @@ def export_deals_csv(
     if deal_owner_id:
         owner_ids = [int(oid) for oid in (deal_owner_id if isinstance(deal_owner_id, list) else [deal_owner_id]) if oid is not None]
         if owner_ids:
-            if role in ("super_admin", "admin"):
+            if role in ("super_admin", "admin") or user_id in MANAGERID.BYPASS_USER_IDS:
                 filters.append(Deal.deal_owner_id.in_(owner_ids))
             else:
                 allowed_set = {int(x) for x in (allowed_owner_ids or [])}

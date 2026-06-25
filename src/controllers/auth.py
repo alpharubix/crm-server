@@ -47,7 +47,7 @@ def validate_login(body: Login, db: Session):
 
 
 class MANAGERID:
-    BYPASS_USER_IDS = {3899927000000650180, 3899927000005114050}
+    BYPASS_USER_IDS = {3899927000000650180, 3899927000005114050, 3899927000000979220}
     MANAGER_EXECUTIVES_MAP = {
         # Namrata
         3899927000000318361: [
@@ -104,6 +104,26 @@ class MANAGERID:
             3899927000005114020,  # Digamber
             3899927000005965050,  # Sahil
             3899927000000452950,  # Vinod
+            3899927000000979220,  # Nandini
+        ],
+        # Nandini
+        3899927000000979220: [
+            3899927000000240595,  # Chiranjeevi B S
+            3899927000000498931,  # Karthik H M
+            3899927000000647914,  # Prajwal G P
+            3899927000000208140,  # Shivaraj P N
+            3899927000000488938,  # Nagaraj
+            3899927000005114050,  # sutapa
+            3899927000005965018,  # Arjun
+            3899927000004429017,  # Sandeep
+            3899927000004808001,  # Ayush
+            3899927000007673012,  # Honappa
+            3899927000000795843,  # Prashanth
+            3899927000005114004,  # Manjunath
+            3899927000005114020,  # Digamber
+            3899927000005965050,  # Sahil
+            3899927000000452950,  # Vinod
+            3899927000000979220,  # Nandini
         ],
         # Manjunath
         3899927000005114004: [
@@ -192,7 +212,6 @@ users = {  # users for fast lookup
     3899927000000615348: "Ashok M",
     3899927000000964875: "Suraj Gupta",
     3899927000000882594: "Myisa Beiucy",
-    3899927000000723465: "Kaveri Metri",
     3899927000000488938: "Nagaraj Hodmany",
     3899927000000208140: "Shivaraj P N",
     3899927000000647914: "Prajwal G P",

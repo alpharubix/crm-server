@@ -132,12 +132,19 @@ def get_projects(
     limit = 50
     offset = (page - 1) * limit
 
+    # Users who always have full visibility across all projects
+    SUPER_APPROVER_IDS = [3899927000000201013, 3899927000005965002]
+
     # 1. Base Authorization Filter
-    query = db.query(Project).filter(
-        (Project.created_by == user_id)
-        | (Project.approver_id == user_id)
-        | (Project.actioner_ids.any(user_id))
-    )
+    # Super-approvers skip the ownership filter — they see all projects.
+    if user_id in SUPER_APPROVER_IDS:
+        query = db.query(Project)
+    else:
+        query = db.query(Project).filter(
+            (Project.created_by == user_id)
+            | (Project.approver_id == user_id)
+            | (Project.actioner_ids.any(user_id))
+        )
 
     # 2. Apply Dynamic Filters
     if search:

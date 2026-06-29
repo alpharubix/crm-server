@@ -559,6 +559,10 @@ def fetch_account_id(account_name: str, db: Session):
         )
 
 
+# JSONB columns that must be merged (not overwritten) when updating via CSV
+_JSONB_MERGE_KEYS = {"business_premise_address", "business_details"}
+
+
 def update_and_insert_accounts(insertion_accounts, updation_accounts, db: Session):
     inserted = 0
     updated = 0
@@ -574,6 +578,7 @@ def update_and_insert_accounts(insertion_accounts, updation_accounts, db: Sessio
         except SQLAlchemyError as e:
             db.rollback()
             failed_accounts.append({"type": "insert", "data": acc, "error": str(e)})
+
     for acc in updation_accounts:
         try:
             account = db.query(Account).filter(Account.id == acc["id"]).first()
@@ -581,7 +586,17 @@ def update_and_insert_accounts(insertion_accounts, updation_accounts, db: Sessio
                 raise ValueError("Account ID not found")
 
             for key, value in acc.items():
-                setattr(account, key, value)
+                if key == "id":
+                    continue
+                if key in _JSONB_MERGE_KEYS:
+                    # Merge CSV-supplied keys into the existing JSONB, preserving
+                    # any other keys already stored (e.g. industry inside business_details)
+                    existing = getattr(account, key) or {}
+                    merged = {**existing, **value}
+                    setattr(account, key, merged)
+                    flag_modified(account, key)
+                else:
+                    setattr(account, key, value)
             try:
                 db.commit()
                 db.refresh(account)
@@ -602,9 +617,18 @@ async def update_accounts_based_on_csv(file, db: Session, user_id: int):
     insertion_accounts, updation_accounts, error_list = [], [], []
     row_number = 1
 
+    # CSV columns that map into business_premise_address JSONB {city, state, pincode}
+    _BUSINESS_PREMISE_MAP = {
+        "business_premise_city": "city",
+        "business_premise_state": "state",
+        "business_premise_pincode": "pincode",
+    }
+    # CSV columns that map into business_details JSONB
+    _BUSINESS_DETAILS_KEYS = {"gstn", "pan"}
+
     try:
         if not file.filename.endswith(".csv"):
-            raise HTTPException(status_code=400, detail="only support csv file")
+            raise HTTPException(status_code=400, detail="Only CSV files are supported")
 
         contents = await file.read()
         decoded = contents.decode("utf-8-sig", errors="replace").splitlines()
@@ -612,38 +636,76 @@ async def update_accounts_based_on_csv(file, db: Session, user_id: int):
         data = list(reader)
 
         if not data:
-            raise HTTPException(status_code=400, detail="Csv file is empty")
+            raise HTTPException(status_code=400, detail="CSV file is empty")
 
-        # Header validation
+        # Strict header validation — all required headers must be present;
+        # report exactly which ones are missing so the user can fix the file.
         account_headers = get_account_headers()
         csv_headers = {col.strip().lower() for col in (reader.fieldnames or [])}
-        if account_headers - csv_headers:
+        missing_headers = account_headers - csv_headers
+        if missing_headers:
             raise HTTPException(
                 status_code=400,
-                detail=f"Header mismatch: {account_headers - csv_headers}",
+                detail={
+                    "message": "Header mismatch found",
+                    "missing_headers": sorted(missing_headers),
+                },
             )
 
         for row in data:
             row_number += 1
             try:
-                # Clean and identify row type
+                # Normalise keys to lowercase; strip whitespace from values.
+                # Empty / whitespace-only values become None (saved as NULL in DB).
                 row = {
-                    k: (v.strip() if v and v.strip() else None) for k, v in row.items()
+                    k.strip().lower(): (v.strip() if v and v.strip() else None)
+                    for k, v in row.items()
                 }
+
                 is_new = not row.get("id")
 
-                # Type conversions
+                # --- Type conversions ---
+
                 if row.get("id"):
                     row["id"] = int(row["id"])
 
+                if row.get("account_owner_id"):
+                    row["account_owner_id"] = int(row["account_owner_id"])
+
+                # source_date — must be YYYY-MM-DD
+                if row.get("source_date"):
+                    try:
+                        row["source_date"] = date.fromisoformat(row["source_date"][:10])
+                    except ValueError:
+                        raise ValueError(
+                            f"Invalid source_date '{row['source_date']}'; expected YYYY-MM-DD"
+                        )
+
+                # call_back_date_time — expected as 'YYYY-MM-DD HH:MM'
                 if row.get("call_back_date_time"):
                     row["call_back_date_time"] = datetime.strptime(
-                        row["call_back_date_time"], "%m/%d/%Y %H:%M"
+                        row["call_back_date_time"], "%Y-%m-%d %H:%M"
                     )
 
-                if row.get("waba_interested"):
-                    val = row["waba_interested"].lower()
-                    row["waba_interested"] = val in ["yes", "true", "1"]
+                # waba_interested — truthy strings → True, empty → None
+                waba_raw = row.get("waba_interested")
+                if waba_raw is not None:
+                    row["waba_interested"] = waba_raw.lower() in ["yes", "true", "1"]
+                # else leaves as None — column is nullable
+
+                # --- Build business_premise_address JSONB ---
+                # Pop the three CSV keys and assemble into a nested dict.
+                # If a value is None (blank in CSV), it is stored as None inside the JSONB.
+                business_premise_address = {}
+                for csv_key, db_key in _BUSINESS_PREMISE_MAP.items():
+                    business_premise_address[db_key] = row.pop(csv_key, None)
+                row["business_premise_address"] = business_premise_address
+
+                # --- Build business_details JSONB ---
+                business_details = {}
+                for key in _BUSINESS_DETAILS_KEYS:
+                    business_details[key] = row.pop(key, None)
+                row["business_details"] = business_details
 
                 if is_new:
                     row.pop("id", None)
@@ -651,9 +713,9 @@ async def update_accounts_based_on_csv(file, db: Session, user_id: int):
                     row["created_by_id"] = int(user_id)
                     insertion_accounts.append(row)
                 else:
-                    updation_accounts.append(
-                        {k: v for k, v in row.items() if v is not None}
-                    )
+                    # Pass the full row (including None values) so blank CSV cells
+                    # explicitly clear existing DB values, as requested.
+                    updation_accounts.append(row)
 
             except Exception as row_err:
                 error_list.append({"row": row_number, "error": str(row_err)})

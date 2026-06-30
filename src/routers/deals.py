@@ -99,3 +99,15 @@ def deal_hot_lookup(request: Request, deal_name: str, db: Session = Depends(get_
         return get_deal_id(user_id=int(user_id), role=role, deal_name=deal_name, db=db)
     except HTTPException as e:
         raise e
+
+# @deals_router.post("/deals-update-csv-upload")
+# async def deals_update_csv(
+#     request: Request, file: UploadFile = File(...), db: Session = Depends(get_db)
+# ):
+#     try:
+#         user_id = request.state.user_id
+#         return await repo.update_accounts_based_on_csv(file, db, user_id)
+#     except Exception as e:
+#         raise HTTPException(
+#             status_code=500, detail=f"unable to process csv error: {str(e)}"
+#         )

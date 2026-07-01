@@ -37,6 +37,23 @@ def create_account(
     account_data["created_by_id"] = user_id
     account_data["assignment_date"] = datetime.now(timezone.utc)
 
+    # Validate owner assignment based on role
+    new_owner_id = account_data.get("account_owner_id")
+    if new_owner_id:
+        if user_role == "manager":
+            allowed_owner_ids = [user_id] + MANAGERID().MANAGER_EXECUTIVES_MAP.get(user_id, [])
+            if int(new_owner_id) not in allowed_owner_ids:
+                raise HTTPException(
+                    status_code=403,
+                    detail="You do not have permission to assign an account to this owner"
+                )
+        elif user_role == "executive":
+            if int(new_owner_id) != user_id:
+                raise HTTPException(
+                    status_code=403,
+                    detail="You do not have permission to assign an account to this owner"
+                )
+
     if data.created_time:
         account_data["created_time"] = data.created_time
 
@@ -106,6 +123,21 @@ def update_account(
     db_account = db.query(Account).filter(Account.id == account_id).first()
     if not db_account:
         raise HTTPException(status_code=404, detail={"msg": "Account not found"})
+
+    # Check if user has permission to update this account
+    if user_role not in ("super_admin", "admin"):
+        if user_role == "manager":
+            allowed_owner_ids = [user_id] + MANAGERID().MANAGER_EXECUTIVES_MAP.get(user_id, [])
+        elif user_role == "executive":
+            allowed_owner_ids = [user_id]
+        else:
+            allowed_owner_ids = []
+        
+        if db_account.account_owner_id is not None and db_account.account_owner_id not in allowed_owner_ids:
+            raise HTTPException(
+                status_code=403,
+                detail="You do not have permission to update this account"
+            )
 
     old_status = db_account.account_status
     old_owner_id = db_account.account_owner_id
@@ -183,6 +215,19 @@ def update_account(
     is_reassigned = False
     new_owner_id = payload.get("account_owner_id")
     if new_owner_id is not None and str(new_owner_id) != str(old_owner_id):
+        if user_role == "manager":
+            allowed_owner_ids = [user_id] + MANAGERID().MANAGER_EXECUTIVES_MAP.get(user_id, [])
+            if int(new_owner_id) not in allowed_owner_ids:
+                raise HTTPException(
+                    status_code=403,
+                    detail="You do not have permission to assign an account to this owner"
+                )
+        elif user_role == "executive":
+            if int(new_owner_id) != user_id:
+                raise HTTPException(
+                    status_code=403,
+                    detail="You do not have permission to assign an account to this owner"
+                )
         db_account.assignment_date = datetime.now(timezone.utc)
         is_reassigned = True
 

@@ -74,19 +74,21 @@ def get_user_filter(request: Request, db):
     # print(role)
     MANAGER_EXECUTIVE_MAP = MANAGERID().MANAGER_EXECUTIVES_MAP
     try:
-        if user_id in MANAGER_EXECUTIVE_MAP:
-            executive_id = MANAGER_EXECUTIVE_MAP.get(user_id)
-            users = db.query(User.id,User.full_name).filter(User.id.in_(executive_id)).all()
-            return {'data':users}
-        elif role in ("super_admin", "admin") :
-            users = db.query(User.id,User.full_name).all()
+        if role in ("super_admin", "admin"):
+            users = db.query(User.id, User.full_name).all()
+            return {'data': users}
+        elif role == "manager" or user_id in MANAGER_EXECUTIVE_MAP:
+            executive_id = MANAGER_EXECUTIVE_MAP.get(user_id, [user_id])
+            if user_id not in executive_id:
+                executive_id = [user_id] + list(executive_id)
+            users = db.query(User.id, User.full_name).filter(User.id.in_(executive_id)).all()
             return {'data': users}
         else:
-            raise HTTPException(status_code=403,detail={"message" :"You do not have permission to access this content","success": False})
+            raise HTTPException(status_code=403, detail={"message": "You do not have permission to access this content", "success": False})
     except HTTPException as e:
         raise e
     except Exception as e:
-        raise HTTPException(status_code=500, detail={"message":"internal server error"})
+        raise HTTPException(status_code=500, detail={"message": "internal server error"})
 
 
 def get_all_users(db:Session):

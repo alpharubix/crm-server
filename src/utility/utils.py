@@ -75,3 +75,22 @@ def get_account_headers():
         "gstn",
         "pan",
     }
+
+
+def get_deal_headers():
+    return {
+        "id",
+        "account_id",
+        "deal_type",
+        "amount_required",
+        "loan_type",
+        "deal_status",
+        "deal_stage",
+        "lender_name",
+        "lender_login_type",
+        "partner_code",
+        "deal_status_closing",
+        "deal_expected_closing",
+        "deal_status_closing",
+        "deal_owner_id",
+    }

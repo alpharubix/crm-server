@@ -1,6 +1,6 @@
 from typing import Any, Dict
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Query
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, File, UploadFile
 from sqlalchemy.orm import Session
 from starlette.requests import Request
 
@@ -9,6 +9,7 @@ from src.controllers.deals import (
     get_deal_id,
     get_deals,
     update_deal_based_on_id,
+    update_deals_based_on_csv,
 )
 from src.database import get_db, get_mongodb
 from src.schemas.deals import DealCreationBody, DealListResponse, DealSchema
@@ -100,14 +101,14 @@ def deal_hot_lookup(request: Request, deal_name: str, db: Session = Depends(get_
     except HTTPException as e:
         raise e
 
-# @deals_router.post("/deals-update-csv-upload")
-# async def deals_update_csv(
-#     request: Request, file: UploadFile = File(...), db: Session = Depends(get_db)
-# ):
-#     try:
-#         user_id = request.state.user_id
-#         return await repo.update_accounts_based_on_csv(file, db, user_id)
-#     except Exception as e:
-#         raise HTTPException(
-#             status_code=500, detail=f"unable to process csv error: {str(e)}"
-#         )
+@deals_router.post("/deals-update-csv-upload")
+async def deals_update_csv(
+    request: Request, file: UploadFile = File(...), db: Session = Depends(get_db)
+):
+    try:
+        user_id = int(request.state.user_id)
+        return await update_deals_based_on_csv(file, db, user_id)
+    except Exception as e:
+        raise HTTPException(
+            status_code=500, detail=f"unable to process csv error: {str(e)}"
+        )

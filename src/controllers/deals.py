@@ -1,7 +1,7 @@
 import math
 from datetime import date, datetime, timedelta, timezone
 
-from fastapi import HTTPException
+from fastapi import HTTPException,UploadFile
 from fastapi.encoders import jsonable_encoder
 from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session, selectinload
@@ -557,3 +557,275 @@ def get_deal_id(user_id: int, role: str, deal_name: str, db: Session):
     except Exception as e:
         print(e)
         raise HTTPException(status_code=500, detail="Internal server error")
+
+
+def update_and_insert_deals(insertion_deals, updation_deals, db: Session):
+    from sqlalchemy.exc import SQLAlchemyError
+    inserted = 0
+    updated = 0
+    failed_deals = []
+
+    for deal_data in insertion_deals:
+        try:
+            # Check duplicate deal: same account + deal_type + loan_type
+            dt_type = deal_data.get("deal_type")
+            ln_type = deal_data.get("loan_type")
+            if dt_type and ln_type:
+                duplicate = (
+                    db.query(Deal)
+                    .filter(
+                        Deal.account_id == deal_data["account_id"],
+                        Deal.deal_type == dt_type,
+                        Deal.loan_type == ln_type,
+                    )
+                    .first()
+                )
+                if duplicate:
+                    raise ValueError(
+                        'A similar deal with same "Deal Type" and "Type of Loan" already exist'
+                    )
+
+            # Auto-generate deal_name: {account_name}/{account_id}/D{seq}
+            account_id = deal_data["account_id"]
+            account_name = deal_data["account_name"]
+            existing_deal_count = (
+                db.query(Deal)
+                .filter(Deal.account_id == account_id)
+                .count()
+            )
+            sequence = existing_deal_count + 1
+            deal_data["deal_name"] = f"{account_name}/{account_id}/D{sequence:02d}"
+
+            new_deal = Deal(**deal_data)
+            db.add(new_deal)
+            db.commit()
+            db.refresh(new_deal)
+            inserted += 1
+        except SQLAlchemyError as e:
+            db.rollback()
+            failed_deals.append({"type": "insert", "data": deal_data, "error": str(e)})
+        except Exception as e:
+            db.rollback()
+            failed_deals.append({"type": "insert", "data": deal_data, "error": str(e)})
+
+    for deal_data in updation_deals:
+        try:
+            deal = db.query(Deal).filter(Deal.id == deal_data["id"]).first()
+            if not deal:
+                raise ValueError("Deal ID not found")
+
+            # Check duplicate deal: same account + deal_type + loan_type
+            new_deal_type = deal_data.get("deal_type", deal.deal_type)
+            new_loan_type = deal_data.get("loan_type", deal.loan_type)
+            if new_deal_type and new_loan_type:
+                duplicate = (
+                    db.query(Deal)
+                    .filter(
+                        Deal.account_id == deal.account_id,
+                        Deal.deal_type == new_deal_type,
+                        Deal.loan_type == new_loan_type,
+                        Deal.id != deal.id,
+                    )
+                    .first()
+                )
+                if duplicate:
+                    raise ValueError(
+                        'A similar deal with same "Deal Type" and "Type of Loan" already exist'
+                    )
+
+            for key, value in deal_data.items():
+                if key == "id":
+                    continue
+                setattr(deal, key, value)
+
+            try:
+                db.commit()
+                db.refresh(deal)
+                updated += 1
+            except SQLAlchemyError as e:
+                raise e
+        except Exception as e:
+            db.rollback()
+            failed_deals.append(
+                {"type": "update", "id": deal_data.get("id"), "error": str(e)}
+            )
+
+    return {"inserted": inserted, "updated": updated, "failed": failed_deals}
+
+
+async def update_deals_based_on_csv(file: UploadFile, db: Session, user_id: int):
+    import csv
+    import io
+    from starlette.responses import JSONResponse
+    from src.models.account import Account
+    from src.utility.utils import get_deal_headers
+    from decimal import Decimal
+    
+    insertion_deals, updation_deals, error_list = [], [], []
+    row_number = 1
+
+    # Date fields that must be YYYY-MM-DD
+    DATE_FIELDS = {
+        "deal_expected_closing",
+        "deal_status_closing"
+    }
+
+    # Integer fields
+    INT_FIELDS = {
+        "id",
+        "account_id",
+        "deal_owner_id",
+    }
+
+    # Numeric (Decimal) fields
+    DECIMAL_FIELDS = {
+        "disbursed_amount",
+        "sanction_amount",
+        "approved_amount",
+        "amount_required",
+        "processing_fees",
+        "mm_charges",
+        "insurance_amount",
+        "pf_percentage",
+        "rate_of_interest"
+    }
+
+    try:
+        if not file.filename.endswith(".csv"):
+            raise HTTPException(status_code=400, detail="Only CSV files are supported")
+
+        contents = await file.read()
+        decoded = contents.decode("utf-8-sig", errors="replace").splitlines()
+        reader = csv.DictReader(decoded)
+        data = list(reader)
+
+        if not data:
+            raise HTTPException(status_code=400, detail="CSV file is empty")
+
+        deal_headers = get_deal_headers()
+        csv_headers = {col.strip().lower() for col in (reader.fieldnames or [])}
+        missing_headers = deal_headers - csv_headers
+        if missing_headers:
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "message": "Header mismatch found",
+                    "missing_headers": sorted(missing_headers),
+                },
+            )
+
+        for row in data:
+            row_number += 1
+            try:
+                # Normalise keys to lowercase; strip whitespace from values.
+                # Empty / whitespace-only values become None (saved as NULL in DB).
+                row = {
+                    k.strip().lower(): (v.strip() if v and v.strip() else None)
+                    for k, v in row.items()
+                }
+
+                is_new = not row.get("id")
+
+                # Parse Integer fields
+                for field in INT_FIELDS:
+                    if row.get(field):
+                        try:
+                            row[field] = int(row[field])
+                        except ValueError:
+                            raise ValueError(f"Invalid integer value for {field}: '{row[field]}'")
+
+                # Parse Decimal fields
+                for field in DECIMAL_FIELDS:
+                    if row.get(field):
+                        try:
+                            row[field] = Decimal(row[field])
+                        except Exception:
+                            raise ValueError(f"Invalid numeric value for {field}: '{row[field]}'")
+
+                # Parse Date fields (expected YYYY-MM-DD)
+                for field in DATE_FIELDS:
+                    if row.get(field):
+                        try:
+                            row[field] = date.fromisoformat(row[field][:10])
+                        except ValueError:
+                            raise ValueError(f"Invalid date for {field}: '{row[field]}'; expected YYYY-MM-DD")
+
+                # Parse Datetime fields
+                if row.get("deal_call_back_datetime"):
+                    try:
+                        row["deal_call_back_datetime"] = datetime.strptime(
+                            row["deal_call_back_datetime"], "%Y-%m-%d %H:%M"
+                        )
+                    except ValueError:
+                        try:
+                            # Fallback if already ISO
+                            row["deal_call_back_datetime"] = datetime.fromisoformat(row["deal_call_back_datetime"])
+                        except ValueError:
+                            raise ValueError(
+                                f"Invalid deal_call_back_datetime '{row['deal_call_back_datetime']}'; expected YYYY-MM-DD HH:MM"
+                            )
+
+                # Process parent ID (account_id)
+                acc_id = row.pop("account_id", None)
+
+                # Validation based on if it's new or update
+                if is_new:
+                    if not acc_id:
+                        raise ValueError("Parent ID (account_id) is required for new deals")
+
+                    # Fetch account to verify it exists and get account_name
+                    account = db.query(Account).filter(Account.id == acc_id).first()
+                    if not account:
+                        raise ValueError(f"Account with ID {acc_id} not found")
+
+                    row["account_id"] = account.id
+                    row["account_name"] = account.account_name
+                    row.pop("id", None)
+                    row["deal_owner_id"] = row.get("deal_owner_id") or user_id
+                    row["created_by"] = int(user_id)
+                    row["modified_by"] = int(user_id)
+                    insertion_deals.append(row)
+                else:
+                    if acc_id:
+                        # If account_id is provided, let's verify the account exists
+                        account = db.query(Account).filter(Account.id == acc_id).first()
+                        if not account:
+                            raise ValueError(f"Account with ID {acc_id} not found")
+                        row["account_id"] = account.id
+                        row["account_name"] = account.account_name
+                    row["modified_by"] = int(user_id)
+                    updation_deals.append(row)
+
+            except Exception as row_err:
+                error_list.append({"row": row_number, "error": str(row_err)})
+
+        if not insertion_deals and not updation_deals:
+            return JSONResponse(
+                status_code=200,
+                content=jsonable_encoder({
+                    "total_inserted": 0,
+                    "total_updated": 0,
+                    "row_errors": error_list,
+                }),
+            )
+
+        db_result = update_and_insert_deals(
+            insertion_deals, updation_deals, db
+        )
+        return JSONResponse(
+            status_code=200,
+            content=jsonable_encoder({
+                "total_inserted": db_result["inserted"],
+                "total_updated": db_result["updated"],
+                "row_errors": error_list + db_result["failed"],
+            }),
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        return JSONResponse(
+            status_code=500,
+            content=jsonable_encoder({"detail": f"Processing error: {str(e)}", "row_errors": error_list}),
+        )
+

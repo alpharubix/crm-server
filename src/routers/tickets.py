@@ -1,7 +1,7 @@
 import math
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, File, UploadFile
 from fastapi.encoders import jsonable_encoder
 from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session, selectinload
@@ -509,3 +509,299 @@ def delete_ticket(ticket_id: int, request: Request, db: Session = Depends(get_db
     db.delete(ticket)
     db.commit()
     return {"message": "Ticket deleted"}
+
+
+@tickets_router.post("/tickets-update-csv-upload")
+async def tickets_update_csv(
+    request: Request,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+):
+    user_role = request.state.role
+    if user_role not in ("super_admin", "admin", "manager"):
+        raise HTTPException(
+            status_code=403, detail="You do not have permission to upload CSV"
+        )
+    try:
+        user_id = int(request.state.user_id)
+        return await update_tickets_based_on_csv(file, db, user_id, user_role)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500, detail=f"unable to process csv error: {str(e)}"
+        )
+
+
+async def update_tickets_based_on_csv(file: UploadFile, db: Session, user_id: int, user_role: str):
+    import csv
+    import io
+    from starlette.responses import JSONResponse
+    from decimal import Decimal
+    from datetime import date
+    from sqlalchemy.exc import SQLAlchemyError
+    from src.utility.utils import get_ticket_headers
+
+    insertion_tickets, updation_tickets, error_list = [], [], []
+    row_number = 1
+
+    allowed_owner_ids = None
+    if user_role == "manager":
+        allowed_owner_ids = {int(user_id)} | set(
+            MANAGERID.MANAGER_EXECUTIVES_MAP.get(int(user_id), [])
+        )
+
+    # Date fields that must be YYYY-MM-DD
+    DATE_FIELDS = {
+        "lender_login_date",
+        "targeted_disbursement_date",
+        "disbursement_date",
+        "loan_start_date",
+        "loan_end_date"
+    }
+
+    # Integer fields
+    INT_FIELDS = {
+        "id",
+        "deal_id",
+        "account_id",
+        "tenure"
+    }
+
+    # Numeric (Decimal) fields
+    DECIMAL_FIELDS = {
+        "potential",
+        "approved_amount",
+        "sanction_amount",
+        "processing_fees",
+        "disbursed_amount",
+        "pf_percentage",
+        "insurance_amount",
+        "rate_of_interest"
+    }
+
+    try:
+        if not file.filename.endswith(".csv"):
+            raise HTTPException(status_code=400, detail="Only CSV files are supported")
+
+        contents = await file.read()
+        decoded = contents.decode("utf-8-sig", errors="replace").splitlines()
+        reader = csv.DictReader(decoded)
+        data = list(reader)
+
+        if not data:
+            raise HTTPException(status_code=400, detail="CSV file is empty")
+
+        ticket_headers = get_ticket_headers()
+        csv_headers = {col.strip().lower() for col in (reader.fieldnames or [])}
+        missing_headers = ticket_headers - csv_headers
+        if missing_headers:
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "message": "Header mismatch found",
+                    "missing_headers": sorted(missing_headers),
+                },
+            )
+
+        # Track local ticket counts per deal to generate sequence names correctly
+        deal_ticket_counts = {}
+
+        for row in data:
+            row_number += 1
+            try:
+                row = {
+                    k.strip().lower(): (v.strip() if v and v.strip() else None)
+                    for k, v in row.items()
+                }
+
+                is_new = not row.get("id")
+
+                # Parse Integer fields
+                for field in INT_FIELDS:
+                    if row.get(field):
+                        try:
+                            row[field] = int(row[field])
+                        except ValueError:
+                            raise ValueError(f"Invalid integer value for {field}: '{row[field]}'")
+
+                # Parse Decimal fields
+                for field in DECIMAL_FIELDS:
+                    if row.get(field):
+                        try:
+                            row[field] = Decimal(row[field])
+                        except Exception:
+                            raise ValueError(f"Invalid numeric value for {field}: '{row[field]}'")
+
+                # Parse Date fields (YYYY-MM-DD)
+                for field in DATE_FIELDS:
+                    if row.get(field):
+                        try:
+                            row[field] = date.fromisoformat(row[field][:10])
+                        except ValueError:
+                            raise ValueError(f"Invalid date for {field}: '{row[field]}'; expected YYYY-MM-DD")
+
+                if is_new:
+                    deal_id_val = row.get("deal_id")
+                    if not deal_id_val:
+                        raise ValueError("deal_id is required for new tickets")
+
+                    parent_deal = db.query(Deal).filter(Deal.id == int(deal_id_val)).first()
+                    if not parent_deal:
+                        raise ValueError(f"Parent deal with ID {deal_id_val} not found")
+
+                    if user_role == "manager":
+                        if parent_deal.deal_owner_id is not None and int(parent_deal.deal_owner_id) not in allowed_owner_ids:
+                            raise HTTPException(
+                                status_code=403,
+                                detail=f"Row {row_number}: You do not have permission to add a ticket to deal owned by user ID {parent_deal.deal_owner_id}"
+                            )
+
+                    # Auto-generate ticket name
+                    if deal_id_val not in deal_ticket_counts:
+                        existing_count = db.query(Ticket).filter(Ticket.deal_id == int(deal_id_val)).count()
+                        deal_ticket_counts[deal_id_val] = existing_count
+
+                    deal_ticket_counts[deal_id_val] += 1
+                    ticket_sequence = deal_ticket_counts[deal_id_val]
+                    parent_deal_name = parent_deal.deal_name or parent_deal.account_name or str(deal_id_val)
+                    generated_ticket_name = f"{parent_deal_name}/T{ticket_sequence:02d}"
+
+                    row["ticket_name"] = generated_ticket_name
+                    row["account_id"] = parent_deal.account_id
+                    row.pop("id", None)
+                    row["created_by"] = int(user_id)
+                    row["modified_by"] = int(user_id)
+                    insertion_tickets.append(row)
+
+                else:
+                    existing_ticket = db.query(Ticket).filter(Ticket.id == row["id"]).first()
+                    if not existing_ticket:
+                        raise ValueError(f"Ticket with ID {row['id']} not found")
+
+                    parent_deal = db.query(Deal).filter(Deal.id == existing_ticket.deal_id).first()
+                    if not parent_deal:
+                        raise ValueError(f"Parent deal for ticket ID {row['id']} not found")
+
+                    if user_role == "manager":
+                        if parent_deal.deal_owner_id is not None and int(parent_deal.deal_owner_id) not in allowed_owner_ids:
+                            raise HTTPException(
+                                status_code=403,
+                                detail=f"Row {row_number}: You do not have permission to update ticket owned by user ID {parent_deal.deal_owner_id}"
+                            )
+
+                    row.pop("deal_id", None)  # Prevent changing deal_id on update
+                    row["account_id"] = parent_deal.account_id
+                    row["modified_by"] = int(user_id)
+                    updation_tickets.append(row)
+
+            except HTTPException:
+                raise
+            except Exception as row_err:
+                error_list.append({"row": row_number, "error": str(row_err)})
+
+        if not insertion_tickets and not updation_tickets:
+            return JSONResponse(
+                status_code=200,
+                content=jsonable_encoder({
+                    "total_inserted": 0,
+                    "total_updated": 0,
+                    "row_errors": error_list,
+                }),
+            )
+
+        db_result = update_and_insert_tickets(
+            insertion_tickets, updation_tickets, db, user_id, user_role
+        )
+        return JSONResponse(
+            status_code=200,
+            content=jsonable_encoder({
+                "total_inserted": db_result["inserted"],
+                "total_updated": db_result["updated"],
+                "row_errors": error_list + db_result["failed"],
+            }),
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        return JSONResponse(
+            status_code=500,
+            content=jsonable_encoder({"detail": f"Processing error: {str(e)}", "row_errors": error_list}),
+        )
+
+
+def update_and_insert_tickets(insertion_tickets, updation_tickets, db: Session, user_id: int, user_role: str):
+    from sqlalchemy.exc import SQLAlchemyError
+    inserted = 0
+    updated = 0
+    failed = []
+
+    for tick in insertion_tickets:
+        try:
+            # Duplicate check
+            deal_id_val = tick.get("deal_id")
+            new_lender_name = tick.get("lender_name")
+            if new_lender_name:
+                duplicate_ticket = (
+                    db.query(Ticket)
+                    .filter(
+                        Ticket.deal_id == int(deal_id_val),
+                        Ticket.lender_name == new_lender_name,
+                    )
+                    .first()
+                )
+                if duplicate_ticket:
+                    raise ValueError(f"Duplicate ticket with lender name '{new_lender_name}' already exists for this deal")
+
+            ticket = Ticket(**tick)
+            db.add(ticket)
+            db.commit()
+            db.refresh(ticket)
+            inserted += 1
+            log_action(db, user_id, user_role, "CREATED", "Ticket", ticket.id, jsonable_encoder(format_ticket(ticket)))
+        except SQLAlchemyError as e:
+            db.rollback()
+            failed.append({"type": "insert", "data": tick, "error": str(e)})
+        except ValueError as e:
+            db.rollback()
+            failed.append({"type": "insert", "data": tick, "error": str(e)})
+
+    for tick in updation_tickets:
+        try:
+            ticket = db.query(Ticket).filter(Ticket.id == tick["id"]).first()
+            if not ticket:
+                raise ValueError("Ticket ID not found")
+
+            # Duplicate check
+            new_lender_name = tick.get("lender_name")
+            if new_lender_name and new_lender_name != ticket.lender_name:
+                duplicate_ticket = (
+                    db.query(Ticket)
+                    .filter(
+                        Ticket.deal_id == ticket.deal_id,
+                        Ticket.lender_name == new_lender_name,
+                        Ticket.id != ticket.id,
+                    )
+                    .first()
+                )
+                if duplicate_ticket:
+                    raise ValueError(f"Duplicate ticket with lender name '{new_lender_name}' already exists for this deal")
+
+            for key, value in tick.items():
+                if key == "id":
+                    continue
+                setattr(ticket, key, value)
+
+            db.commit()
+            db.refresh(ticket)
+            updated += 1
+            log_action(db, user_id, user_role, "UPDATED", "Ticket", ticket.id, tick)
+        except SQLAlchemyError as e:
+            db.rollback()
+            failed.append({"type": "update", "data": tick, "error": str(e)})
+        except ValueError as e:
+            db.rollback()
+            failed.append({"type": "update", "data": tick, "error": str(e)})
+
+    return {"inserted": inserted, "updated": updated, "failed": failed}

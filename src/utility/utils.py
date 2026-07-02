@@ -94,3 +94,35 @@ def get_deal_headers():
         "deal_status_closing",
         "deal_owner_id",
     }
+
+
+def get_ticket_headers():
+    return {
+        "id",
+        "deal_id",
+        "ticket_login",
+        "lender_name",
+        "potential",
+        "lender_login_type",
+        "lender_login_date",
+        "partner_code",
+        "targeted_disbursement_date",
+        "type_of_loan",
+        "disbursement_date",
+        "ticket_status",
+        "ticket_stage",
+        "approved_amount",
+        "sanction_amount",
+        "processing_fees",
+        "disbursed_amount",
+        "pf_percentage",
+        "tenure",
+        "insurance_amount",
+        "loan_start_date",
+        "rate_of_interest",
+        "loan_end_date",
+        "interest_type",
+        "customer_rejection_reason",
+        "customer_rejection_status_explanation",
+        "lender_rejection_status_explanation",
+    }

@@ -653,7 +653,7 @@ def update_and_insert_deals(insertion_deals, updation_deals, db: Session):
     return {"inserted": inserted, "updated": updated, "failed": failed_deals}
 
 
-async def update_deals_based_on_csv(file: UploadFile, db: Session, user_id: int):
+async def update_deals_based_on_csv(file: UploadFile, db: Session, user_id: int, user_role: str):
     import csv
     import io
     from starlette.responses import JSONResponse
@@ -663,6 +663,12 @@ async def update_deals_based_on_csv(file: UploadFile, db: Session, user_id: int)
     
     insertion_deals, updation_deals, error_list = [], [], []
     row_number = 1
+
+    allowed_owner_ids = None
+    if user_role == "manager":
+        allowed_owner_ids = {int(user_id)} | set(
+            MANAGERID.MANAGER_EXECUTIVES_MAP.get(int(user_id), [])
+        )
 
     # Date fields that must be YYYY-MM-DD
     DATE_FIELDS = {
@@ -768,6 +774,14 @@ async def update_deals_based_on_csv(file: UploadFile, db: Session, user_id: int)
                 # Process parent ID (account_id)
                 acc_id = row.pop("account_id", None)
 
+                if user_role == "manager":
+                    new_owner_id = row.get("deal_owner_id")
+                    if new_owner_id and int(new_owner_id) not in allowed_owner_ids:
+                        raise HTTPException(
+                            status_code=403,
+                            detail=f"Row {row_number}: You do not have permission to assign a deal to owner ID {new_owner_id}"
+                        )
+
                 # Validation based on if it's new or update
                 if is_new:
                     if not acc_id:
@@ -786,6 +800,15 @@ async def update_deals_based_on_csv(file: UploadFile, db: Session, user_id: int)
                     row["modified_by"] = int(user_id)
                     insertion_deals.append(row)
                 else:
+                    existing_deal = db.query(Deal).filter(Deal.id == row["id"]).first()
+                    if not existing_deal:
+                        raise ValueError(f"Deal with ID {row['id']} not found")
+                    if user_role == "manager":
+                        if existing_deal.deal_owner_id is not None and int(existing_deal.deal_owner_id) not in allowed_owner_ids:
+                            raise HTTPException(
+                                status_code=403,
+                                detail=f"Row {row_number}: You do not have permission to update deal owned by user ID {existing_deal.deal_owner_id}"
+                            )
                     if acc_id:
                         # If account_id is provided, let's verify the account exists
                         account = db.query(Account).filter(Account.id == acc_id).first()
@@ -796,6 +819,8 @@ async def update_deals_based_on_csv(file: UploadFile, db: Session, user_id: int)
                     row["modified_by"] = int(user_id)
                     updation_deals.append(row)
 
+            except HTTPException:
+                raise
             except Exception as row_err:
                 error_list.append({"row": row_number, "error": str(row_err)})
 

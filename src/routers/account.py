@@ -105,9 +105,16 @@ def get_accounts_ids(account_name: str, db: Session = Depends(get_db)):
 async def accounts_update_csv(
     request: Request, file: UploadFile = File(...), db: Session = Depends(get_db)
 ):
+    user_role = request.state.role
+    if user_role not in ("super_admin", "admin", "manager"):
+        raise HTTPException(
+            status_code=403, detail="You do not have permission to upload CSV"
+        )
     try:
         user_id = request.state.user_id
-        return await repo.update_accounts_based_on_csv(file, db, user_id)
+        return await repo.update_accounts_based_on_csv(file, db, user_id, user_role)
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(
             status_code=500, detail=f"unable to process csv error: {str(e)}"

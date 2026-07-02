@@ -658,9 +658,15 @@ def update_and_insert_accounts(insertion_accounts, updation_accounts, db: Sessio
     return {"inserted": inserted, "updated": updated, "failed": failed_accounts}
 
 
-async def update_accounts_based_on_csv(file, db: Session, user_id: int):
+async def update_accounts_based_on_csv(file, db: Session, user_id: int, user_role: str):
     insertion_accounts, updation_accounts, error_list = [], [], []
     row_number = 1
+
+    allowed_owner_ids = None
+    if user_role == "manager":
+        allowed_owner_ids = {int(user_id)} | set(
+            MANAGERID.MANAGER_EXECUTIVES_MAP.get(int(user_id), [])
+        )
 
     # CSV columns that map into business_premise_address JSONB {city, state, pincode}
     _BUSINESS_PREMISE_MAP = {
@@ -752,16 +758,35 @@ async def update_accounts_based_on_csv(file, db: Session, user_id: int):
                     business_details[key] = row.pop(key, None)
                 row["business_details"] = business_details
 
+                if user_role == "manager":
+                    new_owner_id = row.get("account_owner_id")
+                    if new_owner_id and int(new_owner_id) not in allowed_owner_ids:
+                        raise HTTPException(
+                            status_code=403,
+                            detail=f"Row {row_number}: You do not have permission to assign an account to owner ID {new_owner_id}"
+                        )
+
                 if is_new:
                     row.pop("id", None)
                     row["account_owner_id"] = row.get("account_owner_id") or user_id
                     row["created_by_id"] = int(user_id)
                     insertion_accounts.append(row)
                 else:
+                    existing_account = db.query(Account).filter(Account.id == row["id"]).first()
+                    if not existing_account:
+                        raise ValueError(f"Account with ID {row['id']} not found")
+                    if user_role == "manager":
+                        if existing_account.account_owner_id is not None and int(existing_account.account_owner_id) not in allowed_owner_ids:
+                            raise HTTPException(
+                                status_code=403,
+                                detail=f"Row {row_number}: You do not have permission to update account owned by user ID {existing_account.account_owner_id}"
+                            )
                     # Pass the full row (including None values) so blank CSV cells
                     # explicitly clear existing DB values, as requested.
                     updation_accounts.append(row)
 
+            except HTTPException:
+                raise
             except Exception as row_err:
                 error_list.append({"row": row_number, "error": str(row_err)})
 

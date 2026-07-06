@@ -20,6 +20,7 @@ dependencies = [
     "pandas>=3.0.0",
     "starlette>=0.50.0",
     "apscheduler>=3.11.2",
+    "httpx>=0.28.1",
 ]
 [[build.env]]
 name = "BP_PYTHON_VERSION"

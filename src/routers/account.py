@@ -223,4 +223,78 @@ async def get_r1xcrm_report_date_range(
             raise HTTPException(status_code=response.status_code, detail=response.json())
         return response.json()
     except httpx.RequestError as e:
-        raise HTTPException(status_code=500, detail=f"Unable to connect to 5PointCredit: {e}")
+        raise HTTPException(status_code=500, detail=f"Unable to connect to 5PointCredit: {e}")
+
+
+# routers for tax calculation
+@router.get("/r1xcrm-tax-calculation/{acc_id}")
+async def get_r1xcrm_tax_calculation(
+    request: Request,
+    acc_id: int,
+):
+    try:
+        url = (
+            f"{settings.FIVE_POINT_CREDIT_BACKEND_URL}"
+            f"/itr/r1xcrm-tax-calculation/{acc_id}"
+        )
+        async with httpx.AsyncClient(timeout=30) as client:
+            response = await client.get(url)
+        if response.status_code != 200:
+            raise HTTPException(status_code=response.status_code, detail=response.json())
+        return response.json()
+    except httpx.RequestError as e:
+        raise HTTPException(status_code=500, detail=f"Unable to connect to 5PointCredit: {e}")
+
+@router.get("/r1xcrm-balance_sheet/{acc_id}")
+async def get_r1xcrm_balance_sheet(
+    request: Request,
+    acc_id: int,
+):
+    try:
+        url = (
+            f"{settings.FIVE_POINT_CREDIT_BACKEND_URL}"
+            f"/itr/r1xcrm-balance_sheet/{acc_id}"
+        )
+        async with httpx.AsyncClient(timeout=30) as client:
+            response = await client.get(url)
+        if response.status_code != 200:
+            raise HTTPException(status_code=response.status_code, detail=response.json())
+        return response.json()
+    except httpx.RequestError as e:
+        raise HTTPException(status_code=500, detail=f"Unable to connect to 5PointCredit: {e}")
+
+@router.get("/r1xcrm-profit-and-loss-statement/{acc_id}")
+async def get_r1xcrm_profit_and_loss_statement(
+    request: Request,
+    acc_id: int,
+):
+    try:
+        url = (
+            f"{settings.FIVE_POINT_CREDIT_BACKEND_URL}"
+            f"/itr/r1xcrm-profit-and-loss-statement/{acc_id}"
+        )
+        async with httpx.AsyncClient(timeout=30) as client:
+            response = await client.get(url)
+        if response.status_code != 200:
+            raise HTTPException(status_code=response.status_code, detail=response.json())
+        return response.json()
+    except httpx.RequestError as e:
+        raise HTTPException(status_code=500, detail=f"Unable to connect to 5PointCredit: {e}")
+
+@router.get("/r1xcrm-ratio-analysis/{acc_id}")
+async def get_r1xcrm_ratio_analysis(
+    request: Request,
+    acc_id: int,
+):
+    try:
+        url = (
+            f"{settings.FIVE_POINT_CREDIT_BACKEND_URL}"
+            f"/itr/r1xcrm-ratio-analysis/{acc_id}"
+        )
+        async with httpx.AsyncClient(timeout=30) as client:
+            response = await client.get(url)
+        if response.status_code != 200:
+            raise HTTPException(status_code=response.status_code, detail=response.json())
+        return response.json()
+    except httpx.RequestError as e:
+        raise HTTPException(status_code=500, detail=f"Unable to connect to 5PointCredit: {e}")

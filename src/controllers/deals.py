@@ -428,6 +428,7 @@ def create_deal(deal, db: Session, user_id, user_role):
             notification_emails = [
                 "sutapa.roy@r1xchange.com",
                 "pranay.kumar@r1xchange.com",
+                "raj.nandini@r1xchange.com",
             ]
 
             # from src.controllers.Background_threads import BackgroundThreadPool

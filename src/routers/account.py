@@ -379,3 +379,21 @@ async def get_r1xcrm_monthly_sales_purchase_summary(
         raise HTTPException(status_code=500, detail=f"Unable to connect to 5PointCredit: {e}")
 
 
+@router.get("/check-r1xchange-account/{acc_id}")
+async def check_r1xchange_account(
+    request: Request,
+    acc_id: int,
+):
+    try:
+        url = (
+            f"{settings.FIVE_POINT_CREDIT_BACKEND_URL}"
+            f"/auth/check-r1xchange-account/{acc_id}"
+        )
+        async with httpx.AsyncClient(timeout=30) as client:
+            response = await client.get(url)
+        if response.status_code != 200:
+            raise HTTPException(status_code=response.status_code, detail=response.json())
+        return response.json()
+    except httpx.RequestError as e:
+        raise HTTPException(status_code=500, detail=f"Unable to connect to 5PointCredit: {e}")
+    

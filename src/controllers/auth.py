@@ -195,6 +195,21 @@ class MANAGERID:
         # ],
         # manager_id: [executive_ids]
     }
+    SUPER_ADMIN_AND_ADMIN_MAP = {
+        3899927000000201013,  # "Anslem Prathap"
+        3899927000005965018,  # "Arjun J"
+        3899927000004808001,  # "Ayush Dingane"
+        3899927000005114020,  # "Digamber Pandey"
+        3899927000007673012,  # "Honnapa Nayak"
+        3899927000005114004,  # "Manjunath Jain"
+        3899927000000318361,  # "Namrata Srivastava"
+        3899927000000795843,  # "Prashanth"
+        3899927000000851906,  # "Prataplinga B V"
+        3899927000004429017,  # "Sandip Kumar Jena"
+        3899927000005965002,  # "Subhasini T S"
+        3899927000005114050,  # "Sutapa Roy"
+        3899927000000452950,  # "Vinod Kumar"
+    }
 
 
 users = {  # users for fast lookup

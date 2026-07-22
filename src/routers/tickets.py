@@ -265,9 +265,9 @@ async def create_ticket(request: Request, db: Session = Depends(get_db)):
     existing_ticket_count = (
         db.query(Ticket).filter(Ticket.deal_id == int(deal_id_val)).count()
     )
-    ticket_sequence = existing_ticket_count + 1
+    ticket_sequence = existing_ticket_count + 1000
     parent_deal_name = parent_deal.deal_name or parent_deal.account_name or str(deal_id_val)
-    generated_ticket_name = f"{parent_deal_name}/T{ticket_sequence:02d}"
+    generated_ticket_name = f"{parent_deal_name}/TK{ticket_sequence}"
     filtered_body["ticket_name"] = generated_ticket_name
 
     # --- Duplicate ticket check: same deal + lender_name ---

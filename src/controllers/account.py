@@ -286,8 +286,6 @@ def update_account(
                 #     new_owner.full_name,
                 #     db_account.account_name,
                 #     db_account.id,
-                # )
-
         return db_account
     except HTTPException as e:
         raise e
@@ -415,6 +413,7 @@ def get_all_accounts(
                 selectinload(Account.created_by),
                 selectinload(Account.account_linked_contact),
                 selectinload(Account.deals),
+                selectinload(Account.modified_by)
             )
             .limit(limit)
             .all()

@@ -67,6 +67,7 @@ class JobRequirement(Base):
     approver_id = Column(BIGINT, ForeignKey("users.id"), nullable=True)
     assignee_id = Column(BIGINT, ForeignKey("users.id"), nullable=True)
     created_by_id = Column(BIGINT, ForeignKey("users.id"), nullable=True)
+    modified_by_id = Column(BIGINT, ForeignKey("users.id"), nullable=True)
 
     # Audit
     created_time = Column(
@@ -80,6 +81,7 @@ class JobRequirement(Base):
     )
 
     # Relationships
+    modified_by = relationship("User", foreign_keys=[modified_by_id])
     approver = relationship("User", foreign_keys=[approver_id])
     assignee = relationship("User", foreign_keys=[assignee_id])
     created_by = relationship("User", foreign_keys=[created_by_id])

@@ -44,6 +44,8 @@ class Account(Base):
     # Business Details (Core - Filtered)
     type_of_business = Column(String, nullable=True, index=True)
     industry = Column(String, nullable=True, index=True)
+    profile_type = Column(String, nullable=True, index=True)
+    is_priority_account = Column(String, nullable=True, index=True)
 
     # Location (Core - Filtered)
     city = Column(String, nullable=True, index=True)
@@ -73,6 +75,10 @@ class Account(Base):
     created_by_id = Column(BIGINT, ForeignKey("users.id"), nullable=True)
     created_by = relationship(
         "User", foreign_keys=[created_by_id], backref="user_created_by_id"
+    )
+    modified_by_id = Column(BIGINT, ForeignKey("users.id"), nullable=True)
+    modified_by = relationship(
+        "User", foreign_keys=[modified_by_id], backref="account_modified_by"
     )
     owner = relationship(
         "User", foreign_keys=[account_owner_id], backref="account_owner"

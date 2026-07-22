@@ -1,6 +1,7 @@
 from datetime import date, datetime, timezone
 from typing import Any, Dict, List, Literal, Optional
 
+import pydantic
 from pydantic import (
     BaseModel,
     ConfigDict,
@@ -98,6 +99,7 @@ class AccountBase(BaseModel):
     # Business Details (Optional)
     type_of_business: Optional[str] = None
     industry: Optional[str] = None
+    profile_type: Optional[str] = None
 
     # Location (Optional)
     city: Optional[str] = None
@@ -131,6 +133,21 @@ class AccountBase(BaseModel):
     )
     customer_references: Optional[Dict[str, Any]] = Field(default_factory=dict)
 
+    @field_validator("pincode", mode="before")
+    @classmethod
+    def validate_pincode(cls, value):
+        if value is None or value == "":
+            return value
+        try:
+            pincode = int(str(value).strip())
+        except ValueError as exc:
+            raise ValueError("pincode must be numeric") from exc
+
+        pincode_str = str(pincode)
+        if len(pincode_str) != 6:
+            raise ValueError("pincode must be a 6 digit numeric value")
+        return pincode_str
+
 
 from datetime import datetime
 from typing import Any, Dict, List, Optional
@@ -157,13 +174,16 @@ class AccountResponse(BaseModel):
     pincode: Optional[str] = None
     source: Optional[str] = None
     account_stage: Optional[Any] = None
-
+    profile_type: Optional[str] = None
+    is_priority_account: Optional[str] = None
     created_by_id: Optional[str] = None
     created_time: Optional[datetime] = None
     modified_time: Optional[datetime] = None
+    modified_by_id: Optional[str] = None
     assignment_date: Optional[datetime | None] = None
     custom_fields: Optional[Dict[str, Any]] = Field(default_factory=dict)
     created_by: Optional[UserResponseAccount] = None
+    modified_by: Optional[UserResponseAccount] = None
     account_owner_id: Optional[str] = None
     owner: Optional[UserResponseAccount] = None
     account_linked_contact: Optional[List["ContactResponse"]] = None
@@ -206,7 +226,7 @@ class AccountResponse(BaseModel):
             return value
 
     @field_validator(
-        "id", "account_owner_id", "created_by_id", "parent_account_id", mode="before"
+        "id", "account_owner_id", "created_by_id", "modified_by_id","parent_account_id", mode="before"
     )
     @classmethod
     def coerce_ids_to_str(cls, value):

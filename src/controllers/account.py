@@ -20,6 +20,8 @@ from src.controllers.auth import MANAGERID
 # from src.controllers.Background_threads import BackgroundThreadPool
 from src.controllers.notes import get_notes
 from src.models.ticket import Ticket
+from src.models.deal_document import DealDocument
+from src.models.revenue import Revenue
 from src.utility.utils import get_account_headers
 
 from ..models.account import Account, AccountStatusHistory
@@ -57,7 +59,10 @@ def create_account(
     if data.created_time:
         account_data["created_time"] = data.created_time
 
-    new_account = Account(**account_data)
+    valid_keys = set(Account.__mapper__.attrs.keys())
+    filtered_data = {k: v for k, v in account_data.items() if k in valid_keys}
+
+    new_account = Account(**filtered_data)
     db.add(new_account)
     db.flush()
 
@@ -443,33 +448,76 @@ def get_all_accounts(
                         {"Parent_Id.id": str(deal.crm_deal_id), "module": "Deals"}
                     )
 
-            # Step 4: Query tickets and add to pairs
+            # Step 4: Query tickets, documents, and revenue for deal hierarchy
             tickets_by_deal: dict[int, list] = {}
+            tickets_list: list = []
+            documents_list: list = []
+            revenue_list: list = []
+
             if deal_ids_for_tickets:
+                deal_map = {deal.id: getattr(deal, "deal_name", None) or getattr(deal, "account_name", None) or f"Deal #{deal.id}" for deal in acc.deals}
+
+                # 4a. Tickets
                 ticket_records = (
                     db.query(Ticket)
                     .filter(Ticket.deal_id.in_(deal_ids_for_tickets))
                     .all()
                 )
                 for ticket in ticket_records:
-                    # STRICTLY PAIR TICKET ID WITH TICKET MODULE
                     note_pairs.append(
                         {"Parent_Id.id": str(ticket.id), "module": "Tickets"}
                     )
-
-                    ticket_dict = {
+                    t_dict = {
                         c.name: getattr(ticket, c.name)
                         for c in ticket.__table__.columns
                     }
-                    ticket_dict["id"] = str(ticket_dict["id"])
-                    ticket_dict["deal_id"] = str(ticket_dict["deal_id"])
-                    tickets_by_deal.setdefault(ticket.deal_id, []).append(ticket_dict)
+                    t_dict["id"] = str(t_dict["id"])
+                    t_dict["deal_id"] = str(t_dict["deal_id"])
+                    t_dict["deal_name"] = deal_map.get(ticket.deal_id, "—")
+                    tickets_by_deal.setdefault(ticket.deal_id, []).append(t_dict)
+                    tickets_list.append(t_dict)
 
-            # Step 5: Attach tickets to deals
+                # 4b. Deal Documents
+                doc_records = (
+                    db.query(DealDocument)
+                    .filter(DealDocument.deal_id.in_(deal_ids_for_tickets))
+                    .all()
+                )
+                for doc in doc_records:
+                    d_dict = {
+                        c.name: getattr(doc, c.name)
+                        for c in doc.__table__.columns
+                    }
+                    d_dict["id"] = str(d_dict["id"])
+                    d_dict["deal_id"] = str(d_dict["deal_id"])
+                    d_dict["deal_name"] = deal_map.get(doc.deal_id, "—")
+                    documents_list.append(d_dict)
+
+                # 4c. Revenue
+                rev_records = (
+                    db.query(Revenue)
+                    .filter(Revenue.deal_id.in_(deal_ids_for_tickets))
+                    .all()
+                )
+                for rev in rev_records:
+                    r_dict = {
+                        c.name: getattr(rev, c.name)
+                        for c in rev.__table__.columns
+                    }
+                    r_dict["id"] = str(r_dict["id"])
+                    r_dict["deal_id"] = str(r_dict["deal_id"])
+                    r_dict["deal_name"] = deal_map.get(rev.deal_id, "—")
+                    revenue_list.append(r_dict)
+
+            # Step 5: Attach enriched lists to account
             for deal in acc.deals:
                 deal._tickets_list = tickets_by_deal.get(deal.id, [])
 
-            # Step 6: Fetch notes with paired filters (This fixes your bug)
+            acc._tickets_list = tickets_list
+            acc._deal_documents_list = documents_list
+            acc._revenue_list = revenue_list
+
+            # Step 6: Fetch notes with paired filters
             acc.notes = get_notes(
                 pair_filters=note_pairs, notes_collection=mongodb["Notes"]
             )
@@ -590,12 +638,10 @@ def fetch_account_id(account_name: str, db: Session):
             .limit(10)
             .all()
         )
-        print(results)
         if len(results) == 0:
             return JSONResponse(status_code=404, content={"data": []})
         # Convert to list of dicts
         dict_results = [row._asdict() for row in results]
-        print(dict_results)
         return {"data": dict_results}
     except Exception as e:
         logging.exception(e)
@@ -649,7 +695,7 @@ def update_and_insert_accounts(insertion_accounts, updation_accounts, db: Sessio
             except SQLAlchemyError as e:
                 raise e
         except Exception as e:
-            print(e, acc.get("id"))
+            logging.exception(e)
             db.rollback()
             failed_accounts.append(
                 {"type": "update", "id": acc.get("id"), "error": str(e)}

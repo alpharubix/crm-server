@@ -9,6 +9,7 @@ from pydantic import (
     Field,
     field_serializer,
     field_validator,
+    model_validator,
 )
 
 from src.schemas.contact import ContactResponse
@@ -209,6 +210,9 @@ class AccountResponse(BaseModel):
     owner: Optional[UserResponseAccount] = None
     account_linked_contact: Optional[List["ContactResponse"]] = None
     deals: Optional[List["DealSchema"]] = None
+    tickets: Optional[List[Dict[str, Any]]] = Field(default_factory=list)
+    deal_documents: Optional[List[Dict[str, Any]]] = Field(default_factory=list)
+    revenue: Optional[List[Dict[str, Any]]] = Field(default_factory=list)
     notes: Optional[Any] = None
 
     # ========== NEW FIELDS (Add these) ==========
@@ -234,6 +238,31 @@ class AccountResponse(BaseModel):
     customer_salary_details: Optional[Dict[str, Any]] = Field(default_factory=dict)
 
     model_config = {"from_attributes": True}
+
+    @model_validator(mode="before")
+    @classmethod
+    def extract_custom_attributes(cls, value):
+        if hasattr(value, "_tickets_list") or hasattr(value, "_deal_documents_list") or hasattr(value, "_revenue_list"):
+            data = {}
+            if hasattr(value, "__table__"):
+                for c in value.__table__.columns:
+                    data[c.name] = getattr(value, c.name, None)
+
+            for attr in (
+                "owner", "created_by", "modified_by", "account_linked_contact",
+                "deals", "notes", "business_details", "business_premise_address",
+                "applicant_residence_address", "co_applicant_residence_address",
+                "customer_references", "customer_salary_details", "custom_fields",
+                "parent_account"
+            ):
+                if hasattr(value, attr):
+                    data[attr] = getattr(value, attr)
+
+            data["tickets"] = getattr(value, "_tickets_list", [])
+            data["deal_documents"] = getattr(value, "_deal_documents_list", [])
+            data["revenue"] = getattr(value, "_revenue_list", [])
+            return data
+        return value
 
     @field_serializer(
         "created_time", "modified_time", "call_back_date_time", "assignment_date"

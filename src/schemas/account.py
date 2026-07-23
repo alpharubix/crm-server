@@ -1,5 +1,5 @@
 from datetime import date, datetime, timezone
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional, Union
 
 import pydantic
 from pydantic import (
@@ -80,6 +80,24 @@ class CustomerReferencesInfo(BaseModel):
     person2: ReferencePerson = Field(default_factory=ReferencePerson)
 
 
+# Employment type choices for Salaried profile
+EmploymentType = Literal[
+    "Private Employee",
+    "Government Employee",
+    "Retired",
+    "Others",
+]
+
+
+class CustomerSalaryDetailsInfo(BaseModel):
+    """Structured salary details — applicable when profile_type = 'Salaried'."""
+
+    employment_type: Optional[EmploymentType] = None  # select
+    employer_name: Optional[str] = None               # text
+    employment_vintage: Optional[int] = None           # number (years)
+    annual_income: Optional[float] = None              # number (currency)
+
+
 class AccountBase(BaseModel):
     # Identity & Contact (Required)
     first_name: str
@@ -132,6 +150,9 @@ class AccountBase(BaseModel):
         default_factory=dict
     )
     customer_references: Optional[Dict[str, Any]] = Field(default_factory=dict)
+
+    # Customer Salary Details — optional; frontend enforces when profile_type = "Salaried"
+    customer_salary_details: Optional[Dict[str, Any]] = Field(default_factory=dict)
 
     @field_validator("pincode", mode="before")
     @classmethod
@@ -208,6 +229,9 @@ class AccountResponse(BaseModel):
         default_factory=dict
     )
     customer_references: Optional[Dict[str, Any]] = Field(default_factory=dict)
+
+    # Customer Salary Details — optional; frontend enforces when profile_type = "Salaried"
+    customer_salary_details: Optional[Dict[str, Any]] = Field(default_factory=dict)
 
     model_config = {"from_attributes": True}
 

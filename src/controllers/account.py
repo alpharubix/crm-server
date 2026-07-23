@@ -154,6 +154,7 @@ def update_account(
         "applicant_residence_address",
         "co_applicant_residence_address",
         "customer_references",
+        "customer_salary_details",   # salary info for Salaried profile_type
     ]
 
     # Pure Date columns — must be parsed separately before the generic datetime branch

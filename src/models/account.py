@@ -101,6 +101,9 @@ class Account(Base):
     co_applicant_residence_address = Column(JSONB, default={}, nullable=False)
     customer_references = Column(JSONB, default={}, nullable=False)
 
+    # Customer Salary Details — displayed only when profile_type = "Salaried"
+    customer_salary_details = Column(JSONB, default={}, nullable=True)
+
     # ========== HYBRID PROPERTIES ==========
     @hybrid_property
     def current_business_type(self):

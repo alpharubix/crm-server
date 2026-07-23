@@ -375,7 +375,8 @@ def create_deal(deal, db: Session, user_id, user_role):
             .filter(Deal.account_id == int(deal.account_id))
             .count()
         )
-        sequence = existing_deal_count + 1000
+        existing_deal_count += 1
+        sequence = str(existing_deal_count).zfill(4)
         generated_deal_name = (
             f"{deal.account_name}/DL/{sequence}"
         )

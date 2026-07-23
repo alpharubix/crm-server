@@ -44,6 +44,8 @@ class Account(Base):
     # Business Details (Core - Filtered)
     type_of_business = Column(String, nullable=True, index=True)
     industry = Column(String, nullable=True, index=True)
+    profile_type = Column(String, nullable=True, index=True)
+    is_priority_account = Column(String, nullable=True, index=True)
 
     # Location (Core - Filtered)
     city = Column(String, nullable=True, index=True)
@@ -74,6 +76,10 @@ class Account(Base):
     created_by = relationship(
         "User", foreign_keys=[created_by_id], backref="user_created_by_id"
     )
+    modified_by_id = Column(BIGINT, ForeignKey("users.id"), nullable=True)
+    modified_by = relationship(
+        "User", foreign_keys=[modified_by_id], backref="account_modified_by"
+    )
     owner = relationship(
         "User", foreign_keys=[account_owner_id], backref="account_owner"
     )
@@ -94,6 +100,9 @@ class Account(Base):
     applicant_residence_address = Column(JSONB, default={}, nullable=False)
     co_applicant_residence_address = Column(JSONB, default={}, nullable=False)
     customer_references = Column(JSONB, default={}, nullable=False)
+
+    # Customer Salary Details — displayed only when profile_type = "Salaried"
+    customer_salary_details = Column(JSONB, default={}, nullable=True)
 
     # ========== HYBRID PROPERTIES ==========
     @hybrid_property

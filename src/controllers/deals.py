@@ -276,6 +276,8 @@ def get_deals(
                     deal_dict["deal_owner_id"] = str(deal.deal_owner_id)
                 if deal.account_id:
                     deal_dict["account_id"] = str(deal.account_id)
+                if deal.modified_by:
+                    deal_dict["updated_by"] = str(deal.modified_by)
 
                 deal_dict["payment_receipt"] = None
                 deal_dict["notes"] = notes
@@ -373,9 +375,10 @@ def create_deal(deal, db: Session, user_id, user_role):
             .filter(Deal.account_id == int(deal.account_id))
             .count()
         )
-        sequence = existing_deal_count + 1
+        existing_deal_count += 1
+        sequence = str(existing_deal_count).zfill(4)
         generated_deal_name = (
-            f"{deal.account_name}/{deal.account_id}/D{sequence:02d}"
+            f"{deal.account_name}/DL/{sequence}"
         )
 
         created_deal = Deal(

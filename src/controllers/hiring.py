@@ -19,14 +19,14 @@ def stringify_ids(data):
     if hasattr(data, "__dict__"):
         res = {c.name: getattr(data, c.name) for c in data.__table__.columns}
 
-        for rel in ["approver", "assignee", "created_by", "submitted_by_user"]:
+        for rel in ["approver", "assignee", "created_by","modified_by","submitted_by_user"]:
             if rel in data.__dict__:
                 val = getattr(data, rel)
                 if val:
                     res[rel] = {
                         "id": str(val.id),
                         "name": getattr(
-                            val, "name", getattr(val, "username", str(val.id))
+                            val, "name", getattr(val, "full_name", str(val.id))
                         ),
                     }
         return stringify_ids(res)
@@ -120,7 +120,8 @@ def update_job_requirement(
     for key, value in payload.items():
         if hasattr(jr, key):
             setattr(jr, key, None if value == "" else value)
-
+    #update the modified_id by the resource updater user_id
+    jr.modified_by_id = user_id
     try:
         db.commit()
         db.refresh(jr)
@@ -183,6 +184,7 @@ def get_all_job_requirements(
                 selectinload(JobRequirement.approver),
                 selectinload(JobRequirement.assignee),
                 selectinload(JobRequirement.created_by),
+                selectinload(JobRequirement.modified_by),
             )
             .limit(limit)
             .all()

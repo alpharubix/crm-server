@@ -1,6 +1,7 @@
 from datetime import date, datetime, timezone
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional, Union
 
+import pydantic
 from pydantic import (
     BaseModel,
     ConfigDict,
@@ -8,6 +9,7 @@ from pydantic import (
     Field,
     field_serializer,
     field_validator,
+    model_validator,
 )
 
 from src.schemas.contact import ContactResponse
@@ -79,6 +81,24 @@ class CustomerReferencesInfo(BaseModel):
     person2: ReferencePerson = Field(default_factory=ReferencePerson)
 
 
+# Employment type choices for Salaried profile
+EmploymentType = Literal[
+    "Private Employee",
+    "Government Employee",
+    "Retired",
+    "Others",
+]
+
+
+class CustomerSalaryDetailsInfo(BaseModel):
+    """Structured salary details — applicable when profile_type = 'Salaried'."""
+
+    employment_type: Optional[EmploymentType] = None  # select
+    employer_name: Optional[str] = None               # text
+    employment_vintage: Optional[int] = None           # number (years)
+    annual_income: Optional[float] = None              # number (currency)
+
+
 class AccountBase(BaseModel):
     # Identity & Contact (Required)
     first_name: str
@@ -98,6 +118,7 @@ class AccountBase(BaseModel):
     # Business Details (Optional)
     type_of_business: Optional[str] = None
     industry: Optional[str] = None
+    profile_type: Optional[str] = None
 
     # Location (Optional)
     city: Optional[str] = None
@@ -131,6 +152,24 @@ class AccountBase(BaseModel):
     )
     customer_references: Optional[Dict[str, Any]] = Field(default_factory=dict)
 
+    # Customer Salary Details — optional; frontend enforces when profile_type = "Salaried"
+    customer_salary_details: Optional[Dict[str, Any]] = Field(default_factory=dict)
+
+    @field_validator("pincode", mode="before")
+    @classmethod
+    def validate_pincode(cls, value):
+        if value is None or value == "":
+            return value
+        try:
+            pincode = int(str(value).strip())
+        except ValueError as exc:
+            raise ValueError("pincode must be numeric") from exc
+
+        pincode_str = str(pincode)
+        if len(pincode_str) != 6:
+            raise ValueError("pincode must be a 6 digit numeric value")
+        return pincode_str
+
 
 from datetime import datetime
 from typing import Any, Dict, List, Optional
@@ -157,17 +196,23 @@ class AccountResponse(BaseModel):
     pincode: Optional[str] = None
     source: Optional[str] = None
     account_stage: Optional[Any] = None
-
+    profile_type: Optional[str] = None
+    is_priority_account: Optional[str] = None
     created_by_id: Optional[str] = None
     created_time: Optional[datetime] = None
     modified_time: Optional[datetime] = None
+    modified_by_id: Optional[str] = None
     assignment_date: Optional[datetime | None] = None
     custom_fields: Optional[Dict[str, Any]] = Field(default_factory=dict)
     created_by: Optional[UserResponseAccount] = None
+    modified_by: Optional[UserResponseAccount] = None
     account_owner_id: Optional[str] = None
     owner: Optional[UserResponseAccount] = None
     account_linked_contact: Optional[List["ContactResponse"]] = None
     deals: Optional[List["DealSchema"]] = None
+    tickets: Optional[List[Dict[str, Any]]] = Field(default_factory=list)
+    deal_documents: Optional[List[Dict[str, Any]]] = Field(default_factory=list)
+    revenue: Optional[List[Dict[str, Any]]] = Field(default_factory=list)
     notes: Optional[Any] = None
 
     # ========== NEW FIELDS (Add these) ==========
@@ -189,7 +234,35 @@ class AccountResponse(BaseModel):
     )
     customer_references: Optional[Dict[str, Any]] = Field(default_factory=dict)
 
+    # Customer Salary Details — optional; frontend enforces when profile_type = "Salaried"
+    customer_salary_details: Optional[Dict[str, Any]] = Field(default_factory=dict)
+
     model_config = {"from_attributes": True}
+
+    @model_validator(mode="before")
+    @classmethod
+    def extract_custom_attributes(cls, value):
+        if hasattr(value, "_tickets_list") or hasattr(value, "_deal_documents_list") or hasattr(value, "_revenue_list"):
+            data = {}
+            if hasattr(value, "__table__"):
+                for c in value.__table__.columns:
+                    data[c.name] = getattr(value, c.name, None)
+
+            for attr in (
+                "owner", "created_by", "modified_by", "account_linked_contact",
+                "deals", "notes", "business_details", "business_premise_address",
+                "applicant_residence_address", "co_applicant_residence_address",
+                "customer_references", "customer_salary_details", "custom_fields",
+                "parent_account"
+            ):
+                if hasattr(value, attr):
+                    data[attr] = getattr(value, attr)
+
+            data["tickets"] = getattr(value, "_tickets_list", [])
+            data["deal_documents"] = getattr(value, "_deal_documents_list", [])
+            data["revenue"] = getattr(value, "_revenue_list", [])
+            return data
+        return value
 
     @field_serializer(
         "created_time", "modified_time", "call_back_date_time", "assignment_date"
@@ -206,7 +279,7 @@ class AccountResponse(BaseModel):
             return value
 
     @field_validator(
-        "id", "account_owner_id", "created_by_id", "parent_account_id", mode="before"
+        "id", "account_owner_id", "created_by_id", "modified_by_id","parent_account_id", mode="before"
     )
     @classmethod
     def coerce_ids_to_str(cls, value):

@@ -8,9 +8,9 @@ from src.utility.utils import get_decoded_jwt_token
 
 async def authorization(request: Request, call_next):
     # Bypass OPTIONS and Public Routes
-    public_paths = ["/auth/login", "/", "/docs", "/openapi.json"]
+    public_paths = ["/auth/login", "/", "/docs", "/openapi.json",""]
 
-    if request.method == "OPTIONS" or request.url.path in public_paths:
+    if request.method == "OPTIONS" or request.url.path in public_paths or request.url.path.startswith("/webhook/update-account-name/"):
         return await call_next(request)
 
     """

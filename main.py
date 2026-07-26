@@ -31,7 +31,9 @@ from src.routers.hiring import candidate_router, jr_router
 from src.routers.notes import notes_router
 from src.routers.revenue import revenue_router
 from src.routers.tickets import tickets_router
+from src.routers.support_tickets import support_tickets_router
 from src.routers.webhook import webhook_api_router
+
 
 # 3. Handle setup during the lifespan, not on script execution
 logging.basicConfig(
@@ -134,6 +136,8 @@ app.include_router(candidate_router)
 app.include_router(jr_router)
 app.include_router(revenue_router)
 app.include_router(webhook_api_router)
+app.include_router(support_tickets_router)
+
 
 
 @app.get("/")

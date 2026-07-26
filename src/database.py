@@ -33,6 +33,7 @@ def get_mongodb():
 
 
 # Must be AFTER Base and engine are defined, and after all models are imported
-# from src.models.audit_log import AuditLog
+from src.models.support_ticket import SupportTicket
 
-# Base.metadata.create_all(bind=engine)
+Base.metadata.create_all(bind=engine)
+

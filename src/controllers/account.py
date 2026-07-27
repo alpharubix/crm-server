@@ -547,6 +547,13 @@ def get_all_accounts(
                 Account.city,
                 Account.call_back_date_time,
                 Account.phone,
+                Account.account_stage,
+                Account.business_status,
+                Account.is_priority_account,
+                Account.source_date,
+                Account.source_type,
+                Account.assignment_date,
+                Account.modified_time
             )
             .filter(and_(*filters))
             .offset(offset)

@@ -21,7 +21,6 @@ class Ticket(Base):
     potential = Column(Numeric(15, 2))
     lender_login_type = Column(String(100))
     lender_login_date = Column(Date)
-    partner_code = Column(String(100), nullable=True)
     partner_name = Column(String(150), nullable=True)
     targeted_disbursement_date = Column(Date)
     type_of_loan = Column(String(150))

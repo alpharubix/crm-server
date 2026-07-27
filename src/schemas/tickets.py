@@ -14,7 +14,6 @@ class TicketCreationBody(BaseModel):
     potential: Optional[float] = None
     lender_login_type: Optional[str] = None
     lender_login_date: Optional[date] = None
-    partner_code: Optional[str] = None
     targeted_disbursement_date: Optional[date] = None
     type_of_loan: Optional[str] = None
     disbursement_date: Optional[date] = None

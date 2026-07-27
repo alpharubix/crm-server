@@ -39,7 +39,7 @@ class Deal(Base):
     deal_stage = Column(String(50), nullable=True, index=True)
     deal_status = Column(String(50), nullable=True, index=True)
     crm_deal_id = Column(BIGINT, nullable=True, index=True)
-    partner_code = Column(String(100), nullable=True)
+    partner_name = Column(String(150), nullable=True)
 
     # Amounts
     disbursed_amount = Column(Numeric(15, 2), nullable=True)

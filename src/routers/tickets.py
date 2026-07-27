@@ -27,7 +27,6 @@ def format_ticket(t: Ticket) -> dict:
         "account_id",
         "created_by",
         "modified_by",
-        "partner_code",
     ):
         if data.get(key) is not None:
             data[key] = str(data[key])
@@ -238,7 +237,7 @@ async def create_ticket(request: Request, db: Session = Depends(get_db)):
         "potential",
         "lender_login_type",
         "lender_login_date",
-        "partner_code",
+        "partner_name",
         "targeted_disbursement_date",
         "type_of_loan",
         "disbursement_date",

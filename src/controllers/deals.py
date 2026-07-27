@@ -176,7 +176,7 @@ def get_deals(
                     Deal.deal_expected_closing,
                     Deal.deal_status_closing,
                     Deal.lender_login_type,
-                    Deal.partner_code,
+                    Deal.partner_name,
                 )
                 .limit(200)
                 .all()
@@ -231,7 +231,6 @@ def get_deals(
                         "account_id",
                         "created_by",
                         "modified_by",
-                        "partner_code",
                     ):
                         if t_dict.get(key) is not None:
                             t_dict[key] = str(t_dict[key])
@@ -318,7 +317,7 @@ def get_deals(
                 Deal.ticket_login,
                 Deal.deal_owner_id,
                 Deal.lender_login_type,
-                Deal.partner_code,
+                Deal.partner_name,
                 Deal.deal_expected_closing,
                 Deal.deal_status_closing,
                 Deal.deal_type,
@@ -416,7 +415,7 @@ def create_deal(deal, db: Session, user_id, user_role):
             modified_by=user_id,
             deal_expected_closing=deal.deal_expected_closing,
             deal_status_closing=deal.deal_status_closing,
-            partner_code=deal.partner_code,
+            partner_name=deal.partner_name,
         )
         db.add(created_deal)
         db.commit()

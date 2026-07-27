@@ -48,7 +48,7 @@ class DealSchema(BaseModel):
     interest_type: str | None = None
 
     lender_login_type: str | None = None
-    partner_code: str | None = None
+    partner_name: str | None = None
 
     # Dates
     deal_call_back_datetime: datetime | None = None
@@ -170,7 +170,7 @@ class DealCreationBody(BaseModel):
     deal_status_closing: Optional[date] = None
     lender_login_type: Optional[str] = None
 
-    partner_code: Optional[str] = None
+    partner_name: Optional[str] = None
     # Amounts
     disbursed_amount: Optional[Decimal] = None
     sanction_amount: Optional[Decimal] = None

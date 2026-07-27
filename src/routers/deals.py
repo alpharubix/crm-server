@@ -17,9 +17,9 @@ from src.schemas.deals import DealCreationBody, DealListResponse, DealSchema
 deals_router = APIRouter(prefix="/deals", tags=["deals"])
 
 
-@deals_router.get("", response_model=DealListResponse, response_model_exclude_none=True)
+@deals_router.get("", response_model=DealListResponse)
 @deals_router.get(
-    "/", response_model=DealListResponse, response_model_exclude_none=True
+    "/", response_model=DealListResponse
 )
 def get_deals_list(
     request: Request,

@@ -88,6 +88,8 @@ class DealSchema(BaseModel):
     # Timestamps
     created_at: datetime | None = None
     updated_at: datetime | None = None
+    modified_time: datetime | None = None
+    created_time: datetime | None = None
 
     # Owner
     deal_owner_id: str | None = None
@@ -106,13 +108,15 @@ class DealSchema(BaseModel):
                 c.name: getattr(value, c.name, None) for c in value.__table__.columns
             }
             data["tickets"] = value._tickets_list
+            data["modified_time"] = getattr(value, "updated_at", getattr(value, "modified_time", None))
+            data["created_time"] = getattr(value, "created_at", getattr(value, "created_time", None))
             for attr in ("owner", "notes"):
                 if hasattr(value, attr):
                     data[attr] = getattr(value, attr)
             return data
         return value
 
-    @field_serializer("deal_call_back_datetime", "created_at", "updated_at")
+    @field_serializer("deal_call_back_datetime", "created_at", "updated_at", "modified_time", "created_time")
     def serialize_datetime(self, value):
         if value:
             dt = (

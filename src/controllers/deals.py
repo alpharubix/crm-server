@@ -276,9 +276,13 @@ def get_deals(
                     deal_dict["deal_owner_id"] = str(deal.deal_owner_id)
                 if deal.account_id:
                     deal_dict["account_id"] = str(deal.account_id)
+                if deal.account and deal.account.account_name:
+                    deal_dict["account_name"] = deal.account.account_name
                 if deal.modified_by:
                     deal_dict["updated_by"] = str(deal.modified_by)
 
+                deal_dict["modified_time"] = deal.updated_at
+                deal_dict["modified_at"] = deal.updated_at
                 deal_dict["payment_receipt"] = None
                 deal_dict["notes"] = notes
                 deal_dict["tickets"] = serialized_tickets
@@ -317,6 +321,13 @@ def get_deals(
                 Deal.partner_code,
                 Deal.deal_expected_closing,
                 Deal.deal_status_closing,
+                Deal.deal_type,
+                Deal.deal_call_back_datetime,
+                Deal.amount_required,
+                Deal.deal_name,
+                Deal.created_at,
+                Deal.updated_at,
+                Deal.updated_at.label("modified_time"),
             )
             .offset(offset)
             .limit(limit)

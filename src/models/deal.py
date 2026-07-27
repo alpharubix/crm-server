@@ -1,4 +1,5 @@
 from sqlalchemy import Column, Integer, Numeric, String, Text, DateTime, Date, ForeignKey
+from sqlalchemy.ext.hybrid import hybrid_property
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import BIGINT
 from sqlalchemy.orm import relationship
@@ -86,6 +87,10 @@ class Deal(Base):
     modified_by = Column(BIGINT, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    @hybrid_property
+    def modified_time(self):
+        return self.updated_at
     
     # Documentation
     documents = relationship("DealDocument", back_populates="deal", cascade="all, delete-orphan")

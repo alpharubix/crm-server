@@ -32,15 +32,26 @@ def format_ticket(t: Ticket) -> dict:
         if data.get(key) is not None:
             data[key] = str(data[key])
 
-    # Ensure account_name is always included in the returned ticket dict
-    data["account_name"] = (
-        t.account.account_name
-        if t.account
-        else (t.deal.account_name if t.deal else "-")
-    )
+    # Dynamic lookup via Foreign Keys (account_id & deal_id)
+    # Ensures if Account name is updated, Tickets dynamically return the updated name
+    if t.account and t.account.account_name:
+        data["account_name"] = t.account.account_name
+    elif t.deal and t.deal.account and t.deal.account.account_name:
+        data["account_name"] = t.deal.account.account_name
+    elif t.deal and getattr(t.deal, "account_name", None):
+        data["account_name"] = t.deal.account_name
+    else:
+        data["account_name"] = "-"
+
+    if t.deal and t.deal.deal_name:
+        data["deal_name"] = t.deal.deal_name
+
     data["deal_owner_id"] = (
         str(t.deal.deal_owner_id) if t.deal and t.deal.deal_owner_id else None
     )
+    data["partner_name"] = getattr(t, "partner_name", None)
+    data["modified_at"] = t.updated_at
+    data["modified_time"] = t.updated_at
     return data
 
 

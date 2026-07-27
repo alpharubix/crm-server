@@ -1,4 +1,5 @@
 from sqlalchemy import (BigInteger, Column, Date, Integer, Numeric, String, Text, DateTime, func, ForeignKey, BIGINT)
+from sqlalchemy.ext.hybrid import hybrid_property
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship
 from ..database import Base
@@ -21,6 +22,7 @@ class Ticket(Base):
     lender_login_type = Column(String(100))
     lender_login_date = Column(Date)
     partner_code = Column(String(100), nullable=True)
+    partner_name = Column(String(150), nullable=True)
     targeted_disbursement_date = Column(Date)
     type_of_loan = Column(String(150))
     disbursement_date = Column(Date)
@@ -52,3 +54,11 @@ class Ticket(Base):
     modified_by = Column(BigInteger)
     created_at = Column(DateTime, nullable=False, server_default=func.now())
     updated_at = Column(DateTime, nullable=False, server_default=func.now(), onupdate=func.now())
+
+    @hybrid_property
+    def modified_time(self):
+        return self.updated_at
+
+    @hybrid_property
+    def modified_at(self):
+        return self.updated_at

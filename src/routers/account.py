@@ -27,8 +27,8 @@ def create(request: Request, data: AccountBase, db: Session = Depends(get_db)):
     return {"id": account.id, "message": "Account created successfully"}
 
 
-@router.get("/", response_model=GetlistAccountResponse,response_model_exclude_none=True)
-@router.get("", response_model=GetlistAccountResponse,response_model_exclude_none=True)
+@router.get("/", response_model=GetlistAccountResponse)
+@router.get("", response_model=GetlistAccountResponse)
 def list_all(
     request: Request,
     account_id: int | None = None,

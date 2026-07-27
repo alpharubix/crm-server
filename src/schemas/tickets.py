@@ -4,6 +4,10 @@ from datetime import datetime, date
 
 class TicketCreationBody(BaseModel):
     deal_id: int
+    ticket_name: Optional[str] = None
+    account_name: Optional[str] = None
+    deal_name: Optional[str] = None
+    partner_name: Optional[str] = None
     loan_account_status: Optional[str] = None
     ticket_login: Optional[str] = None
     lender_name: Optional[str] = None
@@ -39,6 +43,8 @@ class TicketSchema(TicketCreationBody):
     modified_by: Optional[int] = None
     created_at: datetime
     updated_at: datetime
+    modified_at: Optional[datetime] = None
+    modified_time: Optional[datetime] = None
 
     class Config:
         from_attributes = True

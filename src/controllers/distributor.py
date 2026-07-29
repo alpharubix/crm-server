@@ -39,6 +39,7 @@ async def upload_file(request:Request,file:UploadFile,db: Database):
             )
     
     mapped_rows = []
+    incoming_dist_codes=[]
 
     for row in reader:
         mapped_row = {}
@@ -58,9 +59,11 @@ async def upload_file(request:Request,file:UploadFile,db: Database):
 
             # Map all other headers
             mapped_row[DIST_HEADER_MAPPING[csv_header]] = value
+            
 
         mapped_rows.append(mapped_row)
         incoming_dist_code = mapped_row["distributor_code"]
+        existing_dist_codes.add(incoming_dist_code)
 
         if incoming_dist_code in existing_dist_codes:
             return JSONResponse(
@@ -80,7 +83,6 @@ async def upload_file(request:Request,file:UploadFile,db: Database):
     result = collection.insert_many(mapped_rows)
     return {
         "message": "Uploaded successfully",
-        "distributor_no":incoming_dist_code,
-        "data":mapped_rows
+        "distributor_no":incoming_dist_codes
     }
 

@@ -28,6 +28,7 @@ async def upload_invoice_file(request: Request, file: UploadFile, db: Database):
     print("CSV read Headers : ", csv_headers)
     print("Missing headers : ", missing_headers)
 
+    incoming_invoices=[]
     if missing_headers:
         return JSONResponse(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -54,6 +55,7 @@ async def upload_invoice_file(request: Request, file: UploadFile, db: Database):
             mapped_row[INVOICE_HEADER_MAPPING[csv_header]] = value
 
         mapped_rows.append(mapped_row)
+
         incoming_invoice_no = mapped_row["invoice_no"]
 
         if incoming_invoice_no in existing_invoice_numbers:
@@ -66,7 +68,7 @@ async def upload_invoice_file(request: Request, file: UploadFile, db: Database):
             )
 
 
-        # incoming_invoice_numbers.add(incoming_invoice_no)
+        incoming_invoices.append(incoming_invoice_no)
 
     if not mapped_rows:
         return JSONResponse(
@@ -86,11 +88,13 @@ async def upload_invoice_file(request: Request, file: UploadFile, db: Database):
         mapped_row["updated_by"] = user_id
 
     result = collection.insert_many(mapped_rows)
-    return {
+    response = {
         "message": "Uploaded successfully",
-        "invoice_no":incoming_invoice_no,
+        "invoices_recieved":incoming_invoices,
         "inserted_count": len(result.inserted_ids),
         "required_invoice_headers":required_headers,
         "received_headers":csv_headers,
         "missing_headers":missing_headers if len(missing_headers)>0 else None
     }
+    print("Response : \n",response)
+    return ""

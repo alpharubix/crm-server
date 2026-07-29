@@ -147,8 +147,9 @@ def test():
 
 
 if __name__ == "__main__":
-    port = int(os.getenv("PORT", 8080))
-    # FIX 2: Set reload=False for production environments like Cloud Run
-    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=False)
-
-# Test comment
+    uvicorn.run(
+        app="main:app",
+        host="0.0.0.0",
+        port=int(os.getenv("PORT", 8080)),
+        reload=os.getenv("DEV", "false").lower() == "true",
+    )

@@ -33,7 +33,8 @@ from src.routers.revenue import revenue_router
 from src.routers.tickets import tickets_router
 from src.routers.support_tickets import support_tickets_router
 from src.routers.webhook import webhook_api_router
-
+from src.routers.distributor_route import distributor_router
+from src.routers.invoice_route import invoice_router
 
 # 3. Handle setup during the lifespan, not on script execution
 logging.basicConfig(
@@ -137,8 +138,8 @@ app.include_router(jr_router)
 app.include_router(revenue_router)
 app.include_router(webhook_api_router)
 app.include_router(support_tickets_router)
-
-
+app.include_router(distributor_router)
+app.include_router(invoice_router)
 
 @app.get("/")
 def test():

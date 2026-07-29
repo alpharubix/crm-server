@@ -9,7 +9,7 @@ from src.utility.utils import get_jwt_token, is_password_correct
 
 def validate_login(body: Login, db: Session):
     email = body.email
-    password = body.password
+    # password = body.password
     try:
         user = db.query(User).filter(User.email == email).first()
         if user is None:

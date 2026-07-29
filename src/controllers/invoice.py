@@ -6,12 +6,22 @@ from fastapi import Request, UploadFile
 from pymongo.database import Database
 from starlette import status
 from starlette.responses import JSONResponse
-
+from pathlib import Path
 from src.utility.MAPPINGS import INVOICE_HEADER_MAPPING
 
 
 
 async def upload_invoice_file(request: Request, file: UploadFile, db: Database):
+
+    csv_extension = file.filename.lower().endswith(".csv")
+    if not csv_extension:
+        return JSONResponse(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                content={
+                    "message":f"Invalid file format. Please upload a CSV (.csv) file only.",
+                    "data":"WRONG_FILE_TYPE"
+                }
+        )
     collection = db["invoice_master"]
 
     user_id = request.state.user_id

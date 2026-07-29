@@ -7,11 +7,19 @@ from starlette import status
 from src.database import get_mongodb
 from pymongo.database import Database
 from datetime import datetime,timezone
-
-
+from pathlib import Path
 
 async def upload_file(request:Request,file:UploadFile,db: Database):
 
+    csv_extension = file.filename.lower().endswith(".csv")
+    if not csv_extension:
+        return JSONResponse(
+             status_code=status.HTTP_400_BAD_REQUEST,
+             content={
+                  "message":f"Invalid file format. Please upload a CSV (.csv) file only.",
+                  "data":"WRONG_FILE_TYPE"
+             }
+        )
 
     collection = db["distributor_master"]
 

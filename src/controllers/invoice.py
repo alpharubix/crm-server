@@ -44,8 +44,11 @@ async def upload_invoice_file(request: Request, file: UploadFile, db: Database):
         for csv_header, value in row.items():
             print(f"{csv_header} : {value}")
             if not value:
-                return _error(
-                    message=f"Found the header {csv_header} is having no value | Values cannot be empty"
+                return JSONResponse(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    content={
+                        "message":""
+                    }
                 )
 
             mapped_row[INVOICE_HEADER_MAPPING[csv_header]] = value
@@ -54,15 +57,25 @@ async def upload_invoice_file(request: Request, file: UploadFile, db: Database):
         incoming_invoice_no = mapped_row["invoice_no"]
 
         if incoming_invoice_no in existing_invoice_numbers:
-            return _error(
-                message=f"Invoice already there in the database | Invoice no : {incoming_invoice_no}"
+            return JSONResponse(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                content={
+                    "message":"Invoice number is already existing",
+                    "data":incoming_invoice_no
+                }
             )
 
 
-        incoming_invoice_numbers.add(incoming_invoice_no)
+        # incoming_invoice_numbers.add(incoming_invoice_no)
 
     if not mapped_rows:
-        return _error(message="CSV file does not contain any data rows")
+        return JSONResponse(
+            status_code=status.HTTP_204_NO_CONTENT,
+            content={
+                "message":"Empty file | No invoice data was found",
+                "data":None
+            }
+        )
 
     now = datetime.now(timezone.utc)
 
@@ -75,5 +88,9 @@ async def upload_invoice_file(request: Request, file: UploadFile, db: Database):
     result = collection.insert_many(mapped_rows)
     return {
         "message": "Uploaded successfully",
+        "invoice_no":incoming_invoice_no,
         "inserted_count": len(result.inserted_ids),
+        "required_invoice_headers":required_headers,
+        "received_headers":csv_headers,
+        "missing_headers":missing_headers if len(missing_headers)>0 else None
     }

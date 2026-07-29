@@ -80,7 +80,7 @@ async def upload_file(request:Request,file:UploadFile,db: Database):
     result = collection.insert_many(mapped_rows)
     return {
         "message": "Uploaded successfully",
-        "inserted_count":len(result.inserted_ids),
-        "reader-data-value":reader
+        "distributor_no":incoming_dist_code,
+        "data":mapped_rows
     }
 

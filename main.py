@@ -33,8 +33,7 @@ from src.routers.revenue import revenue_router
 from src.routers.tickets import tickets_router
 from src.routers.support_tickets import support_tickets_router
 from src.routers.webhook import webhook_api_router
-from src.routers.distributor_route import distributor_router
-from src.routers.invoice_route import invoice_router
+from src.routers.invoicing_route import invoice_router
 
 # 3. Handle setup during the lifespan, not on script execution
 logging.basicConfig(
@@ -138,7 +137,6 @@ app.include_router(jr_router)
 app.include_router(revenue_router)
 app.include_router(webhook_api_router)
 app.include_router(support_tickets_router)
-app.include_router(distributor_router)
 app.include_router(invoice_router)
 
 @app.get("/")
@@ -147,9 +145,17 @@ def test():
 
 
 if __name__ == "__main__":
+<<<<<<< Updated upstream
     uvicorn.run(
         app="main:app",
         host="0.0.0.0",
         port=int(os.getenv("PORT", 8080)),
         reload=os.getenv("DEV", "false").lower() == "true",
     )
+=======
+    port = int(os.getenv("PORT", 8080))
+    # FIX 2: Set reload=False for production environments like Cloud Run
+    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=True)
+
+# Test comment
+>>>>>>> Stashed changes

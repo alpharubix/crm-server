@@ -1,14 +1,166 @@
 import csv
 import io
 from datetime import datetime, timezone
-
 from fastapi import Request, UploadFile
 from pymongo.database import Database
 from starlette import status
 from starlette.responses import JSONResponse
+<<<<<<< Updated upstream
 from pathlib import Path
 from src.utility.MAPPINGS import INVOICE_HEADER_MAPPING
+=======
+from src.utility.invoice_csv_headers import INVOICE_HEADER_MAPPING, DIST_HEADER_MAPPING
 
+>>>>>>> Stashed changes
+
+async def upload_distributor_csv(request:Request,file:UploadFile,db: Database):
+    try:
+
+        distributor_collection = db["distributor_master"]
+        distributor_master_history_collection = db["distributor_master_history"]
+        creation_rows = []  # this list holds the dict of rows which are need to be created
+        updated_rows = []  # this list holds the dict of rows which are need to be updated
+        update_rows_current_data = []  # this array holds all the current state of the updated distcode data
+        empty_values_row = []  # this list holds the dict of missing fields in the row with row id
+        row_iterator = 2  # points to the current row
+        total_row_created = 0
+        total_row_updated = 0
+        user_id = request.state.user_id
+        required_headers=set(DIST_HEADER_MAPPING.keys())
+        contents = await file.read()
+        csv_text = contents.decode("utf-8")
+        reader = csv.DictReader(io.StringIO(csv_text))
+        csv_headers = set (reader.fieldnames or [])
+        missing_headers = list(required_headers - csv_headers)
+        print("CSV read Headers : ",csv_headers)
+        print("Missing headers : ",missing_headers)
+        print("Type of missing headers",type(missing_headers))
+
+        #step 1: validating the headers
+        if missing_headers:
+                return JSONResponse(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    content={
+                        "message":"Header miss match found",
+                        "data":missing_headers
+                    }
+                )
+
+        for row in reader:
+            mapped_row = {}
+            row_missing_values = {}
+            for csv_header, value in row.items():
+                #step2 : checking for empty values in row
+
+                if not value:
+                    if row_missing_values.get("row_number") is None:
+                        row_missing_values.update({"row_number":row_iterator,"empty_fields":[csv_header]})
+                    else:
+                        missing_fields_list = row_missing_values["empty_fields"]
+                        row_missing_values.update({"row_number":row_iterator,"empty_fields":missing_fields_list.append(csv_header)})
+
+                #step 3 :Adding additional column into the database
+                if csv_header.startswith(("Sales", "sales")):
+                    mapped_row[csv_header] = value
+                    continue
+
+                # Map all other headers
+                mapped_row[DIST_HEADER_MAPPING[csv_header]] = value
+
+            if row_missing_values:
+               empty_values_row.append(row_missing_values)
+               continue
+            #step 4: split the rows into insertion and updation based on the distcode
+            incoming_dist_code = mapped_row["distributor_code"]
+
+            distributor = distributor_collection.find_one({"distributor_code":incoming_dist_code})
+
+            if distributor:
+                updated_rows.append(mapped_row)
+                update_rows_current_data.append(distributor)
+            else:
+                creation_rows.append(mapped_row)
+
+        #step 5: update and insert the data to the collection
+        now = datetime.now(timezone.utc)
+
+        if creation_rows:
+
+            for row in creation_rows: #adding meta tags to the creation row
+                row["created_at"] = now
+                row["updated_at"] = now
+                row["created_by"] = user_id
+                row["updated_by"] = user_id
+            logging.info(msg=f"rows for creation {creation_rows}")
+            created_rows = distributor_collection.insert_many(creation_rows)
+            total_row_created = len(created_rows.inserted_ids)
+
+        if updated_rows:
+            update_history,updated_fields = updated_field_detector(
+                updated_rows,
+                update_rows_current_data,
+                now,
+                user_id,
+            )
+            print("UPDATED DISTRIBUTOR DATA",updated_fields)
+            print("Updated DISTRIBUTOR DATA History",update_history)
+            if update_history and updated_fields:
+                bulk_ops = [
+                    UpdateOne(
+                        {"distributor_code": row["distributor_code"]},
+                        {"$set": {"updated_at": now, "updated_by": user_id,
+                                  **{k: v for k, v in row.items() if k != "distributor_code"}}}
+                    )
+                    for row in updated_fields
+                ]
+                logging.info(msg=f"bulk updation {bulk_ops}")
+                distributor_collection.bulk_write(bulk_ops)
+                total_row_updated = len(updated_fields)
+                distributor_master_history_collection.insert_many(update_history)
+
+        return {
+            "message": "Uploaded successfully",
+            "total_rows_craeted":total_row_created,
+            "total_rows_updated":total_row_updated,
+            "failed_rows":empty_values_row,
+        }
+    except Exception as e:
+        logging.error(e)
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content={"message":"Internal Server Error","data":None}
+        )
+
+def updated_field_detector(updated_row,updated_row_current_data,updated_at,updated_by):
+    iterator = 0
+    updated_fields_history = [] #holds the history of the updated fields
+    updated_rows = [] #holds which field from which row is being updated
+
+    for incoming_row in updated_row:
+        updated_row_dict = {}
+        distributor_code = incoming_row.get("distributor_code")
+        old_row_current_field_data = updated_row_current_data[iterator]
+
+        for key, value in incoming_row.items():
+            old_value = old_row_current_field_data.get(key)
+            new_value = value
+            if old_value != new_value:
+                updated_fields_history.append({
+                    "distributor_code": distributor_code,
+                    "field_name": key,
+                     f"old_{key}": old_value,
+                    f"new_{key}":new_value,
+                    "updated_at": updated_at,
+                    "updated_by": updated_by,
+                })
+                if updated_row_dict.get("distributor_code"):
+                    updated_row_dict.update({key:new_value})
+                else:
+                    updated_row_dict.update({"distributor_code":distributor_code,key:value})
+        if updated_row_dict:
+            updated_rows.append(updated_row_dict)
+        iterator+=1
+    return updated_fields_history,updated_rows
 
 
 async def upload_invoice_file(request: Request, file: UploadFile, db: Database):
@@ -25,7 +177,6 @@ async def upload_invoice_file(request: Request, file: UploadFile, db: Database):
     collection = db["invoice_master"]
 
     user_id = request.state.user_id
-    existing_invoice_numbers = set(collection.distinct("invoice_no"))
     required_headers = set(INVOICE_HEADER_MAPPING.keys())
 
     contents = await file.read()

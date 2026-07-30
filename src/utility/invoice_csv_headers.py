@@ -17,18 +17,6 @@ DIST_HEADER_MAPPING = {
     "Phone No":"phone_number",
     "GST Number":"gst_number",
     "PAN Number":"pan_number",
-    # "Sales Month 1":"sales_month_1",
-    # "Sales Month 2":"sales_month_2",
-    # "Sales Month 3":"sales_month_3",
-    # "Sales Month 4":"sales_month_4",
-    # "Sales Month 5":"sales_month_5",
-    # "Sales Month 6":"sales_month_6",
-    # "Sales Month 7":"sales_month_7",
-    # "Sales Month 8":"sales_month_8",
-    # "Sales Month 9":"sales_month_9",
-    # "Sales Month 9":"sales_month_9",
-    # "Sales Month 10":"sales_month_10",
-    # "Sales Month 11":"sales_month_12",
 }
 
 INVOICE_HEADER_MAPPING = {
@@ -60,4 +48,12 @@ INVOICE_HEADER_MAPPING = {
     "Status": "status",
     "Status Reason": "status_reason",
     "Comments": "comments",
+}
+
+SKIP_FIELDS = {
+    "_id",
+    "created_at",
+    "created_by",
+    "updated_at",
+    "updated_by",
 }

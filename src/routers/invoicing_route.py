@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, File, UploadFile
 from starlette.requests import Request
-from src.controllers.invoice import upload_distributor_csv,get_distributors,upload_invoice_file
+from src.controllers.invoice import upload_distributor_csv,get_distributors,upload_invoice_file,get_invoices
 
 from src.database import get_master_invoice_database
 
@@ -16,9 +16,21 @@ async def upload_invoice(
 ):
     return await upload_invoice_file(request, file, db)
 
+@invoice_router.get("/distributors")
+async def distributors(request:Request,page=1,db=Depends(get_master_invoice_database)):
+    return await get_distributors(request=request,page=page,db=db)
+
+@invoice_router.get("/")
+async def invoices(request:Request,page=1,db=Depends(get_master_invoice_database)):
+    return await get_invoices(request=request,page=page,db=db)
 
 @invoice_router.get("/check-health")
 async def get_health():
     return {"status": "working"}
+
+#update history routes
+
+
+
 
 

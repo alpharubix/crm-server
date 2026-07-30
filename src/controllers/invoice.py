@@ -338,3 +338,50 @@ async def get_distributors(
         return JSONResponse(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,content={"message":"Internal server error","data":None})
 
 
+async def get_invoices(
+    request: Request,
+    db: Database,
+    page: int = 1,
+    limit: int = 10,
+):
+    try:
+        invoice_collection = db["invoice_master"]
+
+        # Validate page and limit
+        limit = max(limit, 1)
+
+        skip = (int(page) - 1) * limit
+
+        # Fetch data
+        invoices = invoice_collection.find({}, {"_id": 0}).skip(skip).limit(limit).to_list(length=limit)
+
+        #serialize objects to strings
+        pointer = 0
+        for invoice in invoices:
+            for key, value in invoice.items():
+                if isinstance(value, datetime):
+                    invoices[pointer].update({key: value.isoformat()})
+                if isinstance(value, int):
+                    invoices[pointer].update({key: str(value)})
+
+            pointer += 1
+
+        total_records = invoice_collection.count_documents({})
+
+        pagination = {
+            "page": int(page),
+            "limit": limit,
+            "total_records": total_records,
+            "total_pages": ceil(len(invoices) / limit),
+        }
+
+        return JSONResponse(status_code=status.HTTP_200_OK, content={
+            "message": "Invoice data fetched successfully",
+            "data": {"invoices": invoices, "page_info": pagination}
+        })
+
+    except Exception as e:
+        print(str(e))
+        return JSONResponse(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, content={"message": "Internal server error", "data": None})
+
+

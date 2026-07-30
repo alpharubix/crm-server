@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, File, UploadFile
 from starlette.requests import Request
-from src.controllers.invoice import upload_distributor_csv,get_distributors,upload_invoice_file,get_invoices
+from src.controllers.invoice import upload_distributor_csv,get_distributors,upload_invoice_csv,upload_kotak_hwc_transaction_csv,get_invoices
 
 from src.database import get_master_invoice_database
 
@@ -11,11 +11,14 @@ async def upload_distributor_master(request: Request,file: UploadFile = File(...
     return await upload_distributor_csv(request,file,db)
 
 @invoice_router.post("/upload-invoice-file")
-async def upload_invoice(
+async def upload_invoice_master(
     request: Request, file: UploadFile = File(...), db=Depends(get_master_invoice_database)
 ):
-    return await upload_invoice_file(request, file, db)
+    return await upload_invoice_csv(request, file, db)
 
+@invoice_router.post("/kotak-hwc/transc")
+async def upload_kotak_hwc_transaction(request:Request,file:UploadFile=File(...),db=Depends(get_master_invoice_database)):
+    return await upload_kotak_hwc_transaction_csv(request,file,db)
 @invoice_router.get("/distributors")
 async def distributors(request:Request,page=1,db=Depends(get_master_invoice_database)):
     return await get_distributors(request=request,page=page,db=db)

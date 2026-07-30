@@ -67,6 +67,7 @@ KOTAK_HWC_TRANS_MAPPING = {
     "Overdue BeyondCure - INR": "overdue_beyond_cure_amount",
     "Overdue Beyond Cure - No Of Days": "overdue_beyond_cure_days",
     "Location": "location",
+    "Distributor Code":"distributor_code"
 }
 
 KOTAK_CKPL_TRANS_MAPPING = {

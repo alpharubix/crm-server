@@ -7,7 +7,7 @@ from pymongo.database import Database
 from starlette import status
 from starlette.responses import JSONResponse
 
-from src.utility.MAPPINGS import DIST_HEADER_MAPPING
+from src.utility.invoice_csv_headers import DIST_HEADER_MAPPING
 
 
 def _sales_header_to_field(header: str) -> str:

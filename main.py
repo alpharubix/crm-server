@@ -34,6 +34,11 @@ from src.routers.tickets import tickets_router
 from src.routers.support_tickets import support_tickets_router
 from src.routers.webhook import webhook_api_router
 from src.routers.invoicing_route import invoice_router
+# from src.routers.kotak_hwc_route import kotak_hwc_router
+# from src.routers.kotak_ckpl_route import kotak_ckpl_router
+# from src.routers.tcpl_route import tcpl_router
+# from src.routers.hero_route import hero_router
+# from src.routers.muthoot_route import muthoot_router
 
 # 3. Handle setup during the lifespan, not on script execution
 logging.basicConfig(
@@ -138,6 +143,11 @@ app.include_router(revenue_router)
 app.include_router(webhook_api_router)
 app.include_router(support_tickets_router)
 app.include_router(invoice_router)
+# app.include_router(kotak_hwc_router)
+# app.include_router(kotak_ckpl_router)
+# app.include_router(tcpl_router)
+# app.include_router(hero_router)
+# app.include_router(muthoot_router)
 
 @app.get("/")
 def test():
@@ -145,17 +155,8 @@ def test():
 
 
 if __name__ == "__main__":
-<<<<<<< Updated upstream
-    uvicorn.run(
-        app="main:app",
-        host="0.0.0.0",
-        port=int(os.getenv("PORT", 8080)),
-        reload=os.getenv("DEV", "false").lower() == "true",
-    )
-=======
     port = int(os.getenv("PORT", 8080))
     # FIX 2: Set reload=False for production environments like Cloud Run
     uvicorn.run("main:app", host="0.0.0.0", port=port, reload=True)
 
 # Test comment
->>>>>>> Stashed changes

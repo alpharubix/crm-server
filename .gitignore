@@ -14,5 +14,5 @@ crm/
 zoho-crm-migration
 
 db.sql
-Dockerfile
-uv.lock
+.xlsx
+.csv

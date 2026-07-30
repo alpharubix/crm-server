@@ -1,17 +1,14 @@
 import csv
 import io
 from datetime import datetime, timezone
+import logging
 from fastapi import Request, UploadFile
+from pymongo import UpdateOne
 from pymongo.database import Database
 from starlette import status
 from starlette.responses import JSONResponse
-<<<<<<< Updated upstream
-from pathlib import Path
-from src.utility.MAPPINGS import INVOICE_HEADER_MAPPING
-=======
 from src.utility.invoice_csv_headers import INVOICE_HEADER_MAPPING, DIST_HEADER_MAPPING
 
->>>>>>> Stashed changes
 
 async def upload_distributor_csv(request:Request,file:UploadFile,db: Database):
     try:
@@ -75,8 +72,8 @@ async def upload_distributor_csv(request:Request,file:UploadFile,db: Database):
 
             distributor = distributor_collection.find_one({"distributor_code":incoming_dist_code})
 
-            if distributor:
-                updated_rows.append(mapped_row)
+            if distributor: 
+                updated_rows.append(mapped_row) 
                 update_rows_current_data.append(distributor)
             else:
                 creation_rows.append(mapped_row)
@@ -163,99 +160,157 @@ def updated_field_detector(updated_row,updated_row_current_data,updated_at,updat
     return updated_fields_history,updated_rows
 
 
-async def upload_invoice_file(request: Request, file: UploadFile, db: Database):
+async def upload_invoice_file(request:Request,file:UploadFile,db: Database):
+    try:
 
-    csv_extension = file.filename.lower().endswith(".csv")
-    if not csv_extension:
-        return JSONResponse(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                content={
-                    "message":f"Invalid file format. Please upload a CSV (.csv) file only.",
-                    "data":"WRONG_FILE_TYPE"
-                }
-        )
-    collection = db["invoice_master"]
+        invoice_collection = db["invoice_master"]
+        invoice_master_history_collection = db["invoice_master_history"]
+        creation_rows = []  # this list holds the dict of rows which are need to be created
+        updated_rows = []  # this list holds the dict of rows which are need to be updated
+        update_rows_current_data = []  # this array holds all the current state of the updated invoice data
+        empty_values_row = []  # this list holds the dict of missing fields in the row with row id
+        row_iterator = 2  # points to the current row
+        total_row_created = 0
+        total_row_updated = 0
+        user_id = request.state.user_id
+        required_headers=set(INVOICE_HEADER_MAPPING.keys())
+        contents = await file.read()
+        csv_text = contents.decode("utf-8")
+        reader = csv.DictReader(io.StringIO(csv_text))
+        csv_headers = set (reader.fieldnames or [])
+        missing_headers = list(required_headers - csv_headers)
+        print("CSV read Headers : ",csv_headers)
+        print("Missing headers : ",missing_headers)
+        print("Type of missing headers",type(missing_headers))
 
-    user_id = request.state.user_id
-    required_headers = set(INVOICE_HEADER_MAPPING.keys())
-
-    contents = await file.read()
-
-    csv_text = contents.decode("utf-8-sig")
-    reader = csv.DictReader(io.StringIO(csv_text))
-    csv_headers = set(reader.fieldnames or [])
-    missing_headers = required_headers - csv_headers
-
-    print("CSV read Headers : ", csv_headers)
-    print("Missing headers : ", missing_headers)
-
-    incoming_invoices=[]
-    if missing_headers:
-        return JSONResponse(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            content={
-                "message":f"Missing fields in the invoice : {missing_headers}",
-                "data":missing_headers
-            }
-        )
-    mapped_rows = []
-
-    for row in reader:
-        mapped_row = {}
-
-        for csv_header, value in row.items():
-            print(f"{csv_header} : {value}")
-            if not value:
+        #step 1: validating the headers
+        if missing_headers:
                 return JSONResponse(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     content={
-                        "message":""
+                        "message":"Header miss match found",
+                        "data":missing_headers
                     }
                 )
 
-            mapped_row[INVOICE_HEADER_MAPPING[csv_header]] = value
+        for row in reader:
+            mapped_row = {}
+            row_missing_values = {}
+            for csv_header, value in row.items():
+                #step2 : checking for empty values in row
 
-        mapped_rows.append(mapped_row)
+                if not value:
+                    if row_missing_values.get("row_number") is None:
+                        row_missing_values.update({"row_number":row_iterator,"empty_fields":[csv_header]})
+                    else:
+                        row_missing_values["empty_fields"].append(csv_header)
 
-        incoming_invoice_no = mapped_row["invoice_no"]
+                # Map all other headers
+                if csv_header in INVOICE_HEADER_MAPPING:
+                    mapped_row[INVOICE_HEADER_MAPPING[csv_header]] = value
 
-        if incoming_invoice_no in existing_invoice_numbers:
-            return JSONResponse(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                content={
-                    "message":"Invoice number is already existing",
-                    "data":incoming_invoice_no
-                }
+            if row_missing_values:
+               empty_values_row.append(row_missing_values)
+               row_iterator += 1
+               continue
+               
+            #step 4: split the rows into insertion and updation based on the invoice_no
+            incoming_invoice_no = mapped_row.get("invoice_no")
+            
+            if not incoming_invoice_no:
+                # If invoice_no itself is missing or empty, handle it
+                if not row_missing_values:
+                    empty_values_row.append({"row_number": row_iterator, "empty_fields": ["Invoice no"]})
+                row_iterator += 1
+                continue
+
+            invoice = invoice_collection.find_one({"invoice_no":incoming_invoice_no})
+
+            if invoice: 
+                updated_rows.append(mapped_row) 
+                update_rows_current_data.append(invoice)
+            else:
+                creation_rows.append(mapped_row)
+            
+            row_iterator += 1
+
+        #step 5: update and insert the data to the collection
+        now = datetime.now(timezone.utc)
+
+        if creation_rows:
+
+            for row in creation_rows: #adding meta tags to the creation row
+                row["created_at"] = now
+                row["updated_at"] = now
+                row["created_by"] = user_id
+                row["updated_by"] = user_id
+            logging.info(msg=f"rows for creation {creation_rows}")
+            created_rows = invoice_collection.insert_many(creation_rows)
+            total_row_created = len(created_rows.inserted_ids)
+
+        if updated_rows:
+            update_history,updated_fields = updated_invoice_detector(
+                updated_rows,
+                update_rows_current_data,
+                now,
+                user_id,
             )
+            print("UPDATED INVOICE DATA",updated_fields)
+            print("Updated INVOICE DATA History",update_history)
+            if update_history and updated_fields:
+                bulk_ops = [
+                    UpdateOne(
+                        {"invoice_no": row["invoice_no"]},
+                        {"$set": {"updated_at": now, "updated_by": user_id,
+                                  **{k: v for k, v in row.items() if k != "invoice_no"}}}
+                    )
+                    for row in updated_fields
+                ]
+                logging.info(msg=f"bulk updation {bulk_ops}")
+                invoice_collection.bulk_write(bulk_ops)
+                total_row_updated = len(updated_fields)
+                invoice_master_history_collection.insert_many(update_history)
 
-
-        incoming_invoices.append(incoming_invoice_no)
-
-    if not mapped_rows:
+        return {
+            "message": "Uploaded successfully",
+            "total_rows_craeted":total_row_created,
+            "total_rows_updated":total_row_updated,
+            "failed_rows":empty_values_row,
+        }
+    except Exception as e:
+        logging.error(e)
         return JSONResponse(
-            status_code=status.HTTP_204_NO_CONTENT,
-            content={
-                "message":"Empty file | No invoice data was found",
-                "data":None
-            }
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content={"message":"Internal Server Error","data":None}
         )
 
-    now = datetime.now(timezone.utc)
+def updated_invoice_detector(updated_row,updated_row_current_data,updated_at,updated_by):
+    iterator = 0
+    updated_fields_history = [] #holds the history of the updated fields
+    updated_rows = [] #holds which field from which row is being updated
 
-    for mapped_row in mapped_rows:
-        mapped_row["created_at"] = now
-        mapped_row["updated_at"] = now
-        mapped_row["created_by"] = user_id
-        mapped_row["updated_by"] = user_id
+    for incoming_row in updated_row:
+        updated_row_dict = {}
+        invoice_no = incoming_row.get("invoice_no")
+        old_row_current_field_data = updated_row_current_data[iterator]
 
-    result = collection.insert_many(mapped_rows)
-    response = {
-        "message": "Uploaded successfully",
-        "invoices_recieved":incoming_invoices,
-        "inserted_count": len(result.inserted_ids),
-        "required_invoice_headers":required_headers,
-        "received_headers":csv_headers,
-        "missing_headers":missing_headers if len(missing_headers)>0 else None
-    }
-    print("Response : \n",response)
-    return ""
+        for key, value in incoming_row.items():
+            old_value = old_row_current_field_data.get(key)
+            new_value = value
+            if old_value != new_value:
+                updated_fields_history.append({
+                    "invoice_no": invoice_no,
+                    "field_name": key,
+                     f"old_{key}": old_value,
+                    f"new_{key}":new_value,
+                    "updated_at": updated_at,
+                    "updated_by": updated_by,
+                })
+                if updated_row_dict.get("invoice_no"):
+                    updated_row_dict.update({key:new_value})
+                else:
+                    updated_row_dict.update({"invoice_no":invoice_no,key:value})
+        if updated_row_dict:
+            updated_rows.append(updated_row_dict)
+        iterator+=1
+    return updated_fields_history,updated_rows

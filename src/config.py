@@ -6,7 +6,6 @@ class Settings(BaseSettings):
     MONGODB_URI:str
     APP_PASSWORD:str
     FIVE_POINT_CREDIT_BACKEND_URL:str
-    DEV:str
     model_config = SettingsConfigDict(env_file=".env")
 
 

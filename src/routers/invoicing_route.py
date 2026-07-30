@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, File, UploadFile
 from starlette.requests import Request
-from src.controllers.invoice import upload_distributor_csv
+from src.controllers.invoice import upload_distributor_csv,get_distributors
 from src.database import get_master_invoice_database
 
 invoice_router = APIRouter(prefix="/invoice")
@@ -14,6 +14,11 @@ async def upload_distributor_master(request: Request,file: UploadFile = File(...
 #     request: Request, file: UploadFile = File(...), db=Depends(get_mongodb)
 # ):
 #     return await upload_invoice_file(request, file, db)
+
+
+@invoice_router.get("/distributors")
+async def distributors(request: Request,page=1,db=Depends(get_master_invoice_database)):
+    return await get_distributors(request,db,page)
 
 
 @invoice_router.get("/check-health")

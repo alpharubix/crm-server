@@ -1,15 +1,16 @@
 import csv
 import io
 from datetime import datetime, timezone
+from logging import basicConfig
 from math import ceil
-
+import logging
 from fastapi import Request, UploadFile
 from pymongo import UpdateOne
 from pymongo.database import Database
 from starlette import status
 from starlette.responses import JSONResponse
 from src.utility.invoice_csv_headers import INVOICE_HEADER_MAPPING, DIST_HEADER_MAPPING
-
+basicConfig(level=logging.INFO)
 
 async def upload_distributor_csv(request:Request,file:UploadFile,db: Database):
     try:
@@ -99,6 +100,7 @@ async def upload_distributor_csv(request:Request,file:UploadFile,db: Database):
                 update_rows_current_data,
                 now,
                 user_id,
+                "distributor_code"
             )
             print("UPDATED DISTRIBUTOR DATA",updated_fields)
             print("Updated DISTRIBUTOR DATA History",update_history)
@@ -129,14 +131,14 @@ async def upload_distributor_csv(request:Request,file:UploadFile,db: Database):
             content={"message":"Internal Server Error","data":None}
         )
 
-def updated_field_detector(updated_row,updated_row_current_data,updated_at,updated_by):
+def updated_field_detector(updated_row,updated_row_current_data,updated_at,updated_by,unique_filed):
     iterator = 0
     updated_fields_history = [] #holds the history of the updated fields
     updated_rows = [] #holds which field from which row is being updated
 
     for incoming_row in updated_row:
         updated_row_dict = {}
-        distributor_code = incoming_row.get("distributor_code")
+        unique_code = incoming_row.get(unique_filed)
         old_row_current_field_data = updated_row_current_data[iterator]
 
         for key, value in incoming_row.items():
@@ -144,17 +146,17 @@ def updated_field_detector(updated_row,updated_row_current_data,updated_at,updat
             new_value = value
             if old_value != new_value:
                 updated_fields_history.append({
-                    "distributor_code": distributor_code,
+                    unique_filed: unique_code,
                     "field_name": key,
                      f"old_{key}": old_value,
                     f"new_{key}":new_value,
                     "updated_at": updated_at,
                     "updated_by": updated_by,
                 })
-                if updated_row_dict.get("distributor_code"):
+                if updated_row_dict.get(unique_filed):
                     updated_row_dict.update({key:new_value})
                 else:
-                    updated_row_dict.update({"distributor_code":distributor_code,key:value})
+                    updated_row_dict.update({unique_filed:unique_code,key:value})
         if updated_row_dict:
             updated_rows.append(updated_row_dict)
         iterator+=1
@@ -250,11 +252,12 @@ async def upload_invoice_file(request:Request,file:UploadFile,db: Database):
             total_row_created = len(created_rows.inserted_ids)
 
         if updated_rows:
-            update_history,updated_fields = updated_invoice_detector(
+            update_history,updated_fields = updated_field_detector(
                 updated_rows,
                 update_rows_current_data,
                 now,
                 user_id,
+                "invoice_no"
             )
             print("UPDATED INVOICE DATA",updated_fields)
             print("Updated INVOICE DATA History",update_history)
@@ -285,37 +288,6 @@ async def upload_invoice_file(request:Request,file:UploadFile,db: Database):
             content={"message":"Internal Server Error","data":None}
         )
 
-def updated_invoice_detector(updated_row,updated_row_current_data,updated_at,updated_by):
-    iterator = 0
-    updated_fields_history = [] #holds the history of the updated fields
-    updated_rows = [] #holds which field from which row is being updated
-
-    for incoming_row in updated_row:
-        updated_row_dict = {}
-        invoice_no = incoming_row.get("invoice_no")
-        old_row_current_field_data = updated_row_current_data[iterator]
-
-        for key, value in incoming_row.items():
-            old_value = old_row_current_field_data.get(key)
-            new_value = value
-            if old_value != new_value:
-                updated_fields_history.append({
-                    "invoice_no": invoice_no,
-                    "field_name": key,
-                        f"old_{key}": old_value,
-                    f"new_{key}":new_value,
-                    "updated_at": updated_at,
-                    "updated_by": updated_by,
-                })
-                if updated_row_dict.get("invoice_no"):
-                    updated_row_dict.update({key:new_value})
-                else:
-                    updated_row_dict.update({"invoice_no":invoice_no,key:value})
-        if updated_row_dict:
-            updated_rows.append(updated_row_dict)
-        iterator+=1
-        return updated_fields_history,updated_rows
-       
         
 async def get_distributors(
     request: Request,
@@ -356,9 +328,6 @@ async def get_distributors(
         }
 
 
-        # Total count
-        total_records = distributor_collection.count_documents({})
-
         return JSONResponse(status_code=status.HTTP_200_OK,content={
             "message": "Distributor data fetched successfully",
             "data": {"distributors":distributors,"page_info":pagination}
@@ -367,6 +336,5 @@ async def get_distributors(
     except Exception as e:
         print(str(e))
         return JSONResponse(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,content={"message":"Internal server error","data":None})
-
 
 

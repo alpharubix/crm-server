@@ -2,14 +2,13 @@ import csv
 import io
 from datetime import datetime, timezone
 from math import ceil
-import logging
+
 from fastapi import Request, UploadFile
 from pymongo import UpdateOne
 from pymongo.database import Database
 from starlette import status
 from starlette.responses import JSONResponse
 from src.utility.invoice_csv_headers import INVOICE_HEADER_MAPPING, DIST_HEADER_MAPPING
-
 
 
 async def upload_distributor_csv(request:Request,file:UploadFile,db: Database):
@@ -303,7 +302,7 @@ def updated_invoice_detector(updated_row,updated_row_current_data,updated_at,upd
                 updated_fields_history.append({
                     "invoice_no": invoice_no,
                     "field_name": key,
-                     f"old_{key}": old_value,
+                        f"old_{key}": old_value,
                     f"new_{key}":new_value,
                     "updated_at": updated_at,
                     "updated_by": updated_by,
@@ -315,4 +314,59 @@ def updated_invoice_detector(updated_row,updated_row_current_data,updated_at,upd
         if updated_row_dict:
             updated_rows.append(updated_row_dict)
         iterator+=1
-    return updated_fields_history,updated_rows
+        return updated_fields_history,updated_rows
+       
+        
+async def get_distributors(
+    request: Request,
+    db: Database,
+    page: int = 1,
+    limit: int = 10,
+):
+    try:
+        distributor_collection = db["distributor_master"]
+
+        # Validate page and limit
+        limit = max(limit, 1)
+
+        skip = (int(page) - 1) * limit
+
+
+        # Fetch data
+        distributors = distributor_collection.find({},{"_id":0}).skip(skip).limit(limit).to_list(length=limit)
+
+        #serialize objects to strings
+        pointer=0
+        for distributor in distributors:
+            for key,value in distributor.items():
+                if isinstance(value, datetime):
+                    distributors[pointer].update({key:value.isoformat()})
+                if isinstance(value, int):
+                    distributors[pointer].update({key:str(value)})
+
+            pointer+=1
+
+        total_records = distributor_collection.count_documents({})
+
+        pagination = {
+            "page": int(page),
+            "limit": limit,
+            "total_records": total_records,
+            "total_pages": ceil(len(distributors) / limit) ,
+        }
+
+
+        # Total count
+        total_records = distributor_collection.count_documents({})
+
+        return JSONResponse(status_code=status.HTTP_200_OK,content={
+            "message": "Distributor data fetched successfully",
+            "data": {"distributors":distributors,"page_info":pagination}
+        })
+
+    except Exception as e:
+        print(str(e))
+        return JSONResponse(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,content={"message":"Internal server error","data":None})
+
+
+

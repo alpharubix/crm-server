@@ -73,7 +73,7 @@ KOTAK_HWC_TRANS_MAPPING = {
 KOTAK_CKPL_TRANS_MAPPING = {
     "WCDL Account No": "wcdl_account_no",
     "Dealer Name": "dealer_name",
-    "Total Limit ": "total_limit",
+    "Total Limit": "total_limit",
     "Invoice Number": "invoice_number",
     "Invoice Date(ID)": "invoice_date_id",
     "Disbursement date": "disbursement_date",

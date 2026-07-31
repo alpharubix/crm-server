@@ -337,7 +337,15 @@ async def get_distributors(
         print(str(e))
         return JSONResponse(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,content={"message":"Internal server error","data":None})
 
-async def upload_kotak_hwc_transaction_csv(request:Request,file:UploadFile,db:Database):
+async def _process_csv_upload(
+    request: Request,
+    file: UploadFile,
+    db: Database,
+    mapping: dict,
+    collection_name: str,
+    history_collection_name: str,
+    unique_key: str,
+):
     try:
         if file.filename is None:
             return JSONResponse(
@@ -347,239 +355,107 @@ async def upload_kotak_hwc_transaction_csv(request:Request,file:UploadFile,db:Da
                     "data":None
                 }
             )
-        kotak_collection = db["kotak_hwc_transc"]
-        kotak_history_collection = db["kotak_hwc_transc_history"]
-        creation_rows = []  # this list holds the dict of rows which are need to be created
-        updated_rows = []  # this list holds the dict of rows which are need to be updated
-        update_rows_current_data = []  # this array holds all the current state of the updated distcode data
-        empty_values_row = []  # this list holds the dict of missing fields in the row with row id
-        row_iterator = 2  # points to the current row
+        collection = db[collection_name]
+        history_collection = db[history_collection_name]
+        creation_rows = []
+        updated_rows = []
+        update_rows_current_data = []
+        empty_values_row = []
+        row_iterator = 2
         total_row_created = 0
         total_row_updated = 0
         user_id = request.state.user_id
-        required_headers=set(KOTAK_HWC_TRANS_MAPPING.keys())
+        required_headers = set(mapping.keys())
         contents = await file.read()
         csv_text = contents.decode("utf-8")
         reader = csv.DictReader(io.StringIO(csv_text))
-        csv_headers = set (reader.fieldnames or [])
+        csv_headers = set(reader.fieldnames or [])
         missing_headers = list(required_headers - csv_headers)
-        print("CSV read Headers : ",csv_headers)
-        print("Missing headers : ",missing_headers)
-        print("Type of missing headers",type(missing_headers))
 
-        #step 1: validating the headers
         if missing_headers:
-                return JSONResponse(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    content={
-                        "message":"Header miss match found",
-                        "data":missing_headers
-                    }
-                )
-        for row in reader:
-            mapped_row = {}
-            row_missing_values = {}
-            for csv_header, value in row.items():
-                #step2 : checking for empty values in row
-
-                if not value:
-                    if row_missing_values.get("row_number") is None:
-                        row_missing_values.update({"row_number":row_iterator,"empty_fields":[csv_header]})
-                    else:
-                        missing_fields_list = row_missing_values["empty_fields"]
-                        row_missing_values.update({"row_number":row_iterator,"empty_fields":missing_fields_list.append(csv_header)})
-
-                #step 3 :Adding additional column into the database
-                if csv_header.startswith(("Sales", "sales")):
-                    mapped_row[csv_header] = value
-                    continue
-
-                # Map all other headers
-                mapped_row[KOTAK_HWC_TRANS_MAPPING[csv_header]] = value
-
-            if row_missing_values:
-                empty_values_row.append(row_missing_values)
-                continue
-            #step 4: split the rows into insertion and updation based on the distcode
-            incoming_dist_code = mapped_row["distributor_code"]
-
-            distributor = kotak_collection.find_one({"distributor_code":incoming_dist_code})
-
-            if distributor: 
-                updated_rows.append(mapped_row) 
-                update_rows_current_data.append(distributor)
-            else:
-                creation_rows.append(mapped_row)
-
-        #step 5: update and insert the data to the collection
-        now = datetime.now(timezone.utc)
-
-        if creation_rows:
-
-            for row in creation_rows: #adding meta tags to the creation row
-                row["created_at"] = now
-                row["updated_at"] = now
-                row["created_by"] = user_id
-                row["updated_by"] = user_id
-            logging.info(msg=f"rows for creation {creation_rows}")
-            created_rows = kotak_collection.insert_many(creation_rows)
-            total_row_created = len(created_rows.inserted_ids)
-
-        if updated_rows:
-            update_history,updated_fields = updated_field_detector(
-                updated_rows,
-                update_rows_current_data,
-                now,
-                user_id,
-                "distributor_code"
-            )
-            print("UPDATED DISTRIBUTOR DATA",updated_fields)
-            print("Updated DISTRIBUTOR DATA History",update_history)
-            if update_history and updated_fields:
-                bulk_ops = [
-                    UpdateOne(
-                        {"distributor_code": row["distributor_code"]},
-                        {"$set": {"updated_at": now, "updated_by": user_id,
-                                    **{k: v for k, v in row.items() if k != "distributor_code"}}}
-                    )
-                    for row in updated_fields
-                ]
-                logging.info(msg=f"bulk updation {bulk_ops}")
-                kotak_collection.bulk_write(bulk_ops)
-                total_row_updated = len(updated_fields)
-                kotak_history_collection.insert_many(update_history)
-
-        return {
-            "message": "Uploaded successfully",
-            "total_rows_created":total_row_created,
-            "total_rows_updated":total_row_updated,
-            "failed_rows":empty_values_row,
-        }
-    except Exception as e:
-        logging.error(e)
-        return JSONResponse(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            content={"message":"Internal Server Error","data":None}
-        )
-
-
-async def upload_kotak_hwc_credit_csv(request:Request,file:UploadFile,db:Database):
-    try:
-        if file.filename is None:
             return JSONResponse(
-                status_code=status.HTTP_204_NO_CONTENT,
+                status_code=status.HTTP_400_BAD_REQUEST,
                 content={
-                    "message":"Please input the invoice file",
-                    "data":None
+                    "message":"Header miss match found",
+                    "data":missing_headers
                 }
             )
-        kotak_collection = db["kotak_hwc_credit"]
-        kotak_history_collection = db["kotak_hwc_credit_history"]
-        creation_rows = []  # this list holds the dict of rows which are need to be created
-        updated_rows = []  # this list holds the dict of rows which are need to be updated
-        update_rows_current_data = []  # this array holds all the current state of the updated distcode data
-        empty_values_row = []  # this list holds the dict of missing fields in the row with row id
-        row_iterator = 2  # points to the current row
-        total_row_created = 0
-        total_row_updated = 0
-        user_id = request.state.user_id
-        required_headers=set(KOTAK_HWC_CREDIT_MAPPING.keys())
-        contents = await file.read()
-        csv_text = contents.decode("utf-8")
-        reader = csv.DictReader(io.StringIO(csv_text))
-        csv_headers = set (reader.fieldnames or [])
-        missing_headers = list(required_headers - csv_headers)
-        print("CSV read Headers : ",csv_headers)
-        print("Missing headers : ",missing_headers)
-        print("Type of missing headers",type(missing_headers))
 
-        #step 1: validating the headers
-        if missing_headers:
-                return JSONResponse(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    content={
-                        "message":"Header miss match found",
-                        "data":missing_headers
-                    }
-                )
         for row in reader:
             mapped_row = {}
             row_missing_values = {}
             for csv_header, value in row.items():
-                #step2 : checking for empty values in row
-
                 if not value:
                     if row_missing_values.get("row_number") is None:
                         row_missing_values.update({"row_number":row_iterator,"empty_fields":[csv_header]})
                     else:
-                        missing_fields_list = row_missing_values["empty_fields"]
-                        row_missing_values.update({"row_number":row_iterator,"empty_fields":missing_fields_list.append(csv_header)})
+                        row_missing_values["empty_fields"].append(csv_header)
 
-                #step 3 :Adding additional column into the database
                 if csv_header.startswith(("Sales", "sales")):
                     mapped_row[csv_header] = value
                     continue
 
-                # Map all other headers
-                mapped_row[KOTAK_HWC_CREDIT_MAPPING[csv_header]] = value
+                if csv_header in mapping:
+                    mapped_row[mapping[csv_header]] = value
 
             if row_missing_values:
                 empty_values_row.append(row_missing_values)
+                row_iterator += 1
                 continue
-            #step 4: split the rows into insertion and updation based on the distcode
-            incoming_dist_code = mapped_row["distributor_code"]
+                
+            incoming_unique_code = mapped_row.get(unique_key)
+            if not incoming_unique_code:
+                empty_values_row.append({"row_number": row_iterator, "empty_fields": [unique_key]})
+                row_iterator += 1
+                continue
 
-            distributor = kotak_collection.find_one({"distributor_code":incoming_dist_code})
+            existing_record = collection.find_one({unique_key: incoming_unique_code})
 
-            if distributor: 
+            if existing_record: 
                 updated_rows.append(mapped_row) 
-                update_rows_current_data.append(distributor)
+                update_rows_current_data.append(existing_record)
             else:
                 creation_rows.append(mapped_row)
+                
+            row_iterator += 1
 
-        #step 5: update and insert the data to the collection
         now = datetime.now(timezone.utc)
 
         if creation_rows:
-
-            for row in creation_rows: #adding meta tags to the creation row
+            for row in creation_rows:
                 row["created_at"] = now
                 row["updated_at"] = now
                 row["created_by"] = user_id
                 row["updated_by"] = user_id
-            logging.info(msg=f"rows for creation {creation_rows}")
-            created_rows = kotak_collection.insert_many(creation_rows)
+            created_rows = collection.insert_many(creation_rows)
             total_row_created = len(created_rows.inserted_ids)
 
         if updated_rows:
-            update_history,updated_fields = updated_field_detector(
+            update_history, updated_fields = updated_field_detector(
                 updated_rows,
                 update_rows_current_data,
                 now,
                 user_id,
-                "distributor_code"
+                unique_key
             )
-            print("UPDATED DISTRIBUTOR DATA",updated_fields)
-            print("Updated DISTRIBUTOR DATA History",update_history)
             if update_history and updated_fields:
                 bulk_ops = [
                     UpdateOne(
-                        {"distributor_code": row["distributor_code"]},
+                        {unique_key: row[unique_key]},
                         {"$set": {"updated_at": now, "updated_by": user_id,
-                                    **{k: v for k, v in row.items() if k != "distributor_code"}}}
+                                  **{k: v for k, v in row.items() if k != unique_key}}}
                     )
                     for row in updated_fields
                 ]
-                logging.info(msg=f"bulk updation {bulk_ops}")
-                kotak_collection.bulk_write(bulk_ops)
+                collection.bulk_write(bulk_ops)
                 total_row_updated = len(updated_fields)
-                kotak_history_collection.insert_many(update_history)
+                history_collection.insert_many(update_history)
 
         return {
             "message": "Uploaded successfully",
-            "total_rows_created":total_row_created,
-            "total_rows_updated":total_row_updated,
-            "failed_rows":empty_values_row,
+            "total_rows_created": total_row_created,
+            "total_rows_updated": total_row_updated,
+            "failed_rows": empty_values_row,
         }
     except Exception as e:
         logging.error(e)
@@ -587,6 +463,79 @@ async def upload_kotak_hwc_credit_csv(request:Request,file:UploadFile,db:Databas
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             content={"message":"Internal Server Error","data":None}
         )
+
+async def upload_kotak_hwc_transaction_csv(request: Request, file: UploadFile, db: Database):
+    return await _process_csv_upload(
+        request, file, db, 
+        mapping=KOTAK_HWC_TRANS_MAPPING, 
+        collection_name="kotak_hwc_transaction", 
+        history_collection_name="kotak_hwc_transaction_history", 
+        unique_key="invoice_number"
+    )
+
+async def upload_kotak_hwc_credit_csv(request: Request, file: UploadFile, db: Database):
+    return await _process_csv_upload(
+        request, file, db, 
+        mapping=KOTAK_HWC_CREDIT_MAPPING, 
+        collection_name="kotak_hwc_credit", 
+        history_collection_name="kotak_hwc_credit_history", 
+        unique_key="dealer_name"
+    )
+
+async def upload_tcpl_transaction_csv(request: Request, file: UploadFile, db: Database):
+    return await _process_csv_upload(
+        request, file, db, 
+        mapping=TCPL_TRANS_MAPPING, 
+        collection_name="tcpl_transaction", 
+        history_collection_name="tcpl_transaction_history", 
+        unique_key="invoice_no"
+    )
+
+async def upload_tcpl_credit_csv(request: Request, file: UploadFile, db: Database):
+    return await _process_csv_upload(
+        request, file, db, 
+        mapping=TCPL_CREDIT_MAPPING, 
+        collection_name="tcpl_credit", 
+        history_collection_name="tcpl_credit_history", 
+        unique_key="account_id"
+    )
+
+async def upload_kotak_ckpl_transaction_csv(request: Request, file: UploadFile, db: Database):
+    return await _process_csv_upload(
+        request, file, db, 
+        mapping=KOTAK_CKPL_TRANS_MAPPING, 
+        collection_name="kotak_ckpl_transaction", 
+        history_collection_name="kotak_ckpl_transaction_history", 
+        unique_key="invoice_number"
+    )
+
+async def upload_kotak_ckpl_credit_csv(request: Request, file: UploadFile, db: Database):
+    return await _process_csv_upload(
+        request, file, db, 
+        mapping=KOTAK_CKPL_CREDIT_MAPPING, 
+        collection_name="kotak_ckpl_credit", 
+        history_collection_name="kotak_ckpl_credit_history", 
+        unique_key="dealer_name"
+    )
+
+async def upload_muthoot_transaction_csv(request: Request, file: UploadFile, db: Database):
+    print("MUTHOOT TRANSACTION CSV READING")
+    return await _process_csv_upload(
+        request, file, db, 
+        mapping=MUTHOOT_TRANS_MAPPING, 
+        collection_name="muthoot_transaction", 
+        history_collection_name="muthoot_transaction_history", 
+        unique_key="invoice_number"
+    )
+
+async def upload_muthoot_credit_csv(request: Request, file: UploadFile, db: Database):
+    return await _process_csv_upload(
+        request, file, db, 
+        mapping=MUTHOOT_CREDIT_MAPPING, 
+        collection_name="muthoot_credit", 
+        history_collection_name="muthoot_credit_history", 
+        unique_key="loan_account_number"
+    )
 async def get_invoices(
     request: Request,
     db: Database,

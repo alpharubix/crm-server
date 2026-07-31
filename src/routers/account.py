@@ -29,9 +29,8 @@ def create(request: Request, data: AccountBase, db: Session = Depends(get_db)):
 
 @router.get("/", response_model=GetlistAccountResponse)
 @router.get("", response_model=GetlistAccountResponse)
-def list_all(
+async def list_all(
     request: Request,
-    account_id: int | None = None,
     city: str | None = None,
     page: int = 1,
     state: str | None = None,
@@ -40,13 +39,17 @@ def list_all(
     account_stage: str | None = None,
     account_status: list[str] | None = Query(default=None),
     account_name: Optional[str] = None,
+    account_id: list[str] | str | None = Query(default=None),
     account_owner_id: list[int] | None = Query(default=None),
     industry: list[str] | None = Query(default=None),
     source: list[str] | None = Query(default=None),
     phone: str | None = None,
     call_back_date_time: str = None,
+    module: str | None = None,
+    from_date: str | None = None,
+    to_date: str | None = None,
 ):
-    return repo.get_all_accounts(
+    return await repo.get_all_accounts(
         request=request,
         db=db,
         mongodb=mongodb,
@@ -62,6 +65,9 @@ def list_all(
         phone_number=phone,
         industry=industry,
         call_back_date_time=call_back_date_time,
+        module=module,
+        from_date=from_date,
+        to_date=to_date,
     )
 
 

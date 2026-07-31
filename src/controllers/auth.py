@@ -16,9 +16,6 @@ def validate_login(body: Login, db: Session):
             raise HTTPException(status_code=404, detail="Account not found")
         else:
             hashed_password = user.password
-            print(hashed_password)
-            print(password)
-            print(repr(password))
             if not is_password_correct(
                 password=password, hashed_password=hashed_password
             ):

@@ -288,54 +288,74 @@ async def upload_invoice_csv(request:Request,file:UploadFile,db: Database):
             content={"message":"Internal Server Error","data":None}
         )
 
-        
+def _serialize_uploaded_records(records):
+    for record in records:
+        for key, value in list(record.items()):
+            if isinstance(value, datetime):
+                record[key] = value.isoformat()
+            if isinstance(value, int):
+                record[key] = str(value)
+    return records
+
+
+async def _get_uploaded_collection_data(
+    request: Request,
+    db: Database,
+    collection_name: str,
+    response_key: str,
+    success_message: str,
+    page: int = 1,
+    limit: int = 10,
+):
+    try:
+        collection = db[collection_name]
+
+        page = max(int(page), 1)
+        limit = max(int(limit), 1)
+        skip = (page - 1) * limit
+
+        records = collection.find({}, {"_id": 0}).skip(skip).limit(limit).to_list(length=limit)
+        records = _serialize_uploaded_records(records)
+
+        total_records = collection.count_documents({})
+        pagination = {
+            "page": page,
+            "limit": limit,
+            "total_records": total_records,
+            "total_pages": ceil(total_records / limit) if total_records else 0,
+        }
+
+        return JSONResponse(
+            status_code=status.HTTP_200_OK,
+            content={
+                "message": success_message,
+                "data": {response_key: records, "page_info": pagination},
+            },
+        )
+
+    except Exception as e:
+        print(str(e))
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content={"message":"Internal server error","data":None}
+        )
+
+
 async def get_distributors(
     request: Request,
     db: Database,
     page: int = 1,
     limit: int = 10,
 ):
-    try:
-        distributor_collection = db["distributor_master"]
-
-        # Validate page and limit
-        limit = max(limit, 1)
-
-        skip = (int(page) - 1) * limit
-
-
-        # Fetch data
-        distributors = distributor_collection.find({},{"_id":0}).skip(skip).limit(limit).to_list(length=limit)
-
-        #serialize objects to strings
-        pointer=0
-        for distributor in distributors:
-            for key,value in distributor.items():
-                if isinstance(value, datetime):
-                    distributors[pointer].update({key:value.isoformat()})
-                if isinstance(value, int):
-                    distributors[pointer].update({key:str(value)})
-
-            pointer+=1
-
-        total_records = distributor_collection.count_documents({})
-
-        pagination = {
-            "page": int(page),
-            "limit": limit,
-            "total_records": total_records,
-            "total_pages": ceil(len(distributors) / limit) ,
-        }
-
-
-        return JSONResponse(status_code=status.HTTP_200_OK,content={
-            "message": "Distributor data fetched successfully",
-            "data": {"distributors":distributors,"page_info":pagination}
-        })
-
-    except Exception as e:
-        print(str(e))
-        return JSONResponse(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,content={"message":"Internal server error","data":None})
+    return await _get_uploaded_collection_data(
+        request=request,
+        db=db,
+        collection_name="distributor_master",
+        response_key="distributors",
+        success_message="Distributor data fetched successfully",
+        page=page,
+        limit=limit,
+    )
 
 async def _process_csv_upload(
     request: Request,
@@ -555,50 +575,192 @@ async def upload_muthoot_credit_csv(request: Request, file: UploadFile, db: Data
         history_collection_name="muthoot_credit_history", 
         unique_key="loan_account_number"
     )
+
+
+async def get_kotak_hwc_transactions(
+    request: Request,
+    db: Database,
+    page: int = 1,
+    limit: int = 10,
+):
+    return await _get_uploaded_collection_data(
+        request=request,
+        db=db,
+        collection_name="kotak_hwc_transaction",
+        response_key="kotak_hwc_transactions",
+        success_message="Kotak HWC transaction data fetched successfully",
+        page=page,
+        limit=limit,
+    )
+
+
+async def get_kotak_hwc_credits(
+    request: Request,
+    db: Database,
+    page: int = 1,
+    limit: int = 10,
+):
+    return await _get_uploaded_collection_data(
+        request=request,
+        db=db,
+        collection_name="kotak_hwc_credit",
+        response_key="kotak_hwc_credits",
+        success_message="Kotak HWC credit data fetched successfully",
+        page=page,
+        limit=limit,
+    )
+
+
+async def get_kotak_ckpl_transactions(
+    request: Request,
+    db: Database,
+    page: int = 1,
+    limit: int = 10,
+):
+    return await _get_uploaded_collection_data(
+        request=request,
+        db=db,
+        collection_name="kotak_ckpl_transaction",
+        response_key="kotak_ckpl_transactions",
+        success_message="Kotak CKPL transaction data fetched successfully",
+        page=page,
+        limit=limit,
+    )
+
+
+async def get_kotak_ckpl_credits(
+    request: Request,
+    db: Database,
+    page: int = 1,
+    limit: int = 10,
+):
+    return await _get_uploaded_collection_data(
+        request=request,
+        db=db,
+        collection_name="kotak_ckpl_credit",
+        response_key="kotak_ckpl_credits",
+        success_message="Kotak CKPL credit data fetched successfully",
+        page=page,
+        limit=limit,
+    )
+
+
+async def get_tcpl_transactions(
+    request: Request,
+    db: Database,
+    page: int = 1,
+    limit: int = 10,
+):
+    return await _get_uploaded_collection_data(
+        request=request,
+        db=db,
+        collection_name="tcpl_transaction",
+        response_key="tcpl_transactions",
+        success_message="TCPL transaction data fetched successfully",
+        page=page,
+        limit=limit,
+    )
+
+
+async def get_tcpl_credits(
+    request: Request,
+    db: Database,
+    page: int = 1,
+    limit: int = 10,
+):
+    return await _get_uploaded_collection_data(
+        request=request,
+        db=db,
+        collection_name="tcpl_credit",
+        response_key="tcpl_credits",
+        success_message="TCPL credit data fetched successfully",
+        page=page,
+        limit=limit,
+    )
+
+
+async def get_hero_transactions(
+    request: Request,
+    db: Database,
+    page: int = 1,
+    limit: int = 10,
+):
+    return await _get_uploaded_collection_data(
+        request=request,
+        db=db,
+        collection_name="hero_transaction",
+        response_key="hero_transactions",
+        success_message="Hero transaction data fetched successfully",
+        page=page,
+        limit=limit,
+    )
+
+
+async def get_hero_credits(
+    request: Request,
+    db: Database,
+    page: int = 1,
+    limit: int = 10,
+):
+    return await _get_uploaded_collection_data(
+        request=request,
+        db=db,
+        collection_name="hero_credit",
+        response_key="hero_credits",
+        success_message="Hero credit data fetched successfully",
+        page=page,
+        limit=limit,
+    )
+
+
+async def get_muthoot_transactions(
+    request: Request,
+    db: Database,
+    page: int = 1,
+    limit: int = 10,
+):
+    return await _get_uploaded_collection_data(
+        request=request,
+        db=db,
+        collection_name="muthoot_transaction",
+        response_key="muthoot_transactions",
+        success_message="Muthoot transaction data fetched successfully",
+        page=page,
+        limit=limit,
+    )
+
+
+async def get_muthoot_credits(
+    request: Request,
+    db: Database,
+    page: int = 1,
+    limit: int = 10,
+):
+    return await _get_uploaded_collection_data(
+        request=request,
+        db=db,
+        collection_name="muthoot_credit",
+        response_key="muthoot_credits",
+        success_message="Muthoot credit data fetched successfully",
+        page=page,
+        limit=limit,
+    )
+
+
 async def get_invoices(
     request: Request,
     db: Database,
     page: int = 1,
     limit: int = 10,
 ):
-    try:
-        invoice_collection = db["invoice_master"]
-
-        # Validate page and limit
-        limit = max(limit, 1)
-
-        skip = (int(page) - 1) * limit
-
-        # Fetch data
-        invoices = invoice_collection.find({}, {"_id": 0}).skip(skip).limit(limit).to_list(length=limit)
-
-        #serialize objects to strings
-        pointer = 0
-        for invoice in invoices:
-            for key, value in invoice.items():
-                if isinstance(value, datetime):
-                    invoices[pointer].update({key: value.isoformat()})
-                if isinstance(value, int):
-                    invoices[pointer].update({key: str(value)})
-
-            pointer += 1
-
-        total_records = invoice_collection.count_documents({})
-
-        pagination = {
-            "page": int(page),
-            "limit": limit,
-            "total_records": total_records,
-            "total_pages": ceil(len(invoices) / limit),
-        }
-
-        return JSONResponse(status_code=status.HTTP_200_OK, content={
-            "message": "Invoice data fetched successfully",
-            "data": {"invoices": invoices, "page_info": pagination}
-        })
-
-    except Exception as e:
-        print(str(e))
-        return JSONResponse(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, content={"message": "Internal server error", "data": None})
+    return await _get_uploaded_collection_data(
+        request=request,
+        db=db,
+        collection_name="invoice_master",
+        response_key="invoices",
+        success_message="Invoice data fetched successfully",
+        page=page,
+        limit=limit,
+    )
 
 

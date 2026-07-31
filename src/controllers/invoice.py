@@ -500,6 +500,25 @@ async def upload_tcpl_credit_csv(request: Request, file: UploadFile, db: Databas
         unique_key="account_id"
     )
 
+async def upload_hero_transaction_csv(request: Request, file: UploadFile, db: Database):
+    return await _process_csv_upload(
+        request, file, db, 
+        mapping=HERO_TRANS_MAPPING, 
+        collection_name="hero_transaction", 
+        history_collection_name="hero_transaction_history", 
+        unique_key="invoice_number"
+    )
+
+
+async def upload_hero_credit_csv(request: Request, file: UploadFile, db: Database):
+    return await _process_csv_upload(
+        request, file, db, 
+        mapping=HERO_CREDIT_MAPPING, 
+        collection_name="hero_credit", 
+        history_collection_name="hero_credit_history", 
+        unique_key="invoice_number"
+    )
+
 async def upload_kotak_ckpl_transaction_csv(request: Request, file: UploadFile, db: Database):
     return await _process_csv_upload(
         request, file, db, 

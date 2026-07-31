@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, File, UploadFile
 from starlette.requests import Request
-from src.controllers.invoice import upload_distributor_csv,upload_invoice_csv,upload_kotak_hwc_transaction_csv,upload_kotak_ckpl_credit_csv,upload_kotak_ckpl_transaction_csv,upload_kotak_hwc_credit_csv,upload_muthoot_credit_csv,upload_muthoot_transaction_csv,upload_tcpl_credit_csv,upload_tcpl_transaction_csv,get_invoices,get_distributors
+from src.controllers.invoice import upload_distributor_csv,upload_invoice_csv,upload_kotak_hwc_transaction_csv,upload_kotak_ckpl_credit_csv,upload_kotak_ckpl_transaction_csv,upload_kotak_hwc_credit_csv,upload_muthoot_credit_csv,upload_muthoot_transaction_csv,upload_tcpl_credit_csv,upload_tcpl_transaction_csv,upload_hero_credit_csv,upload_hero_transaction_csv,get_invoices,get_distributors
 
 from src.database import get_master_invoice_database
 
@@ -40,6 +40,14 @@ async def upload_tcpl_transaction(request:Request,file:UploadFile=File(...),db=D
 async def upload_tcpl_credit(request:Request,file:UploadFile=File(...),db=Depends(get_master_invoice_database)):
     print("Route hit")
     return await upload_tcpl_credit_csv(request,file,db)
+
+@invoice_router.post("/hero/transaction")
+async def upload_hero_transaction(request:Request,file:UploadFile=File(...),db=Depends(get_master_invoice_database)):
+    return await upload_hero_transaction_csv(request,file,db)
+
+@invoice_router.post("/hero/credit")
+async def upload_hero_credit(request:Request,file:UploadFile=File(...),db=Depends(get_master_invoice_database)):
+    return await upload_hero_credit_csv(request,file,db)
 
 @invoice_router.post("/muthoot/transaction")
 async def upload_muthoot_transaction(request:Request,file:UploadFile=File(...),db=Depends(get_master_invoice_database)):

@@ -125,7 +125,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Include Routers
+
 app.include_router(account_router.router)
 app.include_router(contact_router.router)
 app.include_router(user_router.router)
@@ -143,11 +143,7 @@ app.include_router(revenue_router)
 app.include_router(webhook_api_router)
 app.include_router(support_tickets_router)
 app.include_router(invoice_router)
-# app.include_router(kotak_hwc_router)
-# app.include_router(kotak_ckpl_router)
-# app.include_router(tcpl_router)
-# app.include_router(hero_router)
-# app.include_router(muthoot_router)
+
 
 @app.get("/")
 def test():

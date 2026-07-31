@@ -60,7 +60,6 @@ def get_all_contacts(
     full_name: str = "",
 ):
     MANAGER_EXECUTIVES_MAP = MANAGERID().MANAGER_EXECUTIVES_MAP
-    print(page)
     limit = 30
     offset = (page - 1) * limit
     query = db.query(Contact)

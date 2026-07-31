@@ -1,5 +1,6 @@
 from sqlalchemy import create_engine
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
+from pymongo import MongoClient
 
 from .config import settings
 
@@ -19,7 +20,6 @@ def get_db():
         db.close()
 
 
-from pymongo import MongoClient
 
 monogodb = MongoClient(settings.MONGODB_URI)
 
@@ -33,7 +33,7 @@ def get_mongodb():
 
 
 # Must be AFTER Base and engine are defined, and after all models are imported
-from src.models.support_ticket import SupportTicket
+# from src.models.support_ticket import SupportTicket
 
-Base.metadata.create_all(bind=engine)
+# Base.metadata.create_all(bind=engine)
 

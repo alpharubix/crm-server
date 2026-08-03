@@ -34,11 +34,7 @@ from src.routers.tickets import tickets_router
 from src.routers.support_tickets import support_tickets_router
 from src.routers.webhook import webhook_api_router
 from src.routers.invoicing_route import invoice_router
-# from src.routers.kotak_hwc_route import kotak_hwc_router
-# from src.routers.kotak_ckpl_route import kotak_ckpl_router
-# from src.routers.tcpl_route import tcpl_router
-# from src.routers.hero_route import hero_router
-# from src.routers.muthoot_route import muthoot_router
+
 
 # 3. Handle setup during the lifespan, not on script execution
 logging.basicConfig(
@@ -109,7 +105,9 @@ logger = logging.getLogger(__name__)
 app = FastAPI()
 
 from src.middleware.auth import authorization
+from src.middleware.invoice_route_protector import authorize_invoice_route_user
 
+app.middleware("https")(authorize_invoice_route_user)
 app.middleware("http")(authorization)
 
 app.add_middleware(

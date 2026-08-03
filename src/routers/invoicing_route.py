@@ -56,6 +56,7 @@ async def kotak_hwc_transactions(request:Request,
     disbursement_date: str | None = None,
     overdue_within_cure: str | None = None,
     overdue_beyond_cure: str | None = None,
+    is_export:bool = False,
     page=1,db=Depends(get_master_invoice_database)):
     return await get_kotak_hwc_transactions(
         request=request,
@@ -65,6 +66,7 @@ async def kotak_hwc_transactions(request:Request,
         disbursement_date=disbursement_date,
         overdue_within_cure=overdue_within_cure,
         overdue_beyond_cure=overdue_beyond_cure,
+        is_export=is_export,
         page=page,
         db=db,
     )
@@ -77,6 +79,7 @@ async def kotak_hwc_credits(
     request: Request,
     dealer_name: str | None = None,
     distributor_code: str | None = None,
+    is_export :bool = False,
     page=1,
     db=Depends(get_master_invoice_database),
 ):
@@ -85,6 +88,7 @@ async def kotak_hwc_credits(
         request=request,
         dealer_name=dealer_name,
         distributor_code=distributor_code,
+        is_export=is_export,
         page=page,
         db=db,
     )
@@ -102,6 +106,7 @@ async def kotak_ckpl_transactions(
     disbursement_date: str | None = None,
     overdue_within_cure: str | None = None,
     overdue_beyond_cure: str | None = None,
+    is_export:bool = False,
     page=1,
     db=Depends(get_master_invoice_database),
 ):
@@ -114,6 +119,7 @@ async def kotak_ckpl_transactions(
         disbursement_date=disbursement_date,
         overdue_within_cure=overdue_within_cure,
         overdue_beyond_cure=overdue_beyond_cure,
+        is_export=is_export,
         page=page,
         db=db,
     )
@@ -127,6 +133,7 @@ async def kotak_ckpl_credits(
     request: Request,
     dealer_name: str | None = None,
     distributor_code: str | None = None,
+    is_export:bool = False,
     page=1,
     db=Depends(get_master_invoice_database),
 ):
@@ -135,6 +142,7 @@ async def kotak_ckpl_credits(
         request=request,
         dealer_name=dealer_name,
         distributor_code=distributor_code,
+        is_export=is_export,
         page=page,
         db=db,
     )
@@ -150,13 +158,10 @@ async def tcpl_transactions(
     invoice_no: str | None = None,
     invoice_date: str | None = None,
     dpd: str | None = None,
+    is_export:bool = False,
     page=1,
     db=Depends(get_master_invoice_database),
 ):
-    customer_name = customer_name or request.query_params.get("Customer Name")
-    invoice_no = invoice_no or request.query_params.get("Invoice No")
-    invoice_date = invoice_date or request.query_params.get("Invoice Date")
-    dpd = dpd or request.query_params.get("DPD")
 
     return await get_tcpl_transactions(
         request=request,
@@ -164,6 +169,7 @@ async def tcpl_transactions(
         invoice_no=invoice_no,
         invoice_date=invoice_date,
         dpd=dpd,
+        is_export=is_export,
         page=page,
         db=db,
     )
@@ -178,16 +184,17 @@ async def tcpl_credits(
     request: Request,
     dealer_name: str | None = None,
     distributor_code: str | None = None,
+    is_export:bool = False,
     page=1,
     db=Depends(get_master_invoice_database),
 ):
-    dealer_name = dealer_name or request.query_params.get("Dealer Name")
-    distributor_code = distributor_code or request.query_params.get("Distributor Code")
+
 
     return await get_tcpl_credits(
         request=request,
         dealer_name=dealer_name,
         distributor_code=distributor_code,
+        is_export=is_export,
         page=page,
         db=db,
     )
@@ -203,13 +210,10 @@ async def hero_transactions(
     invoice_number: str | None = None,
     invoice_date: str | None = None,
     dpd: str | None = None,
+    is_export:bool = False,
     page=1,
     db=Depends(get_master_invoice_database),
 ):
-    client_name = client_name or request.query_params.get("Client Name")
-    invoice_number = invoice_number or request.query_params.get("Invoice Number")
-    invoice_date = invoice_date or request.query_params.get("Invoice Date")
-    dpd = dpd or request.query_params.get("DPD")
 
     return await get_hero_transactions(
         request=request,
@@ -217,6 +221,7 @@ async def hero_transactions(
         invoice_number=invoice_number,
         invoice_date=invoice_date,
         dpd=dpd,
+        is_export=is_export,
         page=page,
         db=db,
     )
@@ -230,6 +235,7 @@ async def hero_credits(
     request: Request,
     customer_name: str | None = None,
     distributor_code: str | None = None,
+    is_export:bool = False,
     page=1,
     db=Depends(get_master_invoice_database),
 ):
@@ -240,6 +246,7 @@ async def hero_credits(
         request=request,
         customer_name=customer_name,
         distributor_code=distributor_code,
+        is_export=is_export,
         page=page,
         db=db,
     )
@@ -255,6 +262,7 @@ async def muthoot_transactions(
     invoice_number: str | None = None,
     invoice_date: str | None = None,
     principal_dpd: str | None = None,
+    is_export:bool = False,
     page=1,
     db=Depends(get_master_invoice_database),
 ):
@@ -264,6 +272,7 @@ async def muthoot_transactions(
         invoice_number=invoice_number,
         invoice_date=invoice_date,
         principal_dpd=principal_dpd,
+        is_export=is_export,
         page=page,
         db=db,
     )
@@ -278,6 +287,7 @@ async def muthoot_credits(
     request: Request,
     borrower_name: str | None = None,
     distributor_code: str | None = None,
+    is_export:bool = False,
     page=1,
     db=Depends(get_master_invoice_database),
 ):
@@ -285,6 +295,7 @@ async def muthoot_credits(
         request=request,
         borrower_name=borrower_name,
         distributor_code=distributor_code,
+        is_export=is_export,
         page=page,
         db=db,
     )
@@ -295,7 +306,7 @@ async def consolidated_limit(request:Request,file:UploadFile=File(...),db=Depend
 
 @invoice_router.get("/consolidated-limit-report")
 async def consolidated_limit(request:Request,company_name:str=None,distributor_code:str=None,state:str=None,lender:str=None,
- anchor_id:str=None,billing_status:str=None,page=1,db=Depends(get_master_invoice_database)):
+ anchor_id:str=None,billing_status:str=None,is_export:bool=False,page=1,db=Depends(get_master_invoice_database)):
     return await get_consolidated_limit_report(
         request=request,
         company_name=company_name,
@@ -304,6 +315,7 @@ async def consolidated_limit(request:Request,company_name:str=None,distributor_c
         lender=lender,
         anchor_id=anchor_id,
         billing_status=billing_status,
+        is_export=is_export,
         page=page,
         db=db,
     )
@@ -313,12 +325,14 @@ async def distributors(request:Request,page=1,anchor: str = None,
     region: str = None,
     state: str = None,
     distribution_type: str = None,
-    division: str = None,db=Depends(get_master_invoice_database)):
+    division: str = None,
+    is_export :bool=False,
+    db=Depends(get_master_invoice_database)):
     return await get_distributors(request=request,anchor=anchor,
     region = region,
     state = state,
     distribution_type = distribution_type,
-    division = division,page=page,db=db)
+    division = division,is_export=is_export,page=page,db=db)
 
 @invoice_router.get("/")
 async def invoices(
@@ -336,6 +350,7 @@ async def invoices(
     utr: Optional[str] = None,
     status: Optional[str] = None,
     status_reason: Optional[str] = None,
+    is_export : bool=False,
     db=Depends(get_master_invoice_database),
 ):
     return await get_invoices(
@@ -352,6 +367,7 @@ async def invoices(
         utr=utr,
         status=status,
         status_reason=status_reason,
+        is_export=is_export,
         page=page,
         limit=limit,
     )

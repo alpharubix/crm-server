@@ -5,12 +5,11 @@ from logging import basicConfig
 from math import ceil
 import logging
 from typing import Optional
-
 from fastapi import Request, UploadFile
 from pymongo import UpdateOne
 from pymongo.database import Database
 from starlette import status
-from starlette.responses import JSONResponse
+from starlette.responses import JSONResponse, StreamingResponse
 from src.utility.invoice_csv_headers import *
 from src.utility.utils import str_to_date
 
@@ -304,14 +303,7 @@ def _serialize_uploaded_records(records):
     return records
 
 
-def _date_or_raw_value_filter(value: str):
-    try:
-        return {"$in": [value, str_to_date(value)]}
-    except ValueError:
-        return value
-
-
-async def _get_uploaded_collection_data(
+def _get_uploaded_collection_data(
     request: Request,
     db: Database,
     collection_name: str,
@@ -320,6 +312,7 @@ async def _get_uploaded_collection_data(
     data_filter:dict = None,
     page: int = 1,
     limit: int = 10,
+    is_export = False,
 ):
     try:
         if data_filter is None:
@@ -330,6 +323,11 @@ async def _get_uploaded_collection_data(
         page = max(int(page), 1)
         limit = max(int(limit), 1)
         skip = (page - 1) * limit
+
+        if is_export:
+            records = collection.find(data_filter, {"_id": 0}).to_list(length=None)
+            records = _serialize_uploaded_records(records)
+            return records #custom output for handling the export request
 
         records = collection.find(data_filter, {"_id": 0}).skip(skip).limit(limit).to_list(length=limit)
         records = _serialize_uploaded_records(records)
@@ -492,6 +490,32 @@ async def _process_csv_upload(
             content={"message":"Internal Server Error","data":None}
         )
 
+def _list_to_csv(data: list[dict]):
+    output = io.StringIO()
+
+    if not data:
+        return output
+
+    writer = csv.DictWriter(output, fieldnames=data[0].keys())
+    writer.writeheader()
+    writer.writerows(data)
+
+    output.seek(0)
+    return output
+
+def _csv_export_orchestration(datas):
+    csv_file = _list_to_csv(datas)
+
+    return StreamingResponse(
+        csv_file,
+        media_type="text/csv",
+        headers={
+            "Content-Disposition": 'attachment; filename="transactions.csv"'
+        },
+    )
+
+
+
 async def upload_kotak_hwc_transaction_csv(request: Request, file: UploadFile, db: Database):
     return await _process_csv_upload(
         request, file, db, 
@@ -603,6 +627,7 @@ async def get_distributors(
     distribution_type: str = None,
     division: str = None,
     limit: int = 10,
+    is_export: bool = False,
 ):
     filter = {}
 
@@ -617,9 +642,21 @@ async def get_distributors(
     if division:
         filter["division"] = division
 
+    if is_export:
+        datas = _get_uploaded_collection_data(
+        request=request,
+        db=db,
+        collection_name="distributor_master",
+        response_key="distributors",
+        success_message="Distributor data fetched successfully",
+        data_filter=filter,
+        page=page,
+        limit=limit,
+        is_export=True
+    )
+        return _csv_export_orchestration(datas)
 
-
-    return await _get_uploaded_collection_data(
+    return _get_uploaded_collection_data(
         request=request,
         db=db,
         collection_name="distributor_master",
@@ -642,6 +679,7 @@ async def get_kotak_hwc_transactions(
     overdue_beyond_cure: str | None = None,
     page: int = 1,
     limit: int = 10,
+    is_export: bool = False,
 ):
     filter = {}
 
@@ -658,7 +696,22 @@ async def get_kotak_hwc_transactions(
     if overdue_beyond_cure:
         filter["overdue_beyond_cure"] = overdue_beyond_cure
 
-    return await _get_uploaded_collection_data(
+    if is_export:
+        datas = _get_uploaded_collection_data(
+        request=request,
+        db=db,
+        data_filter=filter,
+        collection_name="kotak_hwc_transaction",
+        response_key="kotak_hwc_transactions",
+        success_message="Kotak HWC transaction data fetched successfully",
+        is_export=True,
+        page=page,
+        limit=limit,
+    )
+        return _csv_export_orchestration(datas)
+
+
+    return _get_uploaded_collection_data(
         request=request,
         db=db,
         data_filter=filter,
@@ -675,6 +728,7 @@ async def get_kotak_hwc_credits(
     db: Database,
     dealer_name: str | None = None,
     distributor_code: str | None = None,
+    is_export: bool = False,
     page: int = 1,
     limit: int = 10,
 ):
@@ -684,8 +738,21 @@ async def get_kotak_hwc_credits(
         data_filter["dealer_name"] = dealer_name
     if distributor_code:
         data_filter["distributor_code"] = distributor_code
+    if is_export:
+        datas = _get_uploaded_collection_data(
+        request=request,
+        db=db,
+        collection_name="kotak_hwc_credit",
+        response_key="kotak_hwc_credits",
+        success_message="Kotak HWC credit data fetched successfully",
+        data_filter=data_filter,
+        is_export=True,
+        page=page,
+        limit=limit,
+    )
+        return _csv_export_orchestration(datas)
 
-    return await _get_uploaded_collection_data(
+    return _get_uploaded_collection_data(
         request=request,
         db=db,
         collection_name="kotak_hwc_credit",
@@ -706,6 +773,7 @@ async def get_kotak_ckpl_transactions(
     disbursement_date: str | None = None,
     overdue_within_cure: str | None = None,
     overdue_beyond_cure: str | None = None,
+    is_export:bool = False,
     page: int = 1,
     limit: int = 10,
 ):
@@ -724,7 +792,21 @@ async def get_kotak_ckpl_transactions(
     if overdue_beyond_cure:
         data_filter["overdue_beyondcure_inr"] = overdue_beyond_cure
 
-    return await _get_uploaded_collection_data(
+    if is_export:
+        datas = _get_uploaded_collection_data(
+        request=request,
+        db=db,
+        collection_name="kotak_ckpl_transaction",
+        response_key="kotak_ckpl_transactions",
+        success_message="Kotak CKPL transaction data fetched successfully",
+        data_filter=data_filter,
+        page=page,
+        is_export=True,
+        limit=limit,
+    )
+        return _csv_export_orchestration(datas)
+
+    return  _get_uploaded_collection_data(
         request=request,
         db=db,
         collection_name="kotak_ckpl_transaction",
@@ -741,6 +823,7 @@ async def get_kotak_ckpl_credits(
     db: Database,
     dealer_name: str | None = None,
     distributor_code: str | None = None,
+    is_export: bool = False,
     page: int = 1,
     limit: int = 10,
 ):
@@ -750,8 +833,21 @@ async def get_kotak_ckpl_credits(
         data_filter["dealer_name"] = dealer_name
     if distributor_code:
         data_filter["distributor_code"] = distributor_code
+    if is_export:
+        datas = _get_uploaded_collection_data(
+        request=request,
+        db=db,
+        collection_name="kotak_ckpl_credit",
+        response_key="kotak_ckpl_credits",
+        success_message="Kotak CKPL credit data fetched successfully",
+        data_filter=data_filter,
+        is_export=True,
+        page=page,
+        limit=limit,
+    )
+        return _csv_export_orchestration(datas)
 
-    return await _get_uploaded_collection_data(
+    return _get_uploaded_collection_data(
         request=request,
         db=db,
         collection_name="kotak_ckpl_credit",
@@ -770,6 +866,7 @@ async def get_tcpl_transactions(
     invoice_no: str | None = None,
     invoice_date: str | None = None,
     dpd: str | None = None,
+    is_export: bool = False,
     page: int = 1,
     limit: int = 10,
 ):
@@ -780,11 +877,25 @@ async def get_tcpl_transactions(
     if invoice_no:
         data_filter["invoice_no"] = invoice_no
     if invoice_date:
-        data_filter["invoice_date"] = _date_or_raw_value_filter(invoice_date)
+        data_filter["invoice_date"] = str_to_date(invoice_date)
     if dpd:
         data_filter["dpd"] = dpd
 
-    return await _get_uploaded_collection_data(
+    if is_export:
+        datas = _get_uploaded_collection_data(
+        request=request,
+        db=db,
+        collection_name="tcpl_transaction",
+        response_key="tcpl_transactions",
+        success_message="TCPL transaction data fetched successfully",
+        data_filter=data_filter,
+        is_export=True,
+        page=page,
+        limit=limit,
+    )
+        return _csv_export_orchestration(datas)
+
+    return _get_uploaded_collection_data(
         request=request,
         db=db,
         collection_name="tcpl_transaction",
@@ -801,6 +912,7 @@ async def get_tcpl_credits(
     db: Database,
     dealer_name: str | None = None,
     distributor_code: str | None = None,
+    is_export:bool = False,
     page: int = 1,
     limit: int = 10,
 ):
@@ -810,8 +922,21 @@ async def get_tcpl_credits(
         data_filter["client_name"] = dealer_name
     if distributor_code:
         data_filter["distributor_code"] = distributor_code
+    if is_export:
+        datas = _get_uploaded_collection_data(
+        request=request,
+        db=db,
+        collection_name="tcpl_credit",
+        response_key="tcpl_credits",
+        success_message="TCPL credit data fetched successfully",
+        data_filter=data_filter,
+        is_export=True,
+        page=page,
+        limit=limit,
+    )
+        return _csv_export_orchestration(datas)
 
-    return await _get_uploaded_collection_data(
+    return _get_uploaded_collection_data(
         request=request,
         db=db,
         collection_name="tcpl_credit",
@@ -830,6 +955,7 @@ async def get_hero_transactions(
     invoice_number: str | None = None,
     invoice_date: str | None = None,
     dpd: str | None = None,
+    is_export: bool = False,
     page: int = 1,
     limit: int = 10,
 ):
@@ -840,11 +966,24 @@ async def get_hero_transactions(
     if invoice_number:
         data_filter["invoice_number"] = invoice_number
     if invoice_date:
-        data_filter["invoice_date"] = _date_or_raw_value_filter(invoice_date)
+        data_filter["invoice_date"] = str_to_date(invoice_date)
     if dpd:
         data_filter["dpd"] = dpd
+    if is_export:
+        datas = _get_uploaded_collection_data(
+        request=request,
+        db=db,
+        collection_name="hero_transaction",
+        response_key="hero_transactions",
+        success_message="Hero transaction data fetched successfully",
+        data_filter=data_filter,
+        is_export=True,
+        page=page,
+        limit=limit,
+    )
+        return _csv_export_orchestration(datas)
 
-    return await _get_uploaded_collection_data(
+    return _get_uploaded_collection_data(
         request=request,
         db=db,
         collection_name="hero_transaction",
@@ -861,6 +1000,7 @@ async def get_hero_credits(
     db: Database,
     customer_name: str | None = None,
     distributor_code: str | None = None,
+    is_export: bool = False,
     page: int = 1,
     limit: int = 10,
 ):
@@ -870,8 +1010,21 @@ async def get_hero_credits(
         data_filter["customer_name"] = customer_name
     if distributor_code:
         data_filter["distributor_code"] = distributor_code
+    if is_export:
+        datas = _get_uploaded_collection_data(
+        request=request,
+        db=db,
+        collection_name="hero_credit",
+        response_key="hero_credits",
+        success_message="Hero credit data fetched successfully",
+        data_filter=data_filter,
+        is_export=True,
+        page=page,
+        limit=limit,
+    )
+        return _csv_export_orchestration(datas)
 
-    return await _get_uploaded_collection_data(
+    return _get_uploaded_collection_data(
         request=request,
         db=db,
         collection_name="hero_credit",
@@ -890,6 +1043,7 @@ async def get_muthoot_transactions(
     invoice_number: str | None = None,
     invoice_date: str | None = None,
     principal_dpd: str | None = None,
+    is_export: bool = False,
     page: int = 1,
     limit: int = 10,
 ):
@@ -900,11 +1054,24 @@ async def get_muthoot_transactions(
     if invoice_number:
         data_filter["invoice_number"] = invoice_number
     if invoice_date:
-        data_filter["invoice_date"] = _date_or_raw_value_filter(invoice_date)
+        data_filter["invoice_date"] = str_to_date(invoice_date)
     if principal_dpd:
         data_filter["principal_dpd"] = principal_dpd
+    if is_export:
+        datas = _get_uploaded_collection_data(
+        request=request,
+        db=db,
+        collection_name="muthoot_transaction",
+        response_key="muthoot_transactions",
+        success_message="Muthoot transaction data fetched successfully",
+        data_filter=data_filter,
+        is_export=True,
+        page=page,
+        limit=limit,
+    )
+        return _csv_export_orchestration(datas)
 
-    return await _get_uploaded_collection_data(
+    return _get_uploaded_collection_data(
         request=request,
         db=db,
         collection_name="muthoot_transaction",
@@ -921,6 +1088,7 @@ async def get_muthoot_credits(
     db: Database,
     borrower_name: str | None = None,
     distributor_code: str | None = None,
+    is_export: bool = False,
     page: int = 1,
     limit: int = 10,
 ):
@@ -930,8 +1098,21 @@ async def get_muthoot_credits(
         data_filter["borrower_name"] = borrower_name
     if distributor_code:
         data_filter["distributor_code"] = distributor_code
+    if is_export:
+        datas = _get_uploaded_collection_data(
+        request=request,
+        db=db,
+        collection_name="muthoot_credit",
+        response_key="muthoot_credits",
+        success_message="Muthoot credit data fetched successfully",
+        data_filter=data_filter,
+        is_export=True,
+        page=page,
+        limit=limit,
+    )
+        return _csv_export_orchestration(datas)
 
-    return await _get_uploaded_collection_data(
+    return _get_uploaded_collection_data(
         request=request,
         db=db,
         collection_name="muthoot_credit",
@@ -957,6 +1138,7 @@ async def get_invoices(
     utr: Optional[str] = None,
     status: Optional[str] = None,
     status_reason: Optional[str] = None,
+    is_export:bool = False,
     page: int = 1,
     limit: int = 10,
 ):
@@ -995,7 +1177,22 @@ async def get_invoices(
     if status_reason:
         data_filter["status_reason"] = status_reason
 
-    return await _get_uploaded_collection_data(
+    if is_export:
+        datas = _get_uploaded_collection_data(
+        request=request,
+        db=db,
+        collection_name="invoice_master",
+        response_key="invoices",
+        success_message="Invoice data fetched successfully",
+        data_filter=data_filter,
+        is_export=True,
+        page=page,
+        limit=limit,
+    )
+        return _csv_export_orchestration(datas)
+
+
+    return _get_uploaded_collection_data(
         request=request,
         db=db,
         collection_name="invoice_master",
@@ -1016,6 +1213,7 @@ async def get_consolidated_limit_report(
     lender: str = None,
     anchor_id: str = None,
     billing_status: str = None,
+    is_export: bool = False,
     page: int = 1,
     limit: int = 10,
 ):
@@ -1039,7 +1237,22 @@ async def get_consolidated_limit_report(
     if billing_status:
         data_filter["billing_status"] = billing_status
 
-    return await _get_uploaded_collection_data(
+    if is_export:
+        datas = _get_uploaded_collection_data(
+        request=request,
+        db=db,
+        collection_name="consolidated_limit_report",
+        response_key="consolidated_limit_report",
+        success_message="limit report data fetched successfully",
+        data_filter=data_filter,
+        is_export=True,
+        page=page,
+        limit=limit,
+    )
+        return _csv_export_orchestration(datas)
+
+
+    return _get_uploaded_collection_data(
         request=request,
         db=db,
         collection_name="consolidated_limit_report",

@@ -244,6 +244,7 @@ KOTAK_HWC_CREDIT_MAPPING = {
     "OD Outstanding": "od_outstanding",
     "Available Limit": "available_limit",
     "Interest": "interest",
+    "Distributor Code": "distributor_code",
 }
 
 KOTAK_CKPL_CREDIT_MAPPING = {
@@ -255,6 +256,7 @@ KOTAK_CKPL_CREDIT_MAPPING = {
     "DPD": "dpd",
     "Available Limit": "available_limit",
     "Interest": "interest",
+    "Distributor Code": "distributor_code"
 }
 
 TCPL_CREDIT_MAPPING = {
@@ -275,6 +277,7 @@ TCPL_CREDIT_MAPPING = {
     "Adhoc Line Expiry Date": "adhoc_line_expiry_date",
     "Status": "status",
     "RM Name": "rm_name",
+    "Distributor Code": "distributor_code"
 }
 
 HERO_CREDIT_MAPPING = {
@@ -289,6 +292,7 @@ HERO_CREDIT_MAPPING = {
     "Beneficiary Name": "beneficiary_name",
     "Beneficiary Account No": "beneficiary_account_no",
     "DPD": "dpd",
+    "Distributor Code": "distributor_code"
 }
 
 MUTHOOT_CREDIT_MAPPING = {
@@ -296,4 +300,25 @@ MUTHOOT_CREDIT_MAPPING = {
     "Borrower Name": "borrower_name",
     "Sanctioned Limit": "sanctioned_limit",
     "Available Limit": "available_limit",
+    "Distributor Code": "distributor_code"
+}
+
+CONSOLIDATED_LIMIT_MAPPING = {
+    "Sno": "sno",
+    "Company Name": "company_name",
+    "Distributor Code": "distributor_code",
+    "City": "city",
+    "State": "state",
+    "Lender": "lender",
+    "Sanction Limit": "sanction_limit",
+    "Operative Limit": "operative_limit",
+    "Utilised Limit": "utilised_limit",
+    "Available Limit": "available_limit",
+    "Limit Expiry": "limit_expiry",
+    "Overdue": "overdue",
+    "Funding Type": "funding_type",
+    "Billing Status": "billing_status",
+    "Anchor Id": "anchor_id",
+    "Distributor Phone": "distributor_phone",
+    "Distributor Email": "distributor_email",
 }

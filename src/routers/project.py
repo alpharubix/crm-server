@@ -28,18 +28,40 @@ def parse_datetime(val: Optional[str]) -> Optional[datetime]:
     if not val:
         return None
     if isinstance(val, datetime):
-        return val
+        if val.tzinfo is None:
+            return val.replace(tzinfo=IST)
+        return val.astimezone(IST)
+
+    val_str = str(val).strip()
     try:
-        dt = datetime.fromisoformat(val.replace("Z", "+00:00"))
-        return dt
+        dt = datetime.fromisoformat(val_str.replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=IST)
+        return dt.astimezone(IST)
     except Exception:
         pass
-    for fmt in ("%Y-%m-%dT%H:%M:%S", "%Y-%m-%dT%H:%M", "%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%d"):
+
+    for fmt in (
+        "%Y-%m-%dT%H:%M:%S",
+        "%Y-%m-%dT%H:%M",
+        "%Y-%m-%d %H:%M:%S",
+        "%Y-%m-%d %H:%M",
+        "%Y-%m-%d",
+    ):
         try:
-            return datetime.strptime(val, fmt)
+            dt = datetime.strptime(val_str, fmt)
+            return dt.replace(tzinfo=IST)
         except ValueError:
             continue
     return None
+
+
+def format_ist_datetime(dt: Optional[datetime]) -> Optional[str]:
+    if not dt:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=IST)
+    return dt.astimezone(IST).strftime("%d %b %Y, %I:%M %p")
 
 
 def normalize_dt_str(val) -> str:
@@ -63,16 +85,10 @@ def format_project(p) -> dict:
         "created_by": str(p.created_by),
         "modified_by": str(p.modified_by) if p.modified_by else None,
         "approver_id": str(p.approver_id),
-        "created_at": p.created_at.astimezone(IST).strftime("%d %b %Y, %I:%M %p"),
-        "modified_at": p.modified_at.astimezone(IST).strftime("%d %b %Y, %I:%M %p")
-        if p.modified_at
-        else None,
-        "start_date": p.start_date.astimezone(IST).strftime("%d %b %Y, %I:%M %p")
-        if p.start_date
-        else None,
-        "end_date": p.end_date.astimezone(IST).strftime("%d %b %Y, %I:%M %p")
-        if p.end_date
-        else None,
+        "created_at": format_ist_datetime(p.created_at),
+        "modified_at": format_ist_datetime(p.modified_at),
+        "start_date": format_ist_datetime(p.start_date),
+        "end_date": format_ist_datetime(p.end_date),
         "actioner_ids": [str(i) for i in (p.actioner_ids or [])],
         "project_type": p.project_type,
         "project_module": p.project_module,
@@ -434,26 +450,12 @@ def format_task(t) -> dict:
         "assignee_id": str(t.assignee_id) if t.assignee_id else None,
         "created_by": str(t.created_by),
         "modified_by": str(t.modified_by) if t.modified_by else None,
-        "created_at": t.created_at.astimezone(IST).strftime("%d %b %Y, %I:%M %p"),
-        "modified_at": t.modified_at.astimezone(IST).strftime("%d %b %Y, %I:%M %p")
-        if t.modified_at
-        else None,
-        "start_date": t.start_date.astimezone(IST).strftime("%d %b %Y, %I:%M %p")
-        if t.start_date
-        else None,
-        "end_date": t.end_date.astimezone(IST).strftime("%d %b %Y, %I:%M %p")
-        if t.end_date
-        else None,
-        "actual_completion_date": t.actual_completion_date.astimezone(IST).strftime(
-            "%d %b %Y, %I:%M %p"
-        )
-        if t.actual_completion_date
-        else None,
-        "expected_completion_date": t.expected_completion_date.astimezone(
-            IST
-        ).strftime("%d %b %Y, %I:%M %p")
-        if t.expected_completion_date
-        else None,
+        "created_at": format_ist_datetime(t.created_at),
+        "modified_at": format_ist_datetime(t.modified_at),
+        "start_date": format_ist_datetime(t.start_date),
+        "end_date": format_ist_datetime(t.end_date),
+        "actual_completion_date": format_ist_datetime(t.actual_completion_date),
+        "expected_completion_date": format_ist_datetime(t.expected_completion_date),
         "task_rating": t.task_rating,
         "attachment_links": t.attachment_links or [],
         "assignee_name": t.assignee.full_name if t.assignee else None,

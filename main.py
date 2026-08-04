@@ -26,7 +26,7 @@ from src.routers.tickets import tickets_router
 from src.routers.support_tickets import support_tickets_router
 from src.routers.webhook import webhook_api_router
 from src.routers.invoicing_route import invoice_router
-
+from src.routers import project_log as project_log_router
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(levelname)s - %(name)s - %(message)s"
@@ -55,12 +55,15 @@ app.add_middleware(
 )
 
 
+
+# Include Routers
 app.include_router(account_router.router)
 app.include_router(contact_router.router)
 app.include_router(user_router.router)
 app.include_router(authentication_router)
 app.include_router(notes_router)
 app.include_router(audit_log_router.router)
+app.include_router(project_log_router.router)
 app.include_router(deals_router)
 app.include_router(export_csv_router)
 app.include_router(project_router.router)

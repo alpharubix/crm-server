@@ -9,6 +9,7 @@ from sqlalchemy import (
     ForeignKey,
     String,
     Text,
+    Integer
 )
 from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.orm import relationship
@@ -97,6 +98,7 @@ class Project(Base):
     creator = relationship("User", foreign_keys=[created_by])
     tasks = relationship("Task", back_populates="project")
     project_type = Column(Enum(ProjectTypeEnum), nullable=True)
+    project_module = Column(String(100), nullable=True)
     attachment_links = Column(JSON, default=list)
     comments = relationship(
         "ProjectComment", back_populates="project", cascade="all, delete-orphan"
@@ -123,6 +125,8 @@ class Task(Base):
     start_date = Column(DateTime(timezone=True), nullable=True)
     end_date = Column(DateTime(timezone=True), nullable=True)
     actual_completion_date = Column(DateTime(timezone=True), nullable=True)
+    expected_completion_date = Column(DateTime(timezone=True), nullable=True)
+    task_rating = Column(Integer, nullable=True)
     attachment_links = Column(JSON, default=list)
 
     project = relationship("Project", back_populates="tasks")

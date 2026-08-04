@@ -334,7 +334,7 @@ async def distributors(request:Request,page=1,anchor: str = None,
     distribution_type = distribution_type,
     division = division,is_export=is_export,page=page,db=db)
 
-@invoice_router.get("/")
+@invoice_router.get("")
 async def invoices(
     request: Request,
     page: int = 1,

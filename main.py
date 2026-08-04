@@ -25,7 +25,8 @@ from src.routers.revenue import revenue_router
 from src.routers.tickets import tickets_router
 from src.routers.support_tickets import support_tickets_router
 from src.routers.webhook import webhook_api_router
-
+from src.routers.invoicing_route import invoice_router
+from src.routers import project_log as project_log_router
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(levelname)s - %(name)s - %(message)s"
@@ -35,7 +36,9 @@ logger = logging.getLogger(__name__)
 app = FastAPI()
 
 from src.middleware.auth import authorization
+from src.middleware.invoice_route_protector import authorize_invoice_route_user
 
+app.middleware("https")(authorize_invoice_route_user)
 app.middleware("http")(authorization)
 
 app.add_middleware(
@@ -51,7 +54,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-from src.routers import project_log as project_log_router
+
 
 # Include Routers
 app.include_router(account_router.router)
@@ -71,12 +74,13 @@ app.include_router(jr_router)
 app.include_router(revenue_router)
 app.include_router(webhook_api_router)
 app.include_router(support_tickets_router)
-
+app.include_router(invoice_router)
 
 
 @app.get("/")
 def test():
     return {"message": "Hello World"}
+
 
 
 if __name__ == "__main__":

@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from logging import basicConfig
 from math import ceil
 import logging
+import re
 from typing import Optional
 from fastapi import Request, UploadFile
 from pymongo import UpdateOne
@@ -629,18 +630,38 @@ async def get_distributors(
     limit: int = 10,
     is_export: bool = False,
 ):
+
     filter = {}
 
     if anchor:
-        filter["anchor"] = anchor
+        filter["anchor"] = {
+            "$regex": f"^{re.escape(anchor)}",
+            "$options": "i"
+        }
+
     if region:
-        filter["region"] = region
+        filter["region"] = {
+            "$regex": f"^{re.escape(region)}",
+            "$options": "i"
+        }
+
     if state:
-        filter["state"] = state
+        filter["state"] = {
+            "$regex": f"^{re.escape(state)}",
+            "$options": "i"
+        }
+
     if distribution_type:
-        filter["distribution_type"] = distribution_type
+        filter["distribution_type"] = {
+            "$regex": f"^{re.escape(distribution_type)}",
+            "$options": "i"
+        }
+
     if division:
-        filter["division"] = division
+        filter["division"] = {
+            "$regex": f"^{re.escape(division)}",
+            "$options": "i"
+        }
 
     if is_export:
         datas = _get_uploaded_collection_data(
@@ -684,17 +705,34 @@ async def get_kotak_hwc_transactions(
     filter = {}
 
     if dealer_name:
-        filter["dealer_name"] = dealer_name
+        filter["dealer_name"] = {
+            "$regex": f"^{re.escape(dealer_name)}",
+            "$options": "i"
+        }
+
     if invoice_date:
         filter["invoice_date"] = str_to_date(invoice_date)
+
     if invoice_number:
-        filter["invoice_number"] = invoice_number
+        filter["invoice_number"] = {
+            "$regex": f"^{re.escape(invoice_number)}",
+            "$options": "i"
+        }
+
     if disbursement_date:
         filter["disbursement_date"] = str_to_date(disbursement_date)
+
     if overdue_within_cure:
-        filter["overdue_within_cure"] = overdue_within_cure
+        filter["overdue_within_cure"] = {
+            "$regex": f"^{re.escape(overdue_within_cure)}",
+            "$options": "i"
+        }
+
     if overdue_beyond_cure:
-        filter["overdue_beyond_cure"] = overdue_beyond_cure
+        filter["overdue_beyond_cure"] = {
+            "$regex": f"^{re.escape(overdue_beyond_cure)}",
+            "$options": "i"
+        }
 
     if is_export:
         datas = _get_uploaded_collection_data(
@@ -735,9 +773,16 @@ async def get_kotak_hwc_credits(
     data_filter = {}
 
     if dealer_name:
-        data_filter["dealer_name"] = dealer_name
+        data_filter["dealer_name"] = {
+            "$regex": f"^{re.escape(dealer_name)}",
+            "$options": "i"
+        }
+
     if distributor_code:
-        data_filter["distributor_code"] = distributor_code
+        data_filter["distributor_code"] = {
+            "$regex": f"^{re.escape(distributor_code)}",
+            "$options": "i"
+        }
     if is_export:
         datas = _get_uploaded_collection_data(
         request=request,
@@ -780,17 +825,37 @@ async def get_kotak_ckpl_transactions(
     data_filter = {}
 
     if dealer_name:
-        data_filter["dealer_name"] = dealer_name
+        data_filter["dealer_name"] = {
+            "$regex": f"^{re.escape(dealer_name)}",
+            "$options": "i"
+        }
+
     if invoice_date:
-        data_filter["invoice_date_id"] = invoice_date
+        data_filter["invoice_date_id"] = {
+            "$regex": f"^{re.escape(invoice_date)}",
+            "$options": "i"
+        }
+
     if invoice_number:
-        data_filter["invoice_number"] = invoice_number
+        data_filter["invoice_number"] = {
+            "$regex": f"^{re.escape(invoice_number)}",
+            "$options": "i"
+        }
+
     if disbursement_date:
         data_filter["disbursement_date"] = str_to_date(disbursement_date)
+
     if overdue_within_cure:
-        data_filter["overdue_within_cure_inr"] = overdue_within_cure
+        data_filter["overdue_within_cure_inr"] = {
+            "$regex": f"^{re.escape(overdue_within_cure)}",
+            "$options": "i"
+        }
+
     if overdue_beyond_cure:
-        data_filter["overdue_beyondcure_inr"] = overdue_beyond_cure
+        data_filter["overdue_beyondcure_inr"] = {
+            "$regex": f"^{re.escape(overdue_beyond_cure)}",
+            "$options": "i"
+        }
 
     if is_export:
         datas = _get_uploaded_collection_data(
@@ -830,9 +895,16 @@ async def get_kotak_ckpl_credits(
     data_filter = {}
 
     if dealer_name:
-        data_filter["dealer_name"] = dealer_name
+        data_filter["dealer_name"] = {
+            "$regex": f"^{re.escape(dealer_name)}",
+            "$options": "i"
+        }
+
     if distributor_code:
-        data_filter["distributor_code"] = distributor_code
+        data_filter["distributor_code"] = {
+            "$regex": f"^{re.escape(distributor_code)}",
+            "$options": "i"
+        }
     if is_export:
         datas = _get_uploaded_collection_data(
         request=request,
@@ -873,13 +945,25 @@ async def get_tcpl_transactions(
     data_filter = {}
 
     if customer_name:
-        data_filter["customer_name"] = customer_name
+        data_filter["customer_name"] = {
+            "$regex": f"^{re.escape(customer_name)}",
+            "$options": "i"
+        }
+
     if invoice_no:
-        data_filter["invoice_no"] = invoice_no
+        data_filter["invoice_no"] = {
+            "$regex": f"^{re.escape(invoice_no)}",
+            "$options": "i"
+        }
+
     if invoice_date:
         data_filter["invoice_date"] = str_to_date(invoice_date)
+
     if dpd:
-        data_filter["dpd"] = dpd
+        data_filter["dpd"] = {
+            "$regex": f"^{re.escape(dpd)}",
+            "$options": "i"
+        }
 
     if is_export:
         datas = _get_uploaded_collection_data(
@@ -919,9 +1003,16 @@ async def get_tcpl_credits(
     data_filter = {}
 
     if dealer_name:
-        data_filter["client_name"] = dealer_name
+        data_filter["client_name"] = {
+            "$regex": f"^{re.escape(dealer_name)}",
+            "$options": "i"
+        }
+
     if distributor_code:
-        data_filter["distributor_code"] = distributor_code
+        data_filter["distributor_code"] = {
+            "$regex": f"^{re.escape(distributor_code)}",
+            "$options": "i"
+        }
     if is_export:
         datas = _get_uploaded_collection_data(
         request=request,
@@ -962,13 +1053,25 @@ async def get_hero_transactions(
     data_filter = {}
 
     if client_name:
-        data_filter["client_name"] = client_name
+        data_filter["client_name"] = {
+            "$regex": f"^{re.escape(client_name)}",
+            "$options": "i"
+        }
+
     if invoice_number:
-        data_filter["invoice_number"] = invoice_number
+        data_filter["invoice_number"] = {
+            "$regex": f"^{re.escape(invoice_number)}",
+            "$options": "i"
+        }
+
     if invoice_date:
         data_filter["invoice_date"] = str_to_date(invoice_date)
+
     if dpd:
-        data_filter["dpd"] = dpd
+        data_filter["dpd"] = {
+            "$regex": f"^{re.escape(dpd)}",
+            "$options": "i"
+        }
     if is_export:
         datas = _get_uploaded_collection_data(
         request=request,
@@ -1007,9 +1110,16 @@ async def get_hero_credits(
     data_filter = {}
 
     if customer_name:
-        data_filter["customer_name"] = customer_name
+        data_filter["customer_name"] = {
+            "$regex": f"^{re.escape(customer_name)}",
+            "$options": "i"
+        }
+
     if distributor_code:
-        data_filter["distributor_code"] = distributor_code
+        data_filter["distributor_code"] = {
+            "$regex": f"^{re.escape(distributor_code)}",
+            "$options": "i"
+        }
     if is_export:
         datas = _get_uploaded_collection_data(
         request=request,
@@ -1049,14 +1159,28 @@ async def get_muthoot_transactions(
 ):
     data_filter = {}
 
+    import re
+
     if borrower_name:
-        data_filter["borrower_name"] = borrower_name
+        data_filter["borrower_name"] = {
+            "$regex": f"^{re.escape(borrower_name)}",
+            "$options": "i"
+        }
+
     if invoice_number:
-        data_filter["invoice_number"] = invoice_number
+        data_filter["invoice_number"] = {
+            "$regex": f"^{re.escape(invoice_number)}",
+            "$options": "i"
+        }
+
     if invoice_date:
         data_filter["invoice_date"] = str_to_date(invoice_date)
+
     if principal_dpd:
-        data_filter["principal_dpd"] = principal_dpd
+        data_filter["principal_dpd"] = {
+            "$regex": f"^{re.escape(principal_dpd)}",
+            "$options": "i"
+        }
     if is_export:
         datas = _get_uploaded_collection_data(
         request=request,
@@ -1094,10 +1218,18 @@ async def get_muthoot_credits(
 ):
     data_filter = {}
 
+
     if borrower_name:
-        data_filter["borrower_name"] = borrower_name
+        data_filter["borrower_name"] = {
+            "$regex": f"^{re.escape(borrower_name)}",
+            "$options": "i"
+        }
+
     if distributor_code:
-        data_filter["distributor_code"] = distributor_code
+        data_filter["distributor_code"] = {
+            "$regex": f"^{re.escape(distributor_code)}",
+            "$options": "i"
+        }
     if is_export:
         datas = _get_uploaded_collection_data(
         request=request,
@@ -1144,38 +1276,66 @@ async def get_invoices(
 ):
     data_filter = {}
 
+
     if anchor:
-        data_filter["anchor"] = anchor
+        data_filter["anchor"] = {
+            "$regex": f"^{re.escape(anchor)}",
+            "$options": "i"
+        }
 
     if processed_by:
-        data_filter["processed_by"] = processed_by
+        data_filter["processed_by"] = {
+            "$regex": f"^{re.escape(processed_by)}",
+            "$options": "i"
+        }
 
     if working_date:
         data_filter["working_date"] = str_to_date(working_date)
 
     if lender_name:
-        data_filter["lender_name"] = lender_name
+        data_filter["lender_name"] = {
+            "$regex": f"^{re.escape(lender_name)}",
+            "$options": "i"
+        }
 
     if distributor_name:
-        data_filter["distributor_name"] = distributor_name
+        data_filter["distributor_name"] = {
+            "$regex": f"^{re.escape(distributor_name)}",
+            "$options": "i"
+        }
 
     if distributor_code:
-        data_filter["distributor_code"] = distributor_code
+        data_filter["distributor_code"] = {
+            "$regex": f"^{re.escape(distributor_code)}",
+            "$options": "i"
+        }
 
     if invoice_no:
-        data_filter["invoice_no"] = invoice_no
+        data_filter["invoice_no"] = {
+            "$regex": f"^{re.escape(invoice_no)}",
+            "$options": "i"
+        }
 
     if loan_disbursement_date:
         data_filter["loan_disbursement_date"] = str_to_date(loan_disbursement_date)
 
     if utr:
-        data_filter["utr"] = utr
+        data_filter["utr"] = {
+            "$regex": f"^{re.escape(utr)}",
+            "$options": "i"
+        }
 
     if status:
-        data_filter["status"] = status
+        data_filter["status"] = {
+            "$regex": f"^{re.escape(status)}",
+            "$options": "i"
+        }
 
     if status_reason:
-        data_filter["status_reason"] = status_reason
+        data_filter["status_reason"] = {
+            "$regex": f"^{re.escape(status_reason)}",
+            "$options": "i"
+        }
 
     if is_export:
         datas = _get_uploaded_collection_data(
@@ -1220,22 +1380,40 @@ async def get_consolidated_limit_report(
     data_filter = {}
 
     if company_name:
-        data_filter["company_name"] = company_name
+        data_filter["company_name"] = {
+            "$regex": f"^{re.escape(company_name)}",
+            "$options": "i"
+        }
 
     if distributor_code:
-        data_filter["distributor_code"] = distributor_code
+        data_filter["distributor_code"] = {
+            "$regex": f"^{re.escape(distributor_code)}",
+            "$options": "i"
+        }
 
     if state:
-        data_filter["state"] = state
+        data_filter["state"] = {
+            "$regex": f"^{re.escape(state)}",
+            "$options": "i"
+        }
 
     if lender:
-        data_filter["lender"] = lender
+        data_filter["lender"] = {
+            "$regex": f"^{re.escape(lender)}",
+            "$options": "i"
+        }
 
     if anchor_id:
-        data_filter["anchor_id"] = anchor_id
+        data_filter["anchor_id"] = {
+            "$regex": f"^{re.escape(anchor_id)}",
+            "$options": "i"
+        }
 
     if billing_status:
-        data_filter["billing_status"] = billing_status
+        data_filter["billing_status"] = {
+            "$regex": f"^{re.escape(billing_status)}",
+            "$options": "i"
+        }
 
     if is_export:
         datas = _get_uploaded_collection_data(

@@ -24,6 +24,24 @@ router = APIRouter(prefix="/projects", tags=["projects"])
 logger = logging.getLogger(__name__)
 
 
+def parse_datetime(val: Optional[str]) -> Optional[datetime]:
+    if not val:
+        return None
+    if isinstance(val, datetime):
+        return val
+    try:
+        dt = datetime.fromisoformat(val.replace("Z", "+00:00"))
+        return dt
+    except Exception:
+        pass
+    for fmt in ("%Y-%m-%dT%H:%M:%S", "%Y-%m-%dT%H:%M", "%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%d"):
+        try:
+            return datetime.strptime(val, fmt)
+        except ValueError:
+            continue
+    return None
+
+
 def format_project(p) -> dict:
     return {
         "id": str(p.id),
@@ -38,10 +56,15 @@ def format_project(p) -> dict:
         "modified_at": p.modified_at.astimezone(IST).strftime("%d %b %Y, %I:%M %p")
         if p.modified_at
         else None,
-        "start_date": p.start_date.strftime("%Y-%m-%d") if p.start_date else None,
-        "end_date": p.end_date.strftime("%Y-%m-%d") if p.end_date else None,
+        "start_date": p.start_date.astimezone(IST).strftime("%d %b %Y, %I:%M %p")
+        if p.start_date
+        else None,
+        "end_date": p.end_date.astimezone(IST).strftime("%d %b %Y, %I:%M %p")
+        if p.end_date
+        else None,
         "actioner_ids": [str(i) for i in (p.actioner_ids or [])],
         "project_type": p.project_type,
+        "project_module": p.project_module,
         "attachment_links": p.attachment_links or [],
     }
 
@@ -69,10 +92,11 @@ async def create_project(request: Request, db: Session = Depends(get_db)):
         status=body.get("status", "pending_for_approve"),
         created_by=request.state.user_id,
         approver_id=int(body["approver_id"]),
-        start_date=body.get("start_date"),
-        end_date=body.get("end_date"),
+        start_date=parse_datetime(body.get("start_date")),
+        end_date=parse_datetime(body.get("end_date")),
         actioner_ids=[int(i) for i in body.get("actioner_ids", [])],
         project_type=body.get("project_type"),
+        project_module=body.get("project_module"),
         attachment_links=body.get("attachment_links", []),
     )
 
@@ -87,13 +111,6 @@ async def create_project(request: Request, db: Session = Depends(get_db)):
         team_emails = list({user.email for user in team_members if user.email})
 
         if team_emails:
-            # We pass the list to our non-blocking pool so the user doesn't face API delays
-            # BackgroundThreadPool.execute_task(
-            #     notify_project_approved,  # Reusing your list engine function to mail the team
-            #     emails=team_emails,
-            #     project_name=project.name,
-            #     project_id=project.id,
-            # )
             logger.info(
                 f"Dispatched background creation alerts to team members: {team_emails}"
             )
@@ -122,6 +139,7 @@ def get_projects(
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
     project_type: Optional[str] = None,
+    project_module: Optional[str] = None,
     status: Optional[str] = None,
     db: Session = Depends(get_db),
 ):
@@ -152,11 +170,13 @@ def get_projects(
     if assignee_id:
         query = query.filter(Project.actioner_ids.any(assignee_id))
     if start_date:
-        query = query.filter(Project.start_date >= start_date)
+        query = query.filter(Project.start_date >= parse_datetime(start_date))
     if end_date:
-        query = query.filter(Project.end_date <= end_date)
+        query = query.filter(Project.end_date <= parse_datetime(end_date))
     if project_type:
         query = query.filter(Project.project_type == project_type)
+    if project_module:
+        query = query.filter(Project.project_module == project_module)
     if status:
         query = query.filter(Project.status == status)
 
@@ -234,6 +254,7 @@ async def update_project(
         "priority",
         "status",
         "project_type",
+        "project_module",
         "attachment_links",
     ]
     for field in allowed:
@@ -249,9 +270,9 @@ async def update_project(
 
     # 3. Handle Dates
     if "start_date" in body:
-        project.start_date = body["start_date"]
+        project.start_date = parse_datetime(body["start_date"])
     if "end_date" in body:
-        project.end_date = body["end_date"]
+        project.end_date = parse_datetime(body["end_date"])
 
     project.modified_by = request.state.user_id
     db.commit()
@@ -437,11 +458,23 @@ def format_task(t) -> dict:
         "modified_at": t.modified_at.astimezone(IST).strftime("%d %b %Y, %I:%M %p")
         if t.modified_at
         else None,
-        "start_date": t.start_date.strftime("%Y-%m-%d") if t.start_date else None,
-        "end_date": t.end_date.strftime("%Y-%m-%d") if t.end_date else None,
-        "actual_completion_date": t.actual_completion_date.strftime("%Y-%m-%d")
+        "start_date": t.start_date.astimezone(IST).strftime("%d %b %Y, %I:%M %p")
+        if t.start_date
+        else None,
+        "end_date": t.end_date.astimezone(IST).strftime("%d %b %Y, %I:%M %p")
+        if t.end_date
+        else None,
+        "actual_completion_date": t.actual_completion_date.astimezone(IST).strftime(
+            "%d %b %Y, %I:%M %p"
+        )
         if t.actual_completion_date
         else None,
+        "expected_completion_date": t.expected_completion_date.astimezone(
+            IST
+        ).strftime("%d %b %Y, %I:%M %p")
+        if t.expected_completion_date
+        else None,
+        "task_rating": t.task_rating,
         "attachment_links": t.attachment_links or [],
         "assignee_name": t.assignee.full_name if t.assignee else None,
     }
@@ -487,8 +520,10 @@ async def create_task(project_id: int, request: Request, db: Session = Depends(g
         # CHANGED: Cast string ID to int
         assignee_id=int(body["assignee_id"]) if body.get("assignee_id") else None,
         created_by=request.state.user_id,
-        start_date=body.get("start_date"),
-        end_date=body.get("end_date"),
+        start_date=parse_datetime(body.get("start_date")),
+        end_date=parse_datetime(body.get("end_date")),
+        expected_completion_date=parse_datetime(body.get("expected_completion_date")),
+        task_rating=int(body["task_rating"]) if body.get("task_rating") is not None else None,
         attachment_links=body.get("attachment_links", []),
     )
     db.add(task)
@@ -574,13 +609,23 @@ async def update_task(
         "start_date",
         "end_date",
         "actual_completion_date",
+        "expected_completion_date",
+        "task_rating",
         "attachment_links",
     ]
 
     for field in allowed:
         if field in body:
-            # Cast assignee_id to int if it's provided
             if field == "assignee_id" and body[field] is not None:
+                setattr(task, field, int(body[field]))
+            elif field in (
+                "start_date",
+                "end_date",
+                "actual_completion_date",
+                "expected_completion_date",
+            ):
+                setattr(task, field, parse_datetime(body[field]))
+            elif field == "task_rating" and body[field] is not None:
                 setattr(task, field, int(body[field]))
             else:
                 setattr(task, field, body[field])

@@ -42,6 +42,17 @@ def parse_datetime(val: Optional[str]) -> Optional[datetime]:
     return None
 
 
+def normalize_dt_str(val) -> str:
+    if not val:
+        return ""
+    dt = parse_datetime(val) if isinstance(val, str) else val
+    if not dt or not isinstance(dt, datetime):
+        return ""
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=IST)
+    return dt.astimezone(IST).strftime("%Y-%m-%dT%H:%M")
+
+
 def format_project(p) -> dict:
     return {
         "id": str(p.id),
@@ -246,105 +257,74 @@ async def update_project(
         raise HTTPException(status_code=404, detail="Project not found")
 
     body = await request.json()
+    actual_changes = {}
 
     # 1. Standard string/enum fields
-    allowed = [
-        "name",
-        "description",
-        "priority",
-        "status",
-        "project_type",
-        "project_module",
-        "attachment_links",
-    ]
-    for field in allowed:
+    allowed_str = ["name", "description", "priority", "status", "project_type", "project_module"]
+    for field in allowed_str:
         if field in body:
-            setattr(project, field, body[field])
+            new_val = body[field]
+            old_raw = getattr(project, field)
+            old_str = str(old_raw.value) if hasattr(old_raw, "value") else (str(old_raw) if old_raw is not None else "")
+            new_str = str(new_val) if new_val is not None else ""
 
-    # 2. Handle integer casting for IDs
+            if old_str.strip().lower() != new_str.strip().lower():
+                actual_changes[field] = new_val
+                setattr(project, field, new_val)
+
+    # 2. Attachment links
+    if "attachment_links" in body:
+        old_links = list(project.attachment_links or [])
+        new_links = list(body["attachment_links"] or [])
+        if old_links != new_links:
+            actual_changes["attachment_links"] = new_links
+            setattr(project, "attachment_links", new_links)
+
+    # 3. Handle integer casting for IDs
     if "approver_id" in body and body["approver_id"]:
-        setattr(project, "approver_id", int(body["approver_id"]))
+        new_approver = int(body["approver_id"])
+        if project.approver_id != new_approver:
+            actual_changes["approver_id"] = new_approver
+            setattr(project, "approver_id", new_approver)
 
     if "actioner_ids" in body:
-        setattr(project, "actioner_ids", [int(i) for i in body["actioner_ids"]])
+        new_actioners = sorted([int(i) for i in body["actioner_ids"]])
+        old_actioners = sorted(list(project.actioner_ids or []))
+        if old_actioners != new_actioners:
+            actual_changes["actioner_ids"] = new_actioners
+            setattr(project, "actioner_ids", new_actioners)
 
-    # 3. Handle Dates
+    # 4. Handle Dates with normalized comparison
     if "start_date" in body:
-        project.start_date = parse_datetime(body["start_date"])
+        old_str = normalize_dt_str(project.start_date)
+        new_str = normalize_dt_str(body["start_date"])
+        if old_str != new_str:
+            actual_changes["start_date"] = body["start_date"]
+            project.start_date = parse_datetime(body["start_date"])
+
     if "end_date" in body:
-        project.end_date = parse_datetime(body["end_date"])
+        old_str = normalize_dt_str(project.end_date)
+        new_str = normalize_dt_str(body["end_date"])
+        if old_str != new_str:
+            actual_changes["end_date"] = body["end_date"]
+            project.end_date = parse_datetime(body["end_date"])
 
     project.modified_by = request.state.user_id
     db.commit()
     db.refresh(project)
 
-    # --- EMAIL NOTIFICATION TRIGGERS (Offloaded to BackgroundThreadPool) ---
-
-    # Trigger A: Project Approved (Moved to planning)
-    if project.status == StatusEnum.planning:
-        logger.info("statusenum: %s %s", project.status, StatusEnum.planning)
-        actioners = db.query(User).filter(User.id.in_(project.actioner_ids)).all()
-        emails = list({user.email for user in actioners if user.email})
-
-        # if emails:
-            # BackgroundThreadPool.execute_task(
-            #     notify_project_approved,
-            #     emails=emails,
-            #     project_name=project.name,
-            #     project_id=project.id,
-            # )
-
-    # Trigger B: Project Pending Review
-    # if project.status == StatusEnum.pending_for_review:
-    #     approver = db.query(User).filter(User.id == project.approver_id).first()
-
-    #     if approver and approver.email:
-            # BackgroundThreadPool.execute_task(
-            #     notify_project_pending_review,
-            #     approver_email=approver.email,
-            #     approver_name=approver.full_name,
-            #     project_name=project.name,
-            #     project_id=project.id,
-            # )
-
-    # Trigger C: NEW REQUIRED STATUS - Project Completed
-    # Notifies: Team Members (actioners) + Approver + Initiator (created_by)
-    if project.status == StatusEnum.completed:
-        logger.info("Project completed: %s", project.name)
-
-        # Collect distinct user IDs for all 3 target roles
-        stakeholder_ids = set()
-        if project.actioner_ids:
-            stakeholder_ids.update(project.actioner_ids)
-        if project.approver_id:
-            stakeholder_ids.add(project.approver_id)
-        if project.created_by:
-            stakeholder_ids.add(project.created_by)
-
-        # Extract unique emails from database
-        # stakeholders = db.query(User).filter(User.id.in_(list(stakeholder_ids))).all()
-        # notification_emails = list({u.email for u in stakeholders if u.email})
-
-        # if notification_emails:
-            # BackgroundThreadPool.execute_task(
-            #     notify_project_completed,  # Extracted to the thread pool cleanly
-            #     emails=notification_emails,
-            #     project_name=project.name,
-            #     project_id=project.id,
-            # )
-            # logger.info(f"Dispatched completion alerts to: {notification_emails}")
-
-    # 4. Audit Logging
-    log_project_action(
-        db,
-        request.state.user_id,
-        request.state.role,
-        "UPDATED",
-        "PROJECT",
-        project.id,
-        None,
-        body,
-    )
+    # 4. Audit Logging (Only if fields actually changed)
+    if actual_changes:
+        log_project_action(
+            db,
+            request.state.user_id,
+            request.state.role,
+            "UPDATED",
+            "PROJECT",
+            project.id,
+            None,
+            actual_changes,
+        )
     return format_project(project)
 
 
@@ -598,61 +578,65 @@ async def update_task(
             status_code=403, detail="Only project members can edit tasks"
         )
 
-    # --- CHANGED: All members get full edit access ---
-    allowed = [
-        "title",
-        "description",
-        "type",
-        "priority",
-        "status",
-        "assignee_id",
-        "start_date",
-        "end_date",
-        "actual_completion_date",
-        "expected_completion_date",
-        "task_rating",
-        "attachment_links",
-    ]
+    actual_changes = {}
 
-    for field in allowed:
+    allowed_str = ["title", "description", "type", "priority", "status"]
+    for field in allowed_str:
         if field in body:
-            if field == "assignee_id" and body[field] is not None:
-                setattr(task, field, int(body[field]))
-            elif field in (
-                "start_date",
-                "end_date",
-                "actual_completion_date",
-                "expected_completion_date",
-            ):
+            new_val = body[field]
+            old_raw = getattr(task, field)
+            old_str = str(old_raw.value) if hasattr(old_raw, "value") else (str(old_raw) if old_raw is not None else "")
+            new_str = str(new_val) if new_val is not None else ""
+
+            if old_str.strip().lower() != new_str.strip().lower():
+                actual_changes[field] = new_val
+                setattr(task, field, new_val)
+
+    if "assignee_id" in body and body["assignee_id"] is not None:
+        new_assignee = int(body["assignee_id"])
+        if task.assignee_id != new_assignee:
+            actual_changes["assignee_id"] = new_assignee
+            setattr(task, "assignee_id", new_assignee)
+
+    if "task_rating" in body and body["task_rating"] is not None:
+        new_rating = int(body["task_rating"])
+        if task.task_rating != new_rating:
+            actual_changes["task_rating"] = new_rating
+            setattr(task, "task_rating", new_rating)
+
+    if "attachment_links" in body:
+        old_links = list(task.attachment_links or [])
+        new_links = list(body["attachment_links"] or [])
+        if old_links != new_links:
+            actual_changes["attachment_links"] = new_links
+            setattr(task, "attachment_links", new_links)
+
+    date_fields = ["start_date", "end_date", "actual_completion_date", "expected_completion_date"]
+    for field in date_fields:
+        if field in body:
+            old_str = normalize_dt_str(getattr(task, field))
+            new_str = normalize_dt_str(body[field])
+            if old_str != new_str:
+                actual_changes[field] = body[field]
                 setattr(task, field, parse_datetime(body[field]))
-            elif field == "task_rating" and body[field] is not None:
-                setattr(task, field, int(body[field]))
-            else:
-                setattr(task, field, body[field])
 
     task.modified_by = user_id
-    if body.get("status") == "done" and not task.actual_completion_date:  # type: ignore
+    if body.get("status") == "done" and not task.actual_completion_date:
         setattr(task, "actual_completion_date", datetime.now(IST))
     db.commit()
     db.refresh(task)
 
-    # ── Auto-move project to pending_for_review if all tasks are done ──
-    # if body.get("status") == "done":
-    #     all_tasks = db.query(Task).filter(Task.project_id == project_id).all()
-    #     if len(all_tasks) > 0 and all(t.status == "done" for t in all_tasks):
-    #         setattr(project, "status", "pending_for_review")
-    #         setattr(project, "modified_by", user_id)
-    #         db.commit()
-    log_project_action(
-        db,
-        request.state.user_id,
-        request.state.role,
-        "UPDATED",
-        "TASK",
-        project_id,
-        task.id,
-        body,
-    )
+    if actual_changes:
+        log_project_action(
+            db,
+            request.state.user_id,
+            request.state.role,
+            "UPDATED",
+            "TASK",
+            project_id,
+            task.id,
+            actual_changes,
+        )
     return format_task(task)
 
 

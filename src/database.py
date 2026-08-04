@@ -31,7 +31,12 @@ def get_mongodb():
     finally:
         pass
 
-
+def get_master_invoice_database():
+    db = monogodb["invoice_master"]
+    try:
+        yield db
+    except Exception as e:
+        raise e
 # Must be AFTER Base and engine are defined, and after all models are imported
 # from src.models.support_ticket import SupportTicket
 

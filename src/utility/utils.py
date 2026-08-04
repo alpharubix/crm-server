@@ -1,6 +1,8 @@
 import os
 import secrets
 import string
+from datetime import datetime
+
 import jwt
 import bcrypt
 from ..config import settings
@@ -126,3 +128,6 @@ def get_ticket_headers():
         "customer_rejection_status_explanation",
         "lender_rejection_status_explanation",
     }
+
+def str_to_date(date:str):
+    return datetime.strptime(date, "%d-%m-%Y")

@@ -21,6 +21,7 @@ dependencies = [
     "starlette>=0.50.0",
     "apscheduler>=3.11.2",
     "httpx>=0.28.1",
+    "beanie>=2.1.0",
 ]
 [[build.env]]
 name = "BP_PYTHON_VERSION"

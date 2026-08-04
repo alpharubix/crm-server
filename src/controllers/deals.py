@@ -69,12 +69,10 @@ def get_deals(
                 )
         if loan_type:
             loan_types = loan_type if isinstance(loan_type, list) else [loan_type]
-            print("FILTERING BY:", loan_types)  # check this
             filters.append(
                 or_(*[Deal.loan_type.ilike(lt.strip()) for lt in loan_types])
             )
         if deal_owner_id:
-            print("Fitler - ", deal_owner_id)
             filters.append(Deal.deal_owner_id.in_(deal_owner_id))
         if lender_name:
             lenders = [l.strip() for l in (lender_name if isinstance(lender_name, list) else [lender_name]) if l and l.strip()]

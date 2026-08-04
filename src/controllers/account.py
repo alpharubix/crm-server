@@ -5,7 +5,6 @@ import math
 from datetime import date, datetime, timezone
 from typing import Any, Dict, Optional
 
-import pandas as pd
 from fastapi import HTTPException, UploadFile
 from pymongo.synchronous.collection import Collection
 from sqlalchemy import and_, or_
@@ -14,6 +13,9 @@ from sqlalchemy.orm import Session, joinedload, selectinload
 from sqlalchemy.orm.attributes import flag_modified
 from starlette.requests import Request
 from starlette.responses import JSONResponse
+
+import httpx
+from src.config import settings
 
 from src.controllers.audit_log import log_action
 from src.controllers.auth import MANAGERID
@@ -300,13 +302,13 @@ def update_account(
         raise HTTPException(status_code=400, detail=f"Database error: {str(e)}")
 
 
-def get_all_accounts(
+async def get_all_accounts(
     request: Request,
     db: Session,
     mongodb: Collection,
     page: int,
     account_name: Optional[str] = None,
-    account_id: Optional[int] = None,
+    account_id: Optional[list[str] | str | int] = None,
     account_status: Optional[list[str]] = None,
     account_stage: Optional[str] = None,
     source: Optional[list[str]] = None,
@@ -320,6 +322,9 @@ def get_all_accounts(
     call_back_date_time: Optional[datetime] = None,
     account_owner_id: Optional[list[int]] = None,
     phone_number: Optional[str] = None,
+    module: Optional[str] = None,
+    from_date: Optional[str] = None,
+    to_date: Optional[str] = None,
 ):
     MANAGER_EXECUTIVES_MAP = MANAGERID().MANAGER_EXECUTIVES_MAP
 
@@ -331,6 +336,56 @@ def get_all_accounts(
     role = request.state.role
     single_id_request = False
     allowed_owner_ids = None
+
+    # Internal server-to-server API call to Underwriting Tool Backend (localhost:5050)
+    if module:
+        try:
+            uw_url = f"{settings.FIVE_POINT_CREDIT_BACKEND_URL}/crm/accounts-filter"
+            uw_params = {"module": module}
+            if from_date:
+                uw_params["from_date"] = from_date
+            if to_date:
+                uw_params["to_date"] = to_date
+
+            async with httpx.AsyncClient(timeout=30) as client:
+                uw_response = await client.get(uw_url, params=uw_params)
+
+            if uw_response.status_code == 200:
+                uw_data = uw_response.json().get("data", [])
+                matching_acc_ids = [
+                    doc.get("account_id") for doc in uw_data if doc.get("account_id") is not None
+                ]
+                if not matching_acc_ids:
+                    return {
+                        "data": [],
+                        "page_info": {
+                            "page": page,
+                            "total_pages": 0,
+                            "data_size": 0,
+                        },
+                    }
+                valid_ids = [int(i) for i in matching_acc_ids if str(i).isdigit()]
+                filters.append(Account.id.in_(valid_ids if valid_ids else matching_acc_ids))
+            else:
+                logging.error(f"Underwriting tool backend returned status {uw_response.status_code}: {uw_response.text}")
+                return {
+                    "data": [],
+                    "page_info": {
+                        "page": page,
+                        "total_pages": 0,
+                        "data_size": 0,
+                    },
+                }
+        except Exception as e:
+            logging.error(f"Failed to connect to underwriting tool backend: {e}")
+            return {
+                "data": [],
+                "page_info": {
+                    "page": page,
+                    "total_pages": 0,
+                    "data_size": 0,
+                },
+            }
 
     # Role Permissions
     if role in ("super_admin", "admin"):
@@ -345,8 +400,15 @@ def get_all_accounts(
 
     # Apply all optional filters
     if account_id is not None:
-        filters.append(Account.id == account_id)
-        single_id_request = True
+        if isinstance(account_id, list):
+            valid_ids = [int(i) for i in account_id if str(i).isdigit()]
+            filters.append(Account.id.in_(valid_ids if valid_ids else account_id))
+            if len(account_id) == 1:
+                single_id_request = True
+        else:
+            acc_id_val = int(account_id) if str(account_id).isdigit() else account_id
+            filters.append(Account.id == acc_id_val)
+            single_id_request = True
     if account_name:
         filters.append(Account.account_name.ilike(f"%{account_name.strip()}%"))
     if account_status:
@@ -602,6 +664,7 @@ def get_account_status_history(db: Session, account_id: int, page: int = 1):
 
 
 async def accounts_csv_update(file: UploadFile, db: Session):
+    import pandas as pd
     try:
         if file.filename.endswith(".csv"):
             # if the file is csv file process the file

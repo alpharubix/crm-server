@@ -130,4 +130,4 @@ def get_ticket_headers():
     }
 
 def str_to_date(date:str):
-    return datetime.strptime(date, "%d-%m-%Y")
+    return datetime.strptime(date, "%d-%m-%y")

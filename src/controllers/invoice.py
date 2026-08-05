@@ -64,10 +64,12 @@ async def upload_distributor_csv(request:Request,file:UploadFile,db: Database):
                         missing_fields_list = row_missing_values["empty_fields"]
                         row_missing_values.update({"row_number":row_iterator,"empty_fields":missing_fields_list.append(csv_header)})
 
-                #step 3 :Adding additional column into the database
-
-                # Map all other headers
-                mapped_row[DIST_HEADER_MAPPING[csv_header]] = value
+                        # Map all other headers
+                if csv_header in DIST_HEADER_MAPPING:
+                    if "date" in csv_header.lower():
+                        mapped_row[DIST_HEADER_MAPPING[csv_header]] = str_to_date(value)
+                    else:
+                        mapped_row[INVOICE_HEADER_MAPPING[csv_header]] = value
 
             if row_missing_values:
                empty_values_row.append(row_missing_values)

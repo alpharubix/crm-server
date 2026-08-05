@@ -66,10 +66,10 @@ async def upload_distributor_csv(request:Request,file:UploadFile,db: Database):
 
                         # Map all other headers
                 if csv_header in DIST_HEADER_MAPPING:
-                    if "date" in csv_header.lower():
+                    if csv_header.lower() in {"Data Received", "Enrollment Date"}:
                         mapped_row[DIST_HEADER_MAPPING[csv_header]] = str_to_date(value)
                     else:
-                        mapped_row[INVOICE_HEADER_MAPPING[csv_header]] = value
+                        mapped_row[DIST_HEADER_MAPPING[csv_header]] = value
 
             if row_missing_values:
                empty_values_row.append(row_missing_values)
@@ -105,7 +105,7 @@ async def upload_distributor_csv(request:Request,file:UploadFile,db: Database):
                 update_rows_current_data,
                 now,
                 user_id,
-                INVOICE_HEADER_MAPPING.get("Invoice Number")
+                "distributor_code",
             )
             print("UPDATED DISTRIBUTOR DATA",updated_fields)
             print("Updated DISTRIBUTOR DATA History",update_history)
@@ -128,7 +128,14 @@ async def upload_distributor_csv(request:Request,file:UploadFile,db: Database):
             "total_rows_created":total_row_created,
             "total_rows_updated":total_row_updated,
             "failed_rows":empty_values_row,
-        }
+            }
+    except  ValueError as e:
+        logging.error(e)
+        return JSONResponse(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            content={"message": "Invalid date format", "data": None}
+        )
+
     except Exception as e:
         logging.error(e)
         return JSONResponse(
@@ -289,6 +296,12 @@ async def upload_invoice_csv(request:Request,file:UploadFile,db: Database):
             "total_rows_updated":total_row_updated,
             "failed_rows":empty_values_row,
         }
+    except  ValueError as e:
+        logging.error(e)
+        return JSONResponse(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            content={"message": "Invalid date format", "data": None}
+        )
     except Exception as e:
         logging.error(e)
         return JSONResponse(
@@ -486,6 +499,12 @@ async def _process_csv_upload(
             "total_rows_updated": total_row_updated,
             "failed_rows": empty_values_row,
         }
+    except  ValueError as e:
+        logging.error(e)
+        return JSONResponse(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            content={"message": "Invalid date format", "data": None}
+        )
     except Exception as e:
         logging.error(e)
         return JSONResponse(

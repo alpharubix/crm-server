@@ -30,7 +30,16 @@ async def upload_distributor_csv(request:Request,file:UploadFile,db: Database):
         user_id = request.state.user_id
         required_headers=set(DIST_HEADER_MAPPING.keys())
         contents = await file.read()
-        csv_text = contents.decode("utf-8")
+        for encoding in ("utf-8", "utf-8-sig", "cp1252", "latin1"): #encoding fix
+            try:
+                csv_text = contents.decode(encoding)
+                print(f"Decoded using {encoding}")
+                break
+            except UnicodeDecodeError:
+                return JSONResponse(status_code=400,content={
+                        "message":"Header miss match found",
+                        "data":"File encoding is not supported"
+                    })
         reader = csv.DictReader(io.StringIO(csv_text))
         csv_headers = set (reader.fieldnames or [])
         missing_headers = list(required_headers - csv_headers)
@@ -192,7 +201,16 @@ async def upload_invoice_csv(request:Request,file:UploadFile,db: Database):
         user_id = request.state.user_id
         required_headers=set(INVOICE_HEADER_MAPPING.keys())
         contents = await file.read()
-        csv_text = contents.decode("utf-8")
+        for encoding in ("utf-8", "utf-8-sig", "cp1252", "latin1"): #encoding fix
+            try:
+                csv_text = contents.decode(encoding)
+                print(f"Decoded using {encoding}")
+                break
+            except UnicodeDecodeError:
+                return JSONResponse(status_code=400,content={
+                        "message":"Header miss match found",
+                        "data":"File encoding is not supported"
+                    })
         reader = csv.DictReader(io.StringIO(csv_text))
         csv_headers = set (reader.fieldnames or [])
         missing_headers = list(required_headers - csv_headers)
@@ -410,7 +428,16 @@ async def _process_csv_upload(
         user_id = request.state.user_id
         required_headers = set(mapping.keys())
         contents = await file.read()
-        csv_text = contents.decode("utf-8")
+        for encoding in ("utf-8", "utf-8-sig", "cp1252", "latin1"): #encoding fix
+            try:
+                csv_text = contents.decode(encoding)
+                print(f"Decoded using {encoding}")
+                break
+            except UnicodeDecodeError:
+                return JSONResponse(status_code=400,content={
+                        "message":"Header miss match found",
+                        "data":"File encoding is not supported"
+                    })
         reader = csv.DictReader(io.StringIO(csv_text))
         csv_headers = set(reader.fieldnames or [])
         missing_headers = list(required_headers - csv_headers)

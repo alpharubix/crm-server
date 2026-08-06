@@ -58,12 +58,12 @@ async def upload_distributor_csv(request:Request,file:UploadFile,db: Database):
                     continue
 
                 if not value:
-                    if row_missing_values.get("row_number") is None:
-                        row_missing_values.update({"row_number":row_iterator,"empty_fields":[csv_header]})
-                        continue
-                    else:
-                        missing_fields_list = row_missing_values["empty_fields"]
-                        row_missing_values.update({"row_number":row_iterator,"empty_fields":missing_fields_list.append(csv_header)})
+                    if csv_header in DIST_MASTER_MANDATORY_FIELDS:
+                        if row_missing_values.get("row_number") is None:
+                            row_missing_values["row_number"] = row_iterator
+                            row_missing_values["empty_fields"] = [csv_header]
+                        else:
+                            row_missing_values["empty_fields"].append(csv_header)
                         continue
 
                         # Map all other headers
@@ -217,11 +217,12 @@ async def upload_invoice_csv(request:Request,file:UploadFile,db: Database):
                 #step2 : checking for empty values in row
 
                 if not value:
-                    if row_missing_values.get("row_number") is None:
-                        row_missing_values.update({"row_number":row_iterator,"empty_fields":[csv_header]})
-                        continue
-                    else:
-                        row_missing_values["empty_fields"].append(csv_header)
+                    if csv_header in INVOICE_MASTER_MANDATORY_FIELDS:
+                        if row_missing_values.get("row_number") is None:
+                            row_missing_values["row_number"] = row_iterator
+                            row_missing_values["empty_fields"] = [csv_header]
+                        else:
+                            row_missing_values["empty_fields"].append(csv_header)
                         continue
 
                 # Map all other headers
@@ -386,6 +387,7 @@ async def _process_csv_upload(
     collection_name: str,
     history_collection_name: str,
     unique_key: str,
+    mandatory_keys: list,
 ):
     try:
         if file.filename is None:
@@ -427,11 +429,12 @@ async def _process_csv_upload(
             row_missing_values = {}
             for csv_header, value in row.items():
                 if not value:
-                    if row_missing_values.get("row_number") is None:
-                        row_missing_values.update({"row_number":row_iterator,"empty_fields":[csv_header]})
-                        continue
-                    else:
-                        row_missing_values["empty_fields"].append(csv_header)
+                    if csv_header in mandatory_keys:
+                        if row_missing_values.get("row_number") is None:
+                            row_missing_values["row_number"] = row_iterator
+                            row_missing_values["empty_fields"] = [csv_header]
+                        else:
+                            row_missing_values["empty_fields"].append(csv_header)
                         continue
 
                 if csv_header.startswith(("Sales", "sales")):
@@ -440,11 +443,9 @@ async def _process_csv_upload(
 
                 if csv_header in mapping:
                     if "date" in csv_header.lower():
-                        mapped_row[INVOICE_HEADER_MAPPING[csv_header]] = str_to_date(value)
+                        mapped_row[mapping[csv_header]] = str_to_date(value)
                     else:
-                        mapped_row[INVOICE_HEADER_MAPPING[csv_header]] = value
-
-                    mapped_row[mapping[csv_header]] = value
+                        mapped_row[mapping[csv_header]] = value
 
             if row_missing_values:
                 empty_values_row.append(row_missing_values)
@@ -550,7 +551,8 @@ async def upload_kotak_hwc_transaction_csv(request: Request, file: UploadFile, d
         mapping=KOTAK_HWC_TRANS_MAPPING, 
         collection_name="kotak_hwc_transaction", 
         history_collection_name="kotak_hwc_transaction_history", 
-        unique_key="invoice_number"
+        unique_key="invoice_number",
+        mandatory_keys=KOTAK_HWC_TRANS_MANDATORY_FIELDS
     )
 
 async def upload_kotak_hwc_credit_csv(request: Request, file: UploadFile, db: Database):
@@ -559,7 +561,8 @@ async def upload_kotak_hwc_credit_csv(request: Request, file: UploadFile, db: Da
         mapping=KOTAK_HWC_CREDIT_MAPPING, 
         collection_name="kotak_hwc_credit", 
         history_collection_name="kotak_hwc_credit_history", 
-        unique_key="dealer_name"
+        unique_key="dealer_name",
+        mandatory_keys=KOTAK_HWC_CREDIT_MANDATORY_FIELDS
     )
 
 async def upload_tcpl_transaction_csv(request: Request, file: UploadFile, db: Database):
@@ -568,7 +571,8 @@ async def upload_tcpl_transaction_csv(request: Request, file: UploadFile, db: Da
         mapping=TCPL_TRANS_MAPPING, 
         collection_name="tcpl_transaction", 
         history_collection_name="tcpl_transaction_history", 
-        unique_key="invoice_no"
+        unique_key="invoice_no",
+        mandatory_keys=TCPL_TRANS_MANDATORY_FIELDS
     )
 
 async def upload_tcpl_credit_csv(request: Request, file: UploadFile, db: Database):
@@ -577,7 +581,8 @@ async def upload_tcpl_credit_csv(request: Request, file: UploadFile, db: Databas
         mapping=TCPL_CREDIT_MAPPING, 
         collection_name="tcpl_credit", 
         history_collection_name="tcpl_credit_history", 
-        unique_key="account_id"
+        unique_key="account_id",
+        mandatory_keys=TCPL_CREDIT_MANDATORY_FIELDS
     )
 
 async def upload_hero_transaction_csv(request: Request, file: UploadFile, db: Database):
@@ -586,7 +591,8 @@ async def upload_hero_transaction_csv(request: Request, file: UploadFile, db: Da
         mapping=HERO_TRANS_MAPPING, 
         collection_name="hero_transaction", 
         history_collection_name="hero_transaction_history", 
-        unique_key="invoice_number"
+        unique_key="invoice_number",
+        mandatory_keys=HERO_TRANS_MANDATORY_FIELDS
     )
 
 
@@ -596,7 +602,8 @@ async def upload_hero_credit_csv(request: Request, file: UploadFile, db: Databas
         mapping=HERO_CREDIT_MAPPING, 
         collection_name="hero_credit", 
         history_collection_name="hero_credit_history", 
-        unique_key="invoice_number"
+        unique_key="invoice_number",
+        mandatory_keys=HERO_CREDIT_MANDATORY_FIELDS
     )
 
 async def upload_kotak_ckpl_transaction_csv(request: Request, file: UploadFile, db: Database):
@@ -605,7 +612,8 @@ async def upload_kotak_ckpl_transaction_csv(request: Request, file: UploadFile, 
         mapping=KOTAK_CKPL_TRANS_MAPPING, 
         collection_name="kotak_ckpl_transaction", 
         history_collection_name="kotak_ckpl_transaction_history", 
-        unique_key="invoice_number"
+        unique_key="invoice_number",
+        mandatory_keys=KOTAK_CKPL_CREDIT_MANDATORY_FIELDS
     )
 
 async def upload_kotak_ckpl_credit_csv(request: Request, file: UploadFile, db: Database):
@@ -614,7 +622,8 @@ async def upload_kotak_ckpl_credit_csv(request: Request, file: UploadFile, db: D
         mapping=KOTAK_CKPL_CREDIT_MAPPING, 
         collection_name="kotak_ckpl_credit", 
         history_collection_name="kotak_ckpl_credit_history", 
-        unique_key="dealer_name"
+        unique_key="dealer_name",
+        mandatory_keys=KOTAK_CKPL_CREDIT_MANDATORY_FIELDS
     )
 
 async def upload_muthoot_transaction_csv(request: Request, file: UploadFile, db: Database):
@@ -624,7 +633,8 @@ async def upload_muthoot_transaction_csv(request: Request, file: UploadFile, db:
         mapping=MUTHOOT_TRANS_MAPPING, 
         collection_name="muthoot_transaction", 
         history_collection_name="muthoot_transaction_history", 
-        unique_key="invoice_number"
+        unique_key="invoice_number",
+        mandatory_keys=MUTHOOT_TRANS_MANDATORY_FIELDS
     )
 
 async def upload_muthoot_credit_csv(request: Request, file: UploadFile, db: Database):
@@ -633,7 +643,8 @@ async def upload_muthoot_credit_csv(request: Request, file: UploadFile, db: Data
         mapping=MUTHOOT_CREDIT_MAPPING, 
         collection_name="muthoot_credit", 
         history_collection_name="muthoot_credit_history", 
-        unique_key="loan_account_number"
+        unique_key="loan_account_number",
+        mandatory_keys=MUTHOOT_CREDIT_MANDATORY_FIELDS
     )
 
 async def upload_consolidated_report(request: Request, file: UploadFile, db: Database):
@@ -642,7 +653,8 @@ async def upload_consolidated_report(request: Request, file: UploadFile, db: Dat
         mapping=CONSOLIDATED_LIMIT_MAPPING,
         collection_name="consolidated_limit_report",
         history_collection_name="consolidated_limit_history_report",
-        unique_key="distributor_code"
+        unique_key="distributor_code",
+        mandatory_keys=CONSOLIDATED_LIMIT_MANDATORY_FIELDS
     )
 
 async def get_distributors(

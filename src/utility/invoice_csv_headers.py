@@ -321,3 +321,122 @@ CONSOLIDATED_LIMIT_MAPPING = {
     "Distributor Phone": "distributor_phone",
     "Distributor Email": "distributor_email",
 }
+
+#mandatory fields for all the modules
+DIST_MASTER_MANDATORY_FIELDS = [
+    "Anchor",
+    "Data Received",
+    "Distributor Code",
+    "Distributor Name",
+    "City",
+    "State",
+]
+
+INVOICE_MASTER_MANDATORY_FIELDS = [
+    "Anchor",
+    "Processed by",
+    "Working Date",
+    "Lender Name",
+    "Distributor Name",
+    "Distributor code",
+    "Beneficiary Name",
+    "Beneficiary A/c no",
+    "Bank Name",
+    "IFSC Code",
+    "Branch",
+    "Invoice no",
+    "Invoice amount",
+    "Invoice date",
+    "Loan Amount",
+    "Loan Disbursement date",
+    "Status",
+    "Status Reason",
+]
+
+KOTAK_HWC_TRANS_MANDATORY_FIELDS = [
+    "Dealer Name",
+    "Invoice Number",
+]
+
+KOTAK_CKPL_TRANS_MANDATORY_FIELDS = [
+    "Dealer Name",
+    "Invoice Number",
+]
+
+TCPL_TRANS_MANDATORY_FIELDS = [
+    "Customer Name",
+    "Invoice No",
+]
+
+HERO_TRANS_MANDATORY_FIELDS = [
+    "Client Name",
+    "Invoice Number",
+]
+
+MUTHOOT_TRANS_MANDATORY_FIELDS = [
+    "Borrower Name",
+    "Invoice Number",
+]
+
+KOTAK_HWC_CREDIT_MANDATORY_FIELDS = [
+    "Dealer Name",
+    "Sanction Limit",
+    "Operative Limit",
+    "Utilised Limit",
+    "Overdue",
+    "DPD",
+    "Available Limit",
+    "Interest",
+    "Distributor Code",
+]
+
+KOTAK_CKPL_CREDIT_MANDATORY_FIELDS = [
+    "Dealer Name",
+    "Sanction Limit",
+    "Operative Limit",
+    "Utilised Limit",
+    "Overdue",
+    "DPD",
+    "Available Limit",
+    "Interest",
+    "Distributor Code",
+]
+
+TCPL_CREDIT_MANDATORY_FIELDS = []
+
+HERO_CREDIT_MANDATORY_FIELDS = [
+    "Customer Name",
+    "Account Limit",
+    "Limit Utilization (Utilized amount)",
+    "Limit Available",
+    "Deal Expiry Date",
+    "DPD",
+    "Distributor Code",
+]
+
+MUTHOOT_CREDIT_MANDATORY_FIELDS = [
+    "Borrower Name",
+    "Sanctioned Limit",
+    "Available Limit",
+    "Distributor Code",
+]
+
+CONSOLIDATED_LIMIT_MANDATORY_FIELDS = [
+    "Sno",
+    "Company Name",
+    "Distributor Code",
+    "City",
+    "State",
+    "Lender",
+    "Sanction Limit",
+    "Operative Limit",
+    "Utilised Limit",
+    "Available Limit",
+    "Limit Expiry",
+    "Overdue",
+    "Funding Type",
+    "Billing Status",
+    "Anchor Id",
+    "Distributor Phone",
+    "Distributor Email",
+]

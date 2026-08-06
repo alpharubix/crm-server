@@ -60,9 +60,11 @@ async def upload_distributor_csv(request:Request,file:UploadFile,db: Database):
                 if not value:
                     if row_missing_values.get("row_number") is None:
                         row_missing_values.update({"row_number":row_iterator,"empty_fields":[csv_header]})
+                        continue
                     else:
                         missing_fields_list = row_missing_values["empty_fields"]
                         row_missing_values.update({"row_number":row_iterator,"empty_fields":missing_fields_list.append(csv_header)})
+                        continue
 
                         # Map all other headers
                 if csv_header in DIST_HEADER_MAPPING:
@@ -217,8 +219,10 @@ async def upload_invoice_csv(request:Request,file:UploadFile,db: Database):
                 if not value:
                     if row_missing_values.get("row_number") is None:
                         row_missing_values.update({"row_number":row_iterator,"empty_fields":[csv_header]})
+                        continue
                     else:
                         row_missing_values["empty_fields"].append(csv_header)
+                        continue
 
                 # Map all other headers
                 if csv_header in INVOICE_HEADER_MAPPING:
@@ -425,8 +429,10 @@ async def _process_csv_upload(
                 if not value:
                     if row_missing_values.get("row_number") is None:
                         row_missing_values.update({"row_number":row_iterator,"empty_fields":[csv_header]})
+                        continue
                     else:
                         row_missing_values["empty_fields"].append(csv_header)
+                        continue
 
                 if csv_header.startswith(("Sales", "sales")):
                     mapped_row[csv_header] = value

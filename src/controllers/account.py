@@ -899,8 +899,17 @@ async def update_accounts_based_on_csv(file, db: Session, user_id: int, user_rol
                             )
                     # Pass the full row (including None values) so blank CSV cells
                     # explicitly clear existing DB values, as requested.
-                    updation_accounts.append(row)
+                    #sanitize  the row before uploading
+                    sanitized_row = {}
+                    for key, value in row.items():
+                        if isinstance(value, dict):
+                            cleaned = {k: v for k, v in value.items() if v is not None}
+                            if cleaned:
+                                sanitized_row[key] = cleaned
+                        elif value is not None:
+                            sanitized_row[key] = value
 
+                    updation_accounts.append(sanitized_row)
             except HTTPException:
                 raise
             except Exception as row_err:

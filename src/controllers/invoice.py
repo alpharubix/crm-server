@@ -77,7 +77,7 @@ async def upload_distributor_csv(request:Request,file:UploadFile,db: Database):
 
                         # Map all other headers
                 if csv_header in DIST_HEADER_MAPPING:
-                    if csv_header.lower() in {"Data Received", "Enrollment Date"}:
+                    if csv_header in ("Data Received", "Enrollment Date"):
                         mapped_row[DIST_HEADER_MAPPING[csv_header]] = str_to_date(value)
                     else:
                         mapped_row[DIST_HEADER_MAPPING[csv_header]] = value

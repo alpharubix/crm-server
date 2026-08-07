@@ -32,7 +32,7 @@ async def upload_distributor_csv(request:Request,file:UploadFile,db: Database):
         contents = await file.read()
         for encoding in ("utf-8", "utf-8-sig", "cp1252", "latin1"): #encoding fix
             try:
-                csv_text = contents.decode(encoding)
+                csv_text = contents.decode(encoding,errors="replace")
                 print(f"Decoded using {encoding}")
                 break
             except UnicodeDecodeError:
@@ -203,13 +203,12 @@ async def upload_invoice_csv(request:Request,file:UploadFile,db: Database):
         contents = await file.read()
         for encoding in ("utf-8", "utf-8-sig", "cp1252", "latin1"): #encoding fix
             try:
-                csv_text = contents.decode(encoding)
-                print(f"Decoded using {encoding}")
+                csv_text =  contents.decode(encoding, errors="replace")
                 break
             except UnicodeDecodeError:
                 return JSONResponse(status_code=400,content={
-                        "message":"Header miss match found",
-                        "data":"File encoding is not supported"
+                        "message":"file encoding not supported",
+                        "data":None
                     })
         reader = csv.DictReader(io.StringIO(csv_text))
         csv_headers = set (reader.fieldnames or [])
@@ -406,6 +405,7 @@ async def _process_csv_upload(
     history_collection_name: str,
     unique_key: str,
     mandatory_keys: list,
+    exclude_date_headers : list = []
 ):
     try:
         if file.filename is None:
@@ -430,13 +430,12 @@ async def _process_csv_upload(
         contents = await file.read()
         for encoding in ("utf-8", "utf-8-sig", "cp1252", "latin1"): #encoding fix
             try:
-                csv_text = contents.decode(encoding)
-                print(f"Decoded using {encoding}")
+                csv_text = contents.decode(encoding, errors="replace")
                 break
             except UnicodeDecodeError:
                 return JSONResponse(status_code=400,content={
-                        "message":"Header miss match found",
-                        "data":"File encoding is not supported"
+                        "message":"File encoding issue",
+                        "data":None
                     })
         reader = csv.DictReader(io.StringIO(csv_text))
         csv_headers = set(reader.fieldnames or [])
@@ -469,7 +468,7 @@ async def _process_csv_upload(
                     continue
 
                 if csv_header in mapping:
-                    if "date" in csv_header.lower():
+                    if 'date' in csv_header.lower() and csv_header not in exclude_date_headers:
                         mapped_row[mapping[csv_header]] = str_to_date(value)
                     else:
                         mapped_row[mapping[csv_header]] = value
@@ -661,7 +660,8 @@ async def upload_muthoot_transaction_csv(request: Request, file: UploadFile, db:
         collection_name="muthoot_transaction", 
         history_collection_name="muthoot_transaction_history", 
         unique_key="invoice_number",
-        mandatory_keys=MUTHOOT_TRANS_MANDATORY_FIELDS
+        mandatory_keys=MUTHOOT_TRANS_MANDATORY_FIELDS,
+        exclude_date_headers=["Interest & Penal Accrual Till Date(in Rs.)","Interest Accrual Till Date(in Rs.)","Penal Accrual Till Date(in Rs.)"]
     )
 
 async def upload_muthoot_credit_csv(request: Request, file: UploadFile, db: Database):

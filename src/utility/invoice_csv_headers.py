@@ -303,7 +303,6 @@ MUTHOOT_CREDIT_MAPPING = {
 }
 
 CONSOLIDATED_LIMIT_MAPPING = {
-    "Sno": "sno",
     "Company Name": "company_name",
     "Distributor Code": "distributor_code",
     "City": "city",
@@ -422,7 +421,6 @@ MUTHOOT_CREDIT_MANDATORY_FIELDS = [
 ]
 
 CONSOLIDATED_LIMIT_MANDATORY_FIELDS = [
-    "Sno",
     "Company Name",
     "Distributor Code",
     "City",

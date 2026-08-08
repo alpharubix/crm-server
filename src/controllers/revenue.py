@@ -2,7 +2,7 @@ import math
 from datetime import datetime, timezone
 from fastapi import HTTPException
 from fastapi.encoders import jsonable_encoder
-from sqlalchemy import and_, true
+from sqlalchemy import and_, or_, true 
 from sqlalchemy.orm import Session, selectinload
 from starlette import status
 from starlette.requests import Request
@@ -85,7 +85,7 @@ def fetch_revenue(
         offset = (page - 1) * limit
 
         query = db.query(Revenue)
-        filters = []
+        filters = [or_(Revenue.company_id == 1, Revenue.company_id.is_(None))]
 
         user_id = request.state.user_id
         role = request.state.role

@@ -1,14 +1,15 @@
-from sqlalchemy import Column, String, Text, DateTime, ForeignKey
+from sqlalchemy import Column, String, Text, DateTime, ForeignKey, Integer
 from sqlalchemy.dialects.postgresql import BIGINT
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from ..database import Base
 
 class DealDocument(Base):
-    __tablename__ = "deal_documents"
+    __tablename__ = "deal_documents_merged"
 
     id = Column(BIGINT, primary_key=True, autoincrement=True, index=True)
-    deal_id = Column(BIGINT, ForeignKey("deals.id"), nullable=False, index=True)
+    company_id = Column(Integer, default=1, nullable=False, index=True)
+    deal_id = Column(BIGINT, ForeignKey("deals_merged.id"), nullable=False, index=True)
 
     module = Column(String(100), nullable=True)
     description = Column(Text, nullable=True)

@@ -1,4 +1,4 @@
-from sqlalchemy import Column, DateTime, ForeignKey, String
+from sqlalchemy import Column, DateTime, ForeignKey, Integer, String
 from sqlalchemy.dialects.mysql import BIGINT
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship
@@ -8,15 +8,15 @@ from ..database import Base
 
 
 class Contact(Base):
-    __tablename__ = "contacts"
+    __tablename__ = "contacts_merged"
 
     # Primary Key
-    id = Column(BIGINT, primary_key=True, index=True,autoincrement=True)
+    id = Column(BIGINT, primary_key=True, index=True, autoincrement=True)
+    company_id = Column(Integer, default=1, nullable=True, index=True)
 
     # Relationship to Account (The Fix)
-    # account_id = Column(Integer, ForeignKey("accounts.id"), nullable=True, index=True)
     # Foreign Key (Links to Account Table)
-    account_id = Column(BIGINT, ForeignKey("accounts.id"), index=True)
+    account_id = Column(BIGINT, ForeignKey("accounts_merged.id"), index=True)
     owner_id = Column(BIGINT, ForeignKey("users.id"), index=True)
     # Relationship (Links to Account Object)
     # Identity

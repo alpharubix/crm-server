@@ -20,9 +20,10 @@ from ..database import Base
 
 
 class Account(Base):
-    __tablename__ = "accounts"
+    __tablename__ = "accounts_merged"
 
     id = Column(BIGINT, primary_key=True, autoincrement=True)
+    company_id = Column(Integer, default=1, nullable=True, index=True)
 
     # Identity & Contact (Core)
     first_name = Column(String, nullable=True)
@@ -133,7 +134,7 @@ class AccountStatusHistory(Base):
     __tablename__ = "account_status_history"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    account_id = Column(BIGINT, ForeignKey("accounts.id"), nullable=False, index=True)
+    account_id = Column(BIGINT, ForeignKey("accounts_merged.id"), nullable=False, index=True)
     old_status = Column(String, nullable=True)
     new_status = Column(String, nullable=False)
     changed_by = Column(BIGINT, ForeignKey("users.id"), nullable=False)

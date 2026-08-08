@@ -5,13 +5,14 @@ from sqlalchemy.orm import relationship
 from ..database import Base
 
 class Ticket(Base):
-    __tablename__ = "tickets"
+    __tablename__ = "tickets_merged"
     
     # Primary Key & Relationships
     id = Column(BigInteger, primary_key=True, autoincrement=True)
-    deal_id = Column(BigInteger, ForeignKey("deals.id"), nullable=False)
+    company_id = Column(Integer, default=1, nullable=True, index=True)
+    deal_id = Column(BigInteger, ForeignKey("deals_merged.id"), nullable=False)
     deal = relationship("Deal", back_populates="tickets")
-    account_id = Column(BIGINT, ForeignKey("accounts.id"), index=True)
+    account_id = Column(BIGINT, ForeignKey("accounts_merged.id"), index=True)
     account = relationship("Account", back_populates="tickets")
 
     # Ticket Information

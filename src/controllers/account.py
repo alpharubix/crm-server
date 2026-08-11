@@ -500,6 +500,19 @@ async def get_all_accounts(
                     {"Parent_Id.id": str(contact.id), "module": "Contacts"}
                 )
 
+            # Step 2b: Collect Account Tasks pairs
+            from src.models.account_task import AccountTask
+            account_task_records = (
+                db.query(AccountTask.id)
+                .filter(AccountTask.account_id == acc.id)
+                .all()
+            )
+            for task_rec in account_task_records:
+                note_pairs.append({"Parent_Id.id": str(task_rec.id), "module": "Account_Tasks"})
+                note_pairs.append({"Parent_Id.id": str(task_rec.id), "module": "AccountTask"})
+                note_pairs.append({"Parent_Id.id": str(task_rec.id), "module": "AccountTasks"})
+                note_pairs.append({"Parent_Id.id": str(task_rec.id), "module": "Account Task"})
+
             # Step 3: Collect deal IDs and pairs
             deal_ids_for_tickets = []
             for deal in acc.deals:

@@ -28,6 +28,13 @@ from src.routers.webhook import webhook_api_router
 from src.routers.invoicing_route import invoice_router
 from src.routers import project_log as project_log_router
 
+from src.routers import account_task as account_task_router
+from src.database import Base, engine
+import src.models.account_task
+
+# Ensure tables exist
+Base.metadata.create_all(bind=engine)
+
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(levelname)s - %(name)s - %(message)s"
 )
@@ -58,6 +65,7 @@ app.add_middleware(
 
 # Include Routers
 app.include_router(account_router.router)
+app.include_router(account_task_router.router)
 app.include_router(contact_router.router)
 app.include_router(user_router.router)
 app.include_router(authentication_router)

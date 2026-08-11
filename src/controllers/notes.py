@@ -115,6 +115,17 @@ def insert_notes(user_id, user_role, note, parent_id, db, module_name, pg_db: Se
                 if raw_parent_can
                 else "Unknown",
             }
+        elif module_name in ["Account_Tasks", "AccountTasks", "AccountTask"]:
+            from src.models.account_task import AccountTask
+            raw_parent_task = (
+                pg_db.query(AccountTask.id, AccountTask.task_type)
+                .filter(AccountTask.id == int(parent_id))
+                .first()
+            )
+            Parent_Id = {
+                "id": str(raw_parent_task.id) if raw_parent_task else str(parent_id),
+                "task_name": f"Account Task #{raw_parent_task.id}" if raw_parent_task else "Account Task",
+            }
         else:
             raw_parent_deal = (
                 pg_db.query(Deal.id, Deal.deal_name)

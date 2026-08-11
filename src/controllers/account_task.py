@@ -1,15 +1,16 @@
 from datetime import datetime, timezone
 import math
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 from fastapi import HTTPException, status
 from sqlalchemy import or_, and_, desc
 from sqlalchemy.orm import Session, joinedload
 
-from src.models.account_task import AccountTask
+from src.models.account_task import AccountTask, get_call_back_info
 from src.models.account import Account
 from src.models.user import User
-from src.schemas.account_task import AccountTaskCreate, AccountTaskUpdate
+from src.schemas.account_task import AccountTaskCreate, AccountTaskUpdate, BulkAccountTaskCreate
 from src.controllers.audit_log import log_action
+from src.controllers.notes import get_notes
 
 def task_to_dict(task: AccountTask) -> Dict[str, Any]:
     # Check if task is overdue based on due date
@@ -53,11 +54,16 @@ def create_account_task(db: Session, task_in: AccountTaskCreate, current_user_id
             detail=f"Account with ID {task_in.account_id} not found",
         )
 
+    description = task_in.task_description
+    if task_in.task_type == "Call" and not description:
+        _, call_desc = get_call_back_info(account.call_back_date_time)
+        description = call_desc
+
     task = AccountTask(
         module_name=task_in.module_name or "Account",
         account_id=task_in.account_id,
         task_type=task_in.task_type,
-        task_description=task_in.task_description,
+        task_description=description or "",
         task_assigned_date_time=task_in.task_assigned_date_time or datetime.now(timezone.utc),
         task_due_date_time=task_in.task_due_date_time,
         task_status=task_in.task_status or "Unassigned",
@@ -80,6 +86,68 @@ def create_account_task(db: Session, task_in: AccountTaskCreate, current_user_id
     )
 
     return task_to_dict(task)
+
+def bulk_create_account_tasks(db: Session, bulk_in: BulkAccountTaskCreate, current_user_id: int):
+    if not bulk_in.account_ids:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No account IDs provided for bulk creation",
+        )
+
+    task_types = ["Call", "Update Record", "Email", "Move Status"]
+    created_tasks = []
+
+    accounts = db.query(Account).filter(Account.id.in_(bulk_in.account_ids)).all()
+    account_map = {acc.id: acc for acc in accounts}
+
+    now = datetime.now(timezone.utc)
+    assigned_dt = bulk_in.task_assigned_date_time or now
+
+    for acc_id in bulk_in.account_ids:
+        account = account_map.get(acc_id)
+        if not account:
+            continue
+
+        _, call_desc = get_call_back_info(account.call_back_date_time)
+
+        for t_type in task_types:
+            desc_val = call_desc if t_type == "Call" else (bulk_in.task_description or "")
+
+            task = AccountTask(
+                module_name="Account",
+                account_id=acc_id,
+                task_type=t_type,
+                task_description=desc_val,
+                task_assigned_date_time=assigned_dt,
+                task_due_date_time=bulk_in.task_due_date_time,
+                task_status=bulk_in.task_status or "Unassigned",
+                assigned_to_id=account.account_owner_id,
+                created_by_id=current_user_id,
+                modified_by_id=current_user_id,
+            )
+            db.add(task)
+            created_tasks.append(task)
+
+    db.commit()
+
+    log_action(
+        db,
+        current_user_id,
+        "USER",
+        "BULK_CREATED",
+        "AccountTask",
+        0,
+        {
+            "account_ids": bulk_in.account_ids,
+            "tasks_count": len(created_tasks),
+        },
+    )
+
+    return {
+        "message": f"Successfully created {len(created_tasks)} tasks for {len(accounts)} account(s)",
+        "tasks_created": len(created_tasks),
+        "accounts_count": len(accounts),
+    }
 
 def get_account_tasks(
     db: Session,
@@ -114,19 +182,16 @@ def get_account_tasks(
             )
         )
 
-    # Fetch total count
     total_records = query.count()
     total_pages = math.ceil(total_records / page_size) if page_size > 0 else 1
 
     offset = (page - 1) * page_size
     tasks = query.order_by(desc(AccountTask.created_at)).offset(offset).limit(page_size).all()
 
-    # Process task records and filter by call_back_status if specified
     results = []
     now = datetime.now(timezone.utc)
 
     for task in tasks:
-        # Check auto-overdue update in DB if task due date passed
         if task.task_due_date_time and task.task_status not in ["Completed", "Verified"]:
             due = task.task_due_date_time
             if due.tzinfo is None:
@@ -150,8 +215,6 @@ def get_account_tasks(
             "total_records": total_records,
         },
     }
-
-from src.controllers.notes import get_notes
 
 def get_account_task_by_id(db: Session, task_id: int, mongodb: Optional[Any] = None):
     task = db.query(AccountTask).options(

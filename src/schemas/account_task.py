@@ -1,6 +1,6 @@
 from datetime import datetime
-from typing import Optional, List, Any
-from pydantic import BaseModel, Field
+from typing import Optional, List
+from pydantic import BaseModel
 
 class AccountTaskCreate(BaseModel):
     module_name: str = "Account"
@@ -11,6 +11,13 @@ class AccountTaskCreate(BaseModel):
     task_due_date_time: Optional[datetime] = None
     task_status: str = "Unassigned"  # Unassigned, Assigned, Pending, In Progress, Completed, Verified, Overdue
     assigned_to_id: Optional[int] = None
+
+class BulkAccountTaskCreate(BaseModel):
+    account_ids: List[int]
+    task_status: Optional[str] = "Unassigned"
+    task_assigned_date_time: Optional[datetime] = None
+    task_due_date_time: Optional[datetime] = None
+    task_description: Optional[str] = None
 
 class AccountTaskUpdate(BaseModel):
     task_type: Optional[str] = None

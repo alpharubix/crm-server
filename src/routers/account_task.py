@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 from src.database import get_db, get_mongodb
 from src.schemas.account_task import (
     AccountTaskCreate,
+    BulkAccountTaskCreate,
     AccountTaskUpdate,
     AccountTaskSchema,
     AccountTaskListResponse,
@@ -25,6 +26,19 @@ def create_task(
 ):
     current_user_id = getattr(request.state, "user_id", 1)
     return controller.create_account_task(db=db, task_in=task_in, current_user_id=int(current_user_id))
+
+@router.post(
+    "/account-tasks/bulk",
+    status_code=status.HTTP_201_CREATED,
+    response_model=dict,
+)
+def bulk_create_tasks(
+    request: Request,
+    bulk_in: BulkAccountTaskCreate,
+    db: Session = Depends(get_db),
+):
+    current_user_id = getattr(request.state, "user_id", 1)
+    return controller.bulk_create_account_tasks(db=db, bulk_in=bulk_in, current_user_id=int(current_user_id))
 
 @router.get(
     "/account-tasks",

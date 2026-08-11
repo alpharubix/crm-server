@@ -17,6 +17,42 @@ from ..database import Base
 
 IST = ZoneInfo("Asia/Kolkata")
 
+def get_call_back_info(call_back_dt):
+    if not call_back_dt:
+        return "Blank", "Refers to the field not filled up"
+
+    now_utc = datetime.now(timezone.utc)
+    try:
+        now_ist = now_utc.astimezone(IST)
+        cb_ist = call_back_dt.astimezone(IST) if getattr(call_back_dt, "tzinfo", None) else call_back_dt.replace(tzinfo=IST)
+    except Exception:
+        now_ist = now_utc
+        cb_ist = call_back_dt
+
+    today_date = now_ist.date()
+    cb_date = cb_ist.date()
+
+    if cb_ist < now_ist and cb_date < today_date:
+        return "Overdue", "Refers to the field past the date"
+    elif cb_date == today_date:
+        return "Due Today", "Refers to the calendar date Today starting from \"00:00\" to \"23:59\""
+    elif cb_date == today_date + timedelta(days=1):
+        return "Due Tomorrow", "Refers to the calendar date Tomorrow starting from \"00:00\" to \"23:59\""
+
+    start_of_this_week = today_date - timedelta(days=today_date.weekday())
+    end_of_this_week = start_of_this_week + timedelta(days=6)
+    start_of_next_week = end_of_this_week + timedelta(days=1)
+    end_of_next_week = start_of_next_week + timedelta(days=6)
+
+    if start_of_this_week <= cb_date <= end_of_this_week:
+        return "Due This Week", "Refers to the current calendar week starting Monday to Sunday"
+    elif start_of_next_week <= cb_date <= end_of_next_week:
+        return "Due Next Week", "Refers to the next calendar week starting Monday to Sunday"
+    elif cb_date > end_of_next_week:
+        return "Due Dates", "As per the dates selected in the date select field"
+    else:
+        return "Overdue", "Refers to the field past the date"
+
 class AccountTask(Base):
     __tablename__ = "account_tasks"
 
@@ -74,35 +110,8 @@ class AccountTask(Base):
     def call_back_date_status(self):
         if not self.account or not self.account.call_back_date_time:
             return "Blank"
-        
-        cb_dt = self.account.call_back_date_time
-        now = datetime.now(timezone.utc)
-        
-        try:
-            now_ist = now.astimezone(IST).date()
-            cb_ist = cb_dt.astimezone(IST).date() if cb_dt.tzinfo else cb_dt.date()
-        except Exception:
-            now_ist = now.date()
-            cb_ist = cb_dt.date()
-
-        if cb_ist < now_ist:
-            return "Overdue"
-        elif cb_ist == now_ist:
-            return "Due Today"
-        elif cb_ist == now_ist + timedelta(days=1):
-            return "Due Tomorrow"
-        
-        start_of_week = now_ist - timedelta(days=now_ist.weekday())
-        end_of_week = start_of_week + timedelta(days=6)
-        start_of_next_week = end_of_week + timedelta(days=1)
-        end_of_next_week = start_of_next_week + timedelta(days=6)
-
-        if start_of_week <= cb_ist <= end_of_week:
-            return "Due This Week"
-        elif start_of_next_week <= cb_ist <= end_of_next_week:
-            return "Due Next Week"
-        else:
-            return "Due Next Week"
+        status_name, _ = get_call_back_info(self.account.call_back_date_time)
+        return status_name
 
     @hybrid_property
     def computed_task_status(self):

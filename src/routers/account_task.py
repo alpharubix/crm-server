@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Optional, List
 from fastapi import APIRouter, Depends, Query, Request, status
 from sqlalchemy.orm import Session
 
@@ -54,6 +54,17 @@ def list_tasks(
     call_back_status: Optional[str] = Query(None),
     search: Optional[str] = Query(None),
     assigned_to_id: Optional[int] = Query(None),
+    account_owner_id: Optional[List[int]] = Query(None),
+    source_type: Optional[List[str]] = Query(None),
+    account_stage: Optional[List[str]] = Query(None),
+    business_status: Optional[List[str]] = Query(None),
+    waba_interested: Optional[str] = Query(None),
+    is_priority_account: Optional[str] = Query(None),
+    cb_condition: Optional[str] = Query(None),
+    cb_users: Optional[List[int]] = Query(None),
+    cb_date_condition: Optional[str] = Query(None),
+    cb_from_date: Optional[str] = Query(None),
+    cb_to_date: Optional[str] = Query(None),
     db: Session = Depends(get_db),
 ):
     return controller.get_account_tasks(
@@ -66,6 +77,17 @@ def list_tasks(
         call_back_status=call_back_status,
         search=search,
         assigned_to_id=assigned_to_id,
+        account_owner_id=account_owner_id,
+        source_type=source_type,
+        account_stage=account_stage,
+        business_status=business_status,
+        waba_interested=waba_interested,
+        is_priority_account=is_priority_account,
+        cb_condition=cb_condition,
+        cb_users=cb_users,
+        cb_date_condition=cb_date_condition,
+        cb_from_date=cb_from_date,
+        cb_to_date=cb_to_date,
     )
 
 @router.get(

@@ -1,8 +1,9 @@
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
+from zoneinfo import ZoneInfo
 import math
 from typing import Optional, Dict, Any, List
 from fastapi import HTTPException, status
-from sqlalchemy import or_, and_, desc
+from sqlalchemy import or_, and_, desc, not_
 from sqlalchemy.orm import Session, joinedload
 
 from src.models.account_task import AccountTask, get_call_back_info
@@ -11,6 +12,8 @@ from src.models.user import User
 from src.schemas.account_task import AccountTaskCreate, AccountTaskUpdate, BulkAccountTaskCreate
 from src.controllers.audit_log import log_action
 from src.controllers.notes import get_notes
+
+IST = ZoneInfo("Asia/Kolkata")
 
 def task_to_dict(task: AccountTask) -> Dict[str, Any]:
     # Check if task is overdue based on due date
@@ -54,16 +57,11 @@ def create_account_task(db: Session, task_in: AccountTaskCreate, current_user_id
             detail=f"Account with ID {task_in.account_id} not found",
         )
 
-    description = task_in.task_description
-    if task_in.task_type == "Call" and not description:
-        _, call_desc = get_call_back_info(account.call_back_date_time)
-        description = call_desc
-
     task = AccountTask(
         module_name=task_in.module_name or "Account",
         account_id=task_in.account_id,
         task_type=task_in.task_type,
-        task_description=description or "",
+        task_description=task_in.task_description or "",
         task_assigned_date_time=task_in.task_assigned_date_time or datetime.now(timezone.utc),
         task_due_date_time=task_in.task_due_date_time,
         task_status=task_in.task_status or "Unassigned",
@@ -94,7 +92,6 @@ def bulk_create_account_tasks(db: Session, bulk_in: BulkAccountTaskCreate, curre
             detail="No account IDs provided for bulk creation",
         )
 
-    task_types = ["Call", "Update Record", "Email", "Move Status"]
     created_tasks = []
 
     accounts = db.query(Account).filter(Account.id.in_(bulk_in.account_ids)).all()
@@ -108,25 +105,20 @@ def bulk_create_account_tasks(db: Session, bulk_in: BulkAccountTaskCreate, curre
         if not account:
             continue
 
-        _, call_desc = get_call_back_info(account.call_back_date_time)
-
-        for t_type in task_types:
-            desc_val = call_desc if t_type == "Call" else (bulk_in.task_description or "")
-
-            task = AccountTask(
-                module_name="Account",
-                account_id=acc_id,
-                task_type=t_type,
-                task_description=desc_val,
-                task_assigned_date_time=assigned_dt,
-                task_due_date_time=bulk_in.task_due_date_time,
-                task_status=bulk_in.task_status or "Unassigned",
-                assigned_to_id=account.account_owner_id,
-                created_by_id=current_user_id,
-                modified_by_id=current_user_id,
-            )
-            db.add(task)
-            created_tasks.append(task)
+        task = AccountTask(
+            module_name="Account",
+            account_id=acc_id,
+            task_type="Update Record",
+            task_description=bulk_in.task_description or "",
+            task_assigned_date_time=assigned_dt,
+            task_due_date_time=bulk_in.task_due_date_time,
+            task_status=bulk_in.task_status or "Unassigned",
+            assigned_to_id=account.account_owner_id,
+            created_by_id=current_user_id,
+            modified_by_id=current_user_id,
+        )
+        db.add(task)
+        created_tasks.append(task)
 
     db.commit()
 
@@ -144,7 +136,7 @@ def bulk_create_account_tasks(db: Session, bulk_in: BulkAccountTaskCreate, curre
     )
 
     return {
-        "message": f"Successfully created {len(created_tasks)} tasks for {len(accounts)} account(s)",
+        "message": f"Successfully created {len(created_tasks)} task(s) for {len(accounts)} account(s)",
         "tasks_created": len(created_tasks),
         "accounts_count": len(accounts),
     }
@@ -159,11 +151,35 @@ def get_account_tasks(
     call_back_status: Optional[str] = None,
     search: Optional[str] = None,
     assigned_to_id: Optional[int] = None,
+    account_owner_id: Optional[List[int]] = None,
+    # New Account Filters
+    source_type: Optional[List[str]] = None,
+    account_stage: Optional[List[str]] = None,
+    business_status: Optional[List[str]] = None,
+    waba_interested: Optional[str] = None,
+    is_priority_account: Optional[str] = None,
+    # Advanced Call Back Filter Section
+    cb_condition: Optional[str] = None,
+    cb_users: Optional[List[int]] = None,
+    cb_date_condition: Optional[str] = None,
+    cb_from_date: Optional[str] = None,
+    cb_to_date: Optional[str] = None,
 ):
     query = db.query(AccountTask).options(
         joinedload(AccountTask.account).joinedload(Account.owner),
         joinedload(AccountTask.assigned_to)
     )
+
+    effective_cb_date = cb_date_condition or (call_back_status if call_back_status != "all" else None)
+    effective_cb_cond = cb_condition or "Is"
+
+    needs_account_join = bool(
+        account_owner_id or source_type or account_stage or business_status or waba_interested or is_priority_account
+        or effective_cb_cond or cb_users or effective_cb_date or cb_from_date or cb_to_date or search
+    )
+
+    if needs_account_join:
+        query = query.join(AccountTask.account)
 
     if account_id:
         query = query.filter(AccountTask.account_id == account_id)
@@ -173,14 +189,82 @@ def get_account_tasks(
         query = query.filter(AccountTask.task_type == task_type)
     if assigned_to_id:
         query = query.filter(AccountTask.assigned_to_id == assigned_to_id)
+    if account_owner_id:
+        owner_ids = [int(u) for u in (account_owner_id if isinstance(account_owner_id, list) else [account_owner_id]) if str(u).isdigit()]
+        if owner_ids:
+            query = query.filter(Account.account_owner_id.in_(owner_ids))
     if search:
-        query = query.join(AccountTask.account).filter(
+        query = query.filter(
             or_(
                 AccountTask.task_description.ilike(f"%{search}%"),
                 AccountTask.task_type.ilike(f"%{search}%"),
                 Account.account_name.ilike(f"%{search}%")
             )
         )
+
+    # General Account Filters
+    if source_type:
+        query = query.filter(Account.source_type.in_(source_type))
+    if account_stage:
+        query = query.filter(Account.account_stage.in_(account_stage))
+    if business_status:
+        query = query.filter(Account.business_status.in_(business_status))
+    if waba_interested and waba_interested in ["Yes", "No"]:
+        waba_bool = True if waba_interested == "Yes" else False
+        query = query.filter(Account.waba_interested == waba_bool)
+    if is_priority_account and is_priority_account in ["Yes", "No"]:
+        query = query.filter(Account.is_priority_account == is_priority_account)
+
+    # Advanced Call Back Date/Time Filter Section
+    cb_clauses = []
+    if cb_users:
+        cb_clauses.append(
+            or_(
+                AccountTask.assigned_to_id.in_(cb_users),
+                Account.account_owner_id.in_(cb_users)
+            )
+        )
+
+    if effective_cb_date:
+        now_utc = datetime.now(timezone.utc)
+        now_ist = now_utc.astimezone(IST)
+        today_start = datetime(now_ist.year, now_ist.month, now_ist.day, 0, 0, 0, tzinfo=IST)
+        today_end = datetime(now_ist.year, now_ist.month, now_ist.day, 23, 59, 59, tzinfo=IST)
+
+        if effective_cb_date == "Blank":
+            cb_clauses.append(Account.call_back_date_time.is_(None))
+        elif effective_cb_date == "Overdue":
+            cb_clauses.append(and_(Account.call_back_date_time.isnot(None), Account.call_back_date_time < today_start))
+        elif effective_cb_date == "Due Today":
+            cb_clauses.append(Account.call_back_date_time.between(today_start, today_end))
+        elif effective_cb_date == "Due Tomorrow":
+            tomorrow_start = today_start + timedelta(days=1)
+            tomorrow_end = today_end + timedelta(days=1)
+            cb_clauses.append(Account.call_back_date_time.between(tomorrow_start, tomorrow_end))
+        elif effective_cb_date == "Due This Week":
+            weekday = today_start.weekday()
+            start_of_week = today_start - timedelta(days=weekday)
+            end_of_week = today_start + timedelta(days=(6 - weekday), hours=23, minutes=59, seconds=59)
+            cb_clauses.append(Account.call_back_date_time.between(start_of_week, end_of_week))
+        elif effective_cb_date == "Due Next Week":
+            weekday = today_start.weekday()
+            start_of_next_week = today_start + timedelta(days=(7 - weekday))
+            end_of_next_week = start_of_next_week + timedelta(days=6, hours=23, minutes=59, seconds=59)
+            cb_clauses.append(Account.call_back_date_time.between(start_of_next_week, end_of_next_week))
+        elif effective_cb_date == "Due Dates" and cb_from_date and cb_to_date:
+            try:
+                f_dt = datetime.strptime(cb_from_date, "%Y-%m-%d").replace(tzinfo=IST)
+                t_dt = datetime.strptime(cb_to_date, "%Y-%m-%d").replace(hour=23, minute=59, second=59, tzinfo=IST)
+                cb_clauses.append(Account.call_back_date_time.between(f_dt, t_dt))
+            except Exception:
+                pass
+
+    if cb_clauses:
+        combined_clause = and_(*cb_clauses)
+        if effective_cb_cond == "Not":
+            query = query.filter(not_(combined_clause))
+        else:
+            query = query.filter(combined_clause)
 
     total_records = query.count()
     total_pages = math.ceil(total_records / page_size) if page_size > 0 else 1
@@ -201,11 +285,7 @@ def get_account_tasks(
                 db.add(task)
                 db.commit()
 
-        task_data = task_to_dict(task)
-        if call_back_status and call_back_status != "all":
-            if task_data.get("call_back_date_status") != call_back_status:
-                continue
-        results.append(task_data)
+        results.append(task_to_dict(task))
 
     return {
         "data": results,

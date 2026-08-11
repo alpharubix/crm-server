@@ -2,12 +2,15 @@ import csv
 import io
 import logging
 import math
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timezone, timedelta
+from zoneinfo import ZoneInfo
 from typing import Any, Dict, Optional
 
 from fastapi import HTTPException, UploadFile
 from pymongo.synchronous.collection import Collection
-from sqlalchemy import and_, or_
+from sqlalchemy import and_, or_, not_
+
+IST = ZoneInfo("Asia/Kolkata")
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, joinedload, selectinload
 from sqlalchemy.orm.attributes import flag_modified
@@ -310,21 +313,29 @@ async def get_all_accounts(
     account_name: Optional[str] = None,
     account_id: Optional[list[str] | str | int] = None,
     account_status: Optional[list[str]] = None,
-    account_stage: Optional[str] = None,
+    account_stage: Optional[list[str] | str] = None,
     source: Optional[list[str]] = None,
+    source_type: Optional[list[str]] = None,
     type_of_business: Optional[str] = None,
     industry: Optional[list[str]] = None,
     city: Optional[str] = None,
     state: Optional[str] = None,
     pincode: Optional[str] = None,
-    waba_interested: Optional[bool] = None,
-    business_status: Optional[str] = None,
+    waba_interested: Optional[str | bool] = None,
+    is_priority_account: Optional[str] = None,
+    business_status: Optional[list[str] | str] = None,
     call_back_date_time: Optional[datetime] = None,
     account_owner_id: Optional[list[int]] = None,
     phone_number: Optional[str] = None,
     module: Optional[str] = None,
     from_date: Optional[str] = None,
     to_date: Optional[str] = None,
+    # Advanced Call Back Date & Time Section
+    cb_condition: Optional[str] = None,
+    cb_users: Optional[list[int]] = None,
+    cb_date_condition: Optional[str] = None,
+    cb_from_date: Optional[str] = None,
+    cb_to_date: Optional[str] = None,
 ):
     MANAGER_EXECUTIVES_MAP = MANAGERID().MANAGER_EXECUTIVES_MAP
 
@@ -418,13 +429,19 @@ async def get_all_accounts(
                 or_(*[Account.account_status.ilike(f"{status}%") for status in status_list])
             )
     if account_stage:
-        filters.append(Account.account_stage.ilike(f"{account_stage.strip()}%"))
+        stage_list = [s.strip() for s in (account_stage if isinstance(account_stage, list) else [account_stage]) if s and s.strip()]
+        if stage_list:
+            filters.append(Account.account_stage.in_(stage_list))
     if source:
         source_list = [s.strip() for s in (source if isinstance(source, list) else [source]) if s and s.strip()]
         if source_list:
             filters.append(
                 or_(*[Account.source.ilike(f"{src}%") for src in source_list])
             )
+    if source_type:
+        st_list = [s.strip() for s in (source_type if isinstance(source_type, list) else [source_type]) if s and s.strip()]
+        if st_list:
+            filters.append(Account.source_type.in_(st_list))
     if type_of_business:
         filters.append(Account.type_of_business == type_of_business)
     if industry:
@@ -440,9 +457,69 @@ async def get_all_accounts(
     if pincode:
         filters.append(Account.pincode == pincode)
     if waba_interested is not None:
-        filters.append(Account.waba_interested == waba_interested)
+        if isinstance(waba_interested, str):
+            if waba_interested.lower() in ["yes", "true"]:
+                filters.append(Account.waba_interested == True)
+            elif waba_interested.lower() in ["no", "false"]:
+                filters.append(Account.waba_interested == False)
+        elif isinstance(waba_interested, bool):
+            filters.append(Account.waba_interested == waba_interested)
+    if is_priority_account and is_priority_account != "all":
+        filters.append(Account.is_priority_account == is_priority_account)
     if business_status:
-        filters.append(Account.business_status == business_status)
+        bs_list = [s.strip() for s in (business_status if isinstance(business_status, list) else [business_status]) if s and s.strip()]
+        if bs_list:
+            filters.append(Account.business_status.in_(bs_list))
+
+    # Advanced Call Back Date/Time Filter Section
+    effective_cb_cond = cb_condition or "Is"
+    cb_clauses = []
+
+    if cb_users:
+        owner_ids = [int(u) for u in (cb_users if isinstance(cb_users, list) else [cb_users]) if str(u).isdigit()]
+        if owner_ids:
+            cb_clauses.append(Account.account_owner_id.in_(owner_ids))
+
+    if cb_date_condition and cb_date_condition != "all":
+        now_utc = datetime.now(timezone.utc)
+        now_ist = now_utc.astimezone(IST)
+        today_start = datetime(now_ist.year, now_ist.month, now_ist.day, 0, 0, 0, tzinfo=IST)
+        today_end = datetime(now_ist.year, now_ist.month, now_ist.day, 23, 59, 59, tzinfo=IST)
+
+        if cb_date_condition == "Blank":
+            cb_clauses.append(Account.call_back_date_time.is_(None))
+        elif cb_date_condition == "Overdue":
+            cb_clauses.append(and_(Account.call_back_date_time.isnot(None), Account.call_back_date_time < today_start))
+        elif cb_date_condition == "Due Today":
+            cb_clauses.append(Account.call_back_date_time.between(today_start, today_end))
+        elif cb_date_condition == "Due Tomorrow":
+            tomorrow_start = today_start + timedelta(days=1)
+            tomorrow_end = today_end + timedelta(days=1)
+            cb_clauses.append(Account.call_back_date_time.between(tomorrow_start, tomorrow_end))
+        elif cb_date_condition == "Due This Week":
+            weekday = today_start.weekday()
+            start_of_week = today_start - timedelta(days=weekday)
+            end_of_week = today_start + timedelta(days=(6 - weekday), hours=23, minutes=59, seconds=59)
+            cb_clauses.append(Account.call_back_date_time.between(start_of_week, end_of_week))
+        elif cb_date_condition == "Due Next Week":
+            weekday = today_start.weekday()
+            start_of_next_week = today_start + timedelta(days=(7 - weekday))
+            end_of_next_week = start_of_next_week + timedelta(days=6, hours=23, minutes=59, seconds=59)
+            cb_clauses.append(Account.call_back_date_time.between(start_of_next_week, end_of_next_week))
+        elif cb_date_condition == "Due Dates" and cb_from_date and cb_to_date:
+            try:
+                f_dt = datetime.strptime(cb_from_date, "%Y-%m-%d").replace(tzinfo=IST)
+                t_dt = datetime.strptime(cb_to_date, "%Y-%m-%d").replace(hour=23, minute=59, second=59, tzinfo=IST)
+                cb_clauses.append(Account.call_back_date_time.between(f_dt, t_dt))
+            except Exception:
+                pass
+
+    if cb_clauses:
+        combined_clause = and_(*cb_clauses)
+        if effective_cb_cond == "Not":
+            filters.append(not_(combined_clause))
+        else:
+            filters.append(combined_clause)
     if call_back_date_time:
         filters.append(Account.call_back_date_time != None)
         filters.append(Account.call_back_date_time <= call_back_date_time)

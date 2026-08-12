@@ -166,6 +166,4 @@ class AccountTask(Base):
                     assigned = assigned.replace(tzinfo=UTC)
                 if due < assigned:
                     return "Overdue"
-        if self.task_status == "Unassigned" and self.assigned_to_id is not None:
-            return "Assigned"
         return self.task_status

@@ -64,6 +64,11 @@ def create_account_task(db: Session, task_in: AccountTaskCreate, current_user_id
             detail=f"Account with ID {task_in.account_id} not found",
         )
 
+    assigned_user_id = task_in.assigned_to_id or account.account_owner_id
+    initial_status = task_in.task_status or "Unassigned"
+    if initial_status == "Unassigned" and assigned_user_id:
+        initial_status = "Assigned"
+
     task = AccountTask(
         company_id=1,
         module_name=task_in.module_name or "Account",
@@ -72,8 +77,8 @@ def create_account_task(db: Session, task_in: AccountTaskCreate, current_user_id
         task_description=task_in.task_description or "",
         task_assigned_date_time=task_in.task_assigned_date_time or datetime.now(UTC),
         task_due_date_time=task_in.task_due_date_time,
-        task_status=task_in.task_status or "Unassigned",
-        assigned_to_id=task_in.assigned_to_id or account.account_owner_id,
+        task_status=initial_status,
+        assigned_to_id=assigned_user_id,
         created_by_id=current_user_id,
         modified_by_id=current_user_id,
     )
@@ -251,6 +256,7 @@ def get_account_tasks(
                 or_(
                     Account.account_owner_id.in_(allowed_ids),
                     AccountTask.assigned_to_id.in_(allowed_ids),
+                    AccountTask.created_by_id.in_(allowed_ids),
                 )
             )
         else:
@@ -258,6 +264,7 @@ def get_account_tasks(
                 or_(
                     Account.account_owner_id == uid,
                     AccountTask.assigned_to_id == uid,
+                    AccountTask.created_by_id == uid,
                 )
             )
 

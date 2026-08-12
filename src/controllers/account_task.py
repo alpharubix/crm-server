@@ -263,24 +263,57 @@ def get_account_tasks(
 
     if account_id:
         query = query.filter(AccountTask.account_id == account_id)
-    if task_status:
-        query = query.filter(AccountTask.task_status == task_status)
+    if task_status and task_status.lower() != "all":
+        if task_status == "Overdue":
+            now_utc = datetime.now(UTC)
+            query = query.filter(
+                or_(
+                    AccountTask.task_status == "Overdue",
+                    and_(
+                        AccountTask.task_due_date_time.isnot(None),
+                        AccountTask.task_due_date_time < now_utc,
+                        AccountTask.task_status.not_in(["Completed", "Verified"]),
+                    ),
+                )
+            )
+        elif task_status == "Assigned":
+            query = query.filter(
+                or_(
+                    AccountTask.task_status == "Assigned",
+                    and_(
+                        AccountTask.task_status == "Unassigned",
+                        AccountTask.assigned_to_id.isnot(None),
+                    ),
+                )
+            )
+        else:
+            query = query.filter(AccountTask.task_status == task_status)
     if task_type:
         query = query.filter(AccountTask.task_type == task_type)
     if assigned_to_id:
         query = query.filter(AccountTask.assigned_to_id == assigned_to_id)
     if account_owner_id:
-        owner_ids = [
-            int(u)
-            for u in (
-                account_owner_id
-                if isinstance(account_owner_id, list)
-                else [account_owner_id]
-            )
-            if str(u).isdigit()
-        ]
+        if isinstance(account_owner_id, (str, int)):
+            raw_ids = [account_owner_id]
+        elif isinstance(account_owner_id, list):
+            raw_ids = account_owner_id
+        else:
+            raw_ids = []
+
+        owner_ids = []
+        for item in raw_ids:
+            if isinstance(item, str) and "," in item:
+                owner_ids.extend([int(x.strip()) for x in item.split(",") if x.strip().isdigit()])
+            elif str(item).isdigit():
+                owner_ids.append(int(item))
+
         if owner_ids:
-            query = query.filter(Account.account_owner_id.in_(owner_ids))
+            query = query.filter(
+                or_(
+                    Account.account_owner_id.in_(owner_ids),
+                    AccountTask.assigned_to_id.in_(owner_ids),
+                )
+            )
     if search:
         query = query.filter(
             or_(

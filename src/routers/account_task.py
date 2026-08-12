@@ -6,6 +6,7 @@ from src.database import get_db, get_mongodb
 from src.schemas.account_task import (
     AccountTaskCreate,
     BulkAccountTaskCreate,
+    BulkTaskStatusUpdate,
     AccountTaskUpdate,
     AccountTaskSchema,
     AccountTaskListResponse,
@@ -39,6 +40,25 @@ def bulk_create_tasks(
 ):
     current_user_id = getattr(request.state, "user_id", 1)
     return controller.bulk_create_account_tasks(db=db, bulk_in=bulk_in, current_user_id=int(current_user_id))
+
+@router.put(
+    "/account-tasks/bulk-status",
+    response_model=dict,
+)
+def bulk_update_task_status(
+    request: Request,
+    payload: BulkTaskStatusUpdate,
+    db: Session = Depends(get_db),
+):
+    current_user_id = getattr(request.state, "user_id", None)
+    user_role = getattr(request.state, "role", None)
+    return controller.bulk_update_task_status(
+        db=db,
+        task_ids=payload.task_ids,
+        new_status=payload.task_status,
+        current_user_id=int(current_user_id) if current_user_id and str(current_user_id).isdigit() else None,
+        current_role=user_role,
+    )
 
 @router.get(
     "/account-tasks",

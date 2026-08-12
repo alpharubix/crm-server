@@ -2,12 +2,12 @@ import math
 from datetime import datetime
 
 from fastapi import HTTPException
-from pymongo.synchronous.collection import Collection
 from sqlalchemy import and_, or_
-from sqlalchemy.exc import SQLAlchemyError
-from sqlalchemy.orm import Session, joinedload, session, selectinload
+from sqlalchemy.orm import Session, selectinload
 from starlette.requests import Request
+
 from src.controllers.notes import get_notes
+
 from ..models.contact import Contact
 from ..schemas.contact import ContactBase
 from .audit_log import log_action
@@ -42,7 +42,13 @@ def create_contact(db: Session, data: ContactBase, user_id: int, user_role: str)
     db.refresh(new_contact)
 
     log_action(
-        db, user_id, user_role, "CREATED", "Contact", new_contact.id, data.model_dump(mode="json")
+        db,
+        user_id,
+        user_role,
+        "CREATED",
+        "Contact",
+        new_contact.id,
+        data.model_dump(mode="json"),
     )
     return new_contact
 
@@ -51,7 +57,7 @@ def get_all_contacts(
     request,
     db: Session,
     mongodb_conn,
-    page: int=1,
+    page: int = 1,
     contact_id: int | None = None,
     phone: str = None,
     mobile: str = None,
@@ -110,8 +116,7 @@ def get_all_contacts(
         total_data_size = base_query.count()
 
         data = (
-            base_query
-            .options(
+            base_query.options(
                 selectinload(Contact.parent_account),
                 selectinload(Contact.contact_owner),
                 selectinload(Contact.created_by),
@@ -191,7 +196,7 @@ def update_contacts(request: Request, contact_id: int, body: dict, db: Session):
 
         user_id = int(request.state.user_id)
         user_role = request.state.role
-        setattr(contact, "modified_by_id", user_id)
+        contact.modified_by_id = user_id
         db.commit()
         db.refresh(contact)
 

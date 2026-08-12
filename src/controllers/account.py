@@ -2,35 +2,34 @@ import csv
 import io
 import logging
 import math
-from datetime import date, datetime, timezone, timedelta
+from datetime import UTC, date, datetime, timedelta
+from typing import Any
 from zoneinfo import ZoneInfo
-from typing import Any, Dict, Optional
 
 from fastapi import HTTPException, UploadFile
 from pymongo.synchronous.collection import Collection
-from sqlalchemy import and_, or_, not_
+from sqlalchemy import and_, not_, or_
 
 IST = ZoneInfo("Asia/Kolkata")
+import httpx
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, joinedload, selectinload
 from sqlalchemy.orm.attributes import flag_modified
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
-import httpx
 from src.config import settings
-
 from src.controllers.audit_log import log_action
 from src.controllers.auth import MANAGERID
+
 # from src.controllers.Background_threads import BackgroundThreadPool
 from src.controllers.notes import get_notes
-from src.models.ticket import Ticket
 from src.models.deal_document import DealDocument
 from src.models.revenue import Revenue
+from src.models.ticket import Ticket
 from src.utility.utils import get_account_headers
 
 from ..models.account import Account, AccountStatusHistory
-from ..models.user import User
 from ..schemas.account import AccountBase
 
 
@@ -42,23 +41,25 @@ def create_account(
 
     account_data = data.model_dump()
     account_data["created_by_id"] = user_id
-    account_data["assignment_date"] = datetime.now(timezone.utc)
+    account_data["assignment_date"] = datetime.now(UTC)
 
     # Validate owner assignment based on role
     new_owner_id = account_data.get("account_owner_id")
     if new_owner_id:
         if user_role == "manager":
-            allowed_owner_ids = [user_id] + MANAGERID().MANAGER_EXECUTIVES_MAP.get(user_id, [])
+            allowed_owner_ids = [user_id] + MANAGERID().MANAGER_EXECUTIVES_MAP.get(
+                user_id, []
+            )
             if int(new_owner_id) not in allowed_owner_ids:
                 raise HTTPException(
                     status_code=403,
-                    detail="You do not have permission to assign an account to this owner"
+                    detail="You do not have permission to assign an account to this owner",
                 )
         elif user_role == "executive":
             if int(new_owner_id) != user_id:
                 raise HTTPException(
                     status_code=403,
-                    detail="You do not have permission to assign an account to this owner"
+                    detail="You do not have permission to assign an account to this owner",
                 )
 
     if data.created_time:
@@ -113,22 +114,22 @@ def create_account(
     #         if manager_user and manager_user.email:
     #             notification_emails.append(manager_user.email)
 
-        # Offload safely into your Background Thread Pool
-        # from src.controllers.mail import notify_account_assigned
-        #
-        # BackgroundThreadPool.execute_task(
-        #     notify_account_assigned,
-        #     list(set(notification_emails)),  # Duplication filtering safe safeguard
-        #     owner.full_name,
-        #     new_account.account_name,
-        #     new_account.id,
-        # )
+    # Offload safely into your Background Thread Pool
+    # from src.controllers.mail import notify_account_assigned
+    #
+    # BackgroundThreadPool.execute_task(
+    #     notify_account_assigned,
+    #     list(set(notification_emails)),  # Duplication filtering safe safeguard
+    #     owner.full_name,
+    #     new_account.account_name,
+    #     new_account.id,
+    # )
 
     return new_account
 
 
 def update_account(
-    db: Session, account_id: int, payload: Dict[str, Any], user_id: int, user_role: str
+    db: Session, account_id: int, payload: dict[str, Any], user_id: int, user_role: str
 ):
     db_account = db.query(Account).filter(Account.id == account_id).first()
     if not db_account:
@@ -137,16 +138,21 @@ def update_account(
     # Check if user has permission to update this account
     if user_role not in ("super_admin", "admin"):
         if user_role == "manager":
-            allowed_owner_ids = [user_id] + MANAGERID().MANAGER_EXECUTIVES_MAP.get(user_id, [])
+            allowed_owner_ids = [user_id] + MANAGERID().MANAGER_EXECUTIVES_MAP.get(
+                user_id, []
+            )
         elif user_role == "executive":
             allowed_owner_ids = [user_id]
         else:
             allowed_owner_ids = []
-        
-        if db_account.account_owner_id is not None and db_account.account_owner_id not in allowed_owner_ids:
+
+        if (
+            db_account.account_owner_id is not None
+            and db_account.account_owner_id not in allowed_owner_ids
+        ):
             raise HTTPException(
                 status_code=403,
-                detail="You do not have permission to update this account"
+                detail="You do not have permission to update this account",
             )
 
     old_status = db_account.account_status
@@ -164,7 +170,7 @@ def update_account(
         "applicant_residence_address",
         "co_applicant_residence_address",
         "customer_references",
-        "customer_salary_details",   # salary info for Salaried profile_type
+        "customer_salary_details",  # salary info for Salaried profile_type
     ]
 
     # Pure Date columns — must be parsed separately before the generic datetime branch
@@ -182,7 +188,7 @@ def update_account(
                     except ValueError as e:
                         raise HTTPException(
                             status_code=400,
-                            detail={"message": f"Invalid date format for {key}: {str(e)}"},
+                            detail={"message": f"Invalid date format for {key}: {e!s}"},
                         )
                 setattr(db_account, key, value)
             elif "time" in key or "date" in key:
@@ -190,10 +196,8 @@ def update_account(
                     try:
                         value = datetime.fromisoformat(value)
                         if value.tzinfo is None:
-                            value = value.replace(tzinfo=timezone.utc)
-                        if key == "call_back_date_time" and value < datetime.now(
-                            timezone.utc
-                        ):
+                            value = value.replace(tzinfo=UTC)
+                        if key == "call_back_date_time" and value < datetime.now(UTC):
                             raise HTTPException(
                                 status_code=400,
                                 detail={"message": "Date should not be in the past"},
@@ -203,7 +207,9 @@ def update_account(
                     except Exception as e:
                         raise HTTPException(
                             status_code=400,
-                            detail={"message": f"Invalid datetime format for {key}: {str(e)}"},
+                            detail={
+                                "message": f"Invalid datetime format for {key}: {e!s}"
+                            },
                         )
                 setattr(db_account, key, value)
             elif key in jsonb_columns:
@@ -227,19 +233,21 @@ def update_account(
     new_owner_id = payload.get("account_owner_id")
     if new_owner_id is not None and str(new_owner_id) != str(old_owner_id):
         if user_role == "manager":
-            allowed_owner_ids = [user_id] + MANAGERID().MANAGER_EXECUTIVES_MAP.get(user_id, [])
+            allowed_owner_ids = [user_id] + MANAGERID().MANAGER_EXECUTIVES_MAP.get(
+                user_id, []
+            )
             if int(new_owner_id) not in allowed_owner_ids:
                 raise HTTPException(
                     status_code=403,
-                    detail="You do not have permission to assign an account to this owner"
+                    detail="You do not have permission to assign an account to this owner",
                 )
         elif user_role == "executive":
             if int(new_owner_id) != user_id:
                 raise HTTPException(
                     status_code=403,
-                    detail="You do not have permission to assign an account to this owner"
+                    detail="You do not have permission to assign an account to this owner",
                 )
-        db_account.assignment_date = datetime.now(timezone.utc)
+        db_account.assignment_date = datetime.now(UTC)
         is_reassigned = True
 
     db_account.custom_fields = custom_fields_dict
@@ -289,20 +297,20 @@ def update_account(
         #             if manager_user and manager_user.email:
         #                 reassign_emails.append(manager_user.email)
 
-                # from src.controllers.mail import notify_account_assigned
-                #
-                # BackgroundThreadPool.execute_task(
-                #     notify_account_assigned,
-                #     list(set(reassign_emails)),
-                #     new_owner.full_name,
-                #     db_account.account_name,
-                #     db_account.id,
+        # from src.controllers.mail import notify_account_assigned
+        #
+        # BackgroundThreadPool.execute_task(
+        #     notify_account_assigned,
+        #     list(set(reassign_emails)),
+        #     new_owner.full_name,
+        #     db_account.account_name,
+        #     db_account.id,
         return db_account
     except HTTPException as e:
         raise e
     except Exception as e:
         db.rollback()
-        raise HTTPException(status_code=400, detail=f"Database error: {str(e)}")
+        raise HTTPException(status_code=400, detail=f"Database error: {e!s}")
 
 
 async def get_all_accounts(
@@ -310,32 +318,32 @@ async def get_all_accounts(
     db: Session,
     mongodb: Collection,
     page: int,
-    account_name: Optional[str] = None,
-    account_id: Optional[list[str] | str | int] = None,
-    account_status: Optional[list[str]] = None,
-    account_stage: Optional[list[str] | str] = None,
-    source: Optional[list[str]] = None,
-    source_type: Optional[list[str]] = None,
-    type_of_business: Optional[str] = None,
-    industry: Optional[list[str]] = None,
-    city: Optional[str] = None,
-    state: Optional[str] = None,
-    pincode: Optional[str] = None,
-    waba_interested: Optional[str | bool] = None,
-    is_priority_account: Optional[str] = None,
-    business_status: Optional[list[str] | str] = None,
-    call_back_date_time: Optional[datetime] = None,
-    account_owner_id: Optional[list[int]] = None,
-    phone_number: Optional[str] = None,
-    module: Optional[str] = None,
-    from_date: Optional[str] = None,
-    to_date: Optional[str] = None,
+    account_name: str | None = None,
+    account_id: list[str] | str | int | None = None,
+    account_status: list[str] | None = None,
+    account_stage: list[str] | str | None = None,
+    source: list[str] | None = None,
+    source_type: list[str] | None = None,
+    type_of_business: str | None = None,
+    industry: list[str] | None = None,
+    city: str | None = None,
+    state: str | None = None,
+    pincode: str | None = None,
+    waba_interested: str | bool | None = None,
+    is_priority_account: str | None = None,
+    business_status: list[str] | str | None = None,
+    call_back_date_time: datetime | None = None,
+    account_owner_id: list[int] | None = None,
+    phone_number: str | None = None,
+    module: str | None = None,
+    from_date: str | None = None,
+    to_date: str | None = None,
     # Advanced Call Back Date & Time Section
-    cb_condition: Optional[str] = None,
-    cb_users: Optional[list[int]] = None,
-    cb_date_condition: Optional[str] = None,
-    cb_from_date: Optional[str] = None,
-    cb_to_date: Optional[str] = None,
+    cb_condition: str | None = None,
+    cb_users: list[int] | None = None,
+    cb_date_condition: str | None = None,
+    cb_from_date: str | None = None,
+    cb_to_date: str | None = None,
 ):
     MANAGER_EXECUTIVES_MAP = MANAGERID().MANAGER_EXECUTIVES_MAP
 
@@ -364,7 +372,9 @@ async def get_all_accounts(
             if uw_response.status_code == 200:
                 uw_data = uw_response.json().get("data", [])
                 matching_acc_ids = [
-                    doc.get("account_id") for doc in uw_data if doc.get("account_id") is not None
+                    doc.get("account_id")
+                    for doc in uw_data
+                    if doc.get("account_id") is not None
                 ]
                 if not matching_acc_ids:
                     return {
@@ -376,9 +386,13 @@ async def get_all_accounts(
                         },
                     }
                 valid_ids = [int(i) for i in matching_acc_ids if str(i).isdigit()]
-                filters.append(Account.id.in_(valid_ids if valid_ids else matching_acc_ids))
+                filters.append(
+                    Account.id.in_(valid_ids if valid_ids else matching_acc_ids)
+                )
             else:
-                logging.error(f"Underwriting tool backend returned status {uw_response.status_code}: {uw_response.text}")
+                logging.error(
+                    f"Underwriting tool backend returned status {uw_response.status_code}: {uw_response.text}"
+                )
                 return {
                     "data": [],
                     "page_info": {
@@ -423,33 +437,60 @@ async def get_all_accounts(
     if account_name:
         filters.append(Account.account_name.ilike(f"%{account_name.strip()}%"))
     if account_status:
-        status_list = [s.strip() for s in (account_status if isinstance(account_status, list) else [account_status]) if s and s.strip()]
+        status_list = [
+            s.strip()
+            for s in (
+                account_status if isinstance(account_status, list) else [account_status]
+            )
+            if s and s.strip()
+        ]
         if status_list:
             filters.append(
-                or_(*[Account.account_status.ilike(f"{status}%") for status in status_list])
+                or_(
+                    *[
+                        Account.account_status.ilike(f"{status}%")
+                        for status in status_list
+                    ]
+                )
             )
     if account_stage:
-        stage_list = [s.strip() for s in (account_stage if isinstance(account_stage, list) else [account_stage]) if s and s.strip()]
+        stage_list = [
+            s.strip()
+            for s in (
+                account_stage if isinstance(account_stage, list) else [account_stage]
+            )
+            if s and s.strip()
+        ]
         if stage_list:
             filters.append(Account.account_stage.in_(stage_list))
     if source:
-        source_list = [s.strip() for s in (source if isinstance(source, list) else [source]) if s and s.strip()]
+        source_list = [
+            s.strip()
+            for s in (source if isinstance(source, list) else [source])
+            if s and s.strip()
+        ]
         if source_list:
             filters.append(
                 or_(*[Account.source.ilike(f"{src}%") for src in source_list])
             )
     if source_type:
-        st_list = [s.strip() for s in (source_type if isinstance(source_type, list) else [source_type]) if s and s.strip()]
+        st_list = [
+            s.strip()
+            for s in (source_type if isinstance(source_type, list) else [source_type])
+            if s and s.strip()
+        ]
         if st_list:
             filters.append(Account.source_type.in_(st_list))
     if type_of_business:
         filters.append(Account.type_of_business == type_of_business)
     if industry:
-        industry_list = [ind.strip() for ind in (industry if isinstance(industry, list) else [industry]) if ind and ind.strip()]
+        industry_list = [
+            ind.strip()
+            for ind in (industry if isinstance(industry, list) else [industry])
+            if ind and ind.strip()
+        ]
         if industry_list:
-            filters.append(
-                or_(*[Account.industry.ilike(ind) for ind in industry_list])
-            )
+            filters.append(or_(*[Account.industry.ilike(ind) for ind in industry_list]))
     if city:
         filters.append(Account.city.ilike(f"%{city.strip()}%"))
     if state:
@@ -467,7 +508,15 @@ async def get_all_accounts(
     if is_priority_account and is_priority_account != "all":
         filters.append(Account.is_priority_account == is_priority_account)
     if business_status:
-        bs_list = [s.strip() for s in (business_status if isinstance(business_status, list) else [business_status]) if s and s.strip()]
+        bs_list = [
+            s.strip()
+            for s in (
+                business_status
+                if isinstance(business_status, list)
+                else [business_status]
+            )
+            if s and s.strip()
+        ]
         if bs_list:
             filters.append(Account.business_status.in_(bs_list))
 
@@ -476,40 +525,69 @@ async def get_all_accounts(
     cb_clauses = []
 
     if cb_users:
-        owner_ids = [int(u) for u in (cb_users if isinstance(cb_users, list) else [cb_users]) if str(u).isdigit()]
+        owner_ids = [
+            int(u)
+            for u in (cb_users if isinstance(cb_users, list) else [cb_users])
+            if str(u).isdigit()
+        ]
         if owner_ids:
             cb_clauses.append(Account.account_owner_id.in_(owner_ids))
 
     if cb_date_condition and cb_date_condition != "all":
-        now_utc = datetime.now(timezone.utc)
+        now_utc = datetime.now(UTC)
         now_ist = now_utc.astimezone(IST)
-        today_start = datetime(now_ist.year, now_ist.month, now_ist.day, 0, 0, 0, tzinfo=IST)
-        today_end = datetime(now_ist.year, now_ist.month, now_ist.day, 23, 59, 59, tzinfo=IST)
+        today_start = datetime(
+            now_ist.year, now_ist.month, now_ist.day, 0, 0, 0, tzinfo=IST
+        )
+        today_end = datetime(
+            now_ist.year, now_ist.month, now_ist.day, 23, 59, 59, tzinfo=IST
+        )
 
         if cb_date_condition == "Blank":
             cb_clauses.append(Account.call_back_date_time.is_(None))
         elif cb_date_condition == "Overdue":
-            cb_clauses.append(and_(Account.call_back_date_time.isnot(None), Account.call_back_date_time < today_start))
+            cb_clauses.append(
+                and_(
+                    Account.call_back_date_time.isnot(None),
+                    Account.call_back_date_time < today_start,
+                )
+            )
         elif cb_date_condition == "Due Today":
-            cb_clauses.append(Account.call_back_date_time.between(today_start, today_end))
+            cb_clauses.append(
+                Account.call_back_date_time.between(today_start, today_end)
+            )
         elif cb_date_condition == "Due Tomorrow":
             tomorrow_start = today_start + timedelta(days=1)
             tomorrow_end = today_end + timedelta(days=1)
-            cb_clauses.append(Account.call_back_date_time.between(tomorrow_start, tomorrow_end))
+            cb_clauses.append(
+                Account.call_back_date_time.between(tomorrow_start, tomorrow_end)
+            )
         elif cb_date_condition == "Due This Week":
             weekday = today_start.weekday()
             start_of_week = today_start - timedelta(days=weekday)
-            end_of_week = today_start + timedelta(days=(6 - weekday), hours=23, minutes=59, seconds=59)
-            cb_clauses.append(Account.call_back_date_time.between(start_of_week, end_of_week))
+            end_of_week = today_start + timedelta(
+                days=(6 - weekday), hours=23, minutes=59, seconds=59
+            )
+            cb_clauses.append(
+                Account.call_back_date_time.between(start_of_week, end_of_week)
+            )
         elif cb_date_condition == "Due Next Week":
             weekday = today_start.weekday()
             start_of_next_week = today_start + timedelta(days=(7 - weekday))
-            end_of_next_week = start_of_next_week + timedelta(days=6, hours=23, minutes=59, seconds=59)
-            cb_clauses.append(Account.call_back_date_time.between(start_of_next_week, end_of_next_week))
+            end_of_next_week = start_of_next_week + timedelta(
+                days=6, hours=23, minutes=59, seconds=59
+            )
+            cb_clauses.append(
+                Account.call_back_date_time.between(
+                    start_of_next_week, end_of_next_week
+                )
+            )
         elif cb_date_condition == "Due Dates" and cb_from_date and cb_to_date:
             try:
                 f_dt = datetime.strptime(cb_from_date, "%Y-%m-%d").replace(tzinfo=IST)
-                t_dt = datetime.strptime(cb_to_date, "%Y-%m-%d").replace(hour=23, minute=59, second=59, tzinfo=IST)
+                t_dt = datetime.strptime(cb_to_date, "%Y-%m-%d").replace(
+                    hour=23, minute=59, second=59, tzinfo=IST
+                )
                 cb_clauses.append(Account.call_back_date_time.between(f_dt, t_dt))
             except Exception:
                 pass
@@ -532,7 +610,15 @@ async def get_all_accounts(
             )
         )
     if account_owner_id:
-        owner_ids = [int(oid) for oid in (account_owner_id if isinstance(account_owner_id, list) else [account_owner_id]) if oid is not None]
+        owner_ids = [
+            int(oid)
+            for oid in (
+                account_owner_id
+                if isinstance(account_owner_id, list)
+                else [account_owner_id]
+            )
+            if oid is not None
+        ]
         if owner_ids:
             if role in ("super_admin", "admin"):
                 filters.append(Account.account_owner_id.in_(owner_ids))
@@ -558,7 +644,7 @@ async def get_all_accounts(
                 selectinload(Account.created_by),
                 selectinload(Account.account_linked_contact),
                 selectinload(Account.deals),
-                selectinload(Account.modified_by)
+                selectinload(Account.modified_by),
             )
             .limit(limit)
             .all()
@@ -579,16 +665,23 @@ async def get_all_accounts(
 
             # Step 2b: Collect Account Tasks pairs
             from src.models.account_task import AccountTask
+
             account_task_records = (
-                db.query(AccountTask.id)
-                .filter(AccountTask.account_id == acc.id)
-                .all()
+                db.query(AccountTask.id).filter(AccountTask.account_id == acc.id).all()
             )
             for task_rec in account_task_records:
-                note_pairs.append({"Parent_Id.id": str(task_rec.id), "module": "Account_Tasks"})
-                note_pairs.append({"Parent_Id.id": str(task_rec.id), "module": "AccountTask"})
-                note_pairs.append({"Parent_Id.id": str(task_rec.id), "module": "AccountTasks"})
-                note_pairs.append({"Parent_Id.id": str(task_rec.id), "module": "Account Task"})
+                note_pairs.append(
+                    {"Parent_Id.id": str(task_rec.id), "module": "Account_Tasks"}
+                )
+                note_pairs.append(
+                    {"Parent_Id.id": str(task_rec.id), "module": "AccountTask"}
+                )
+                note_pairs.append(
+                    {"Parent_Id.id": str(task_rec.id), "module": "AccountTasks"}
+                )
+                note_pairs.append(
+                    {"Parent_Id.id": str(task_rec.id), "module": "Account Task"}
+                )
 
             # Step 3: Collect deal IDs and pairs
             deal_ids_for_tickets = []
@@ -607,7 +700,12 @@ async def get_all_accounts(
             revenue_list: list = []
 
             if deal_ids_for_tickets:
-                deal_map = {deal.id: getattr(deal, "deal_name", None) or getattr(deal, "account_name", None) or f"Deal #{deal.id}" for deal in acc.deals}
+                deal_map = {
+                    deal.id: getattr(deal, "deal_name", None)
+                    or getattr(deal, "account_name", None)
+                    or f"Deal #{deal.id}"
+                    for deal in acc.deals
+                }
 
                 # 4a. Tickets
                 ticket_records = (
@@ -637,8 +735,7 @@ async def get_all_accounts(
                 )
                 for doc in doc_records:
                     d_dict = {
-                        c.name: getattr(doc, c.name)
-                        for c in doc.__table__.columns
+                        c.name: getattr(doc, c.name) for c in doc.__table__.columns
                     }
                     d_dict["id"] = str(d_dict["id"])
                     d_dict["deal_id"] = str(d_dict["deal_id"])
@@ -653,8 +750,7 @@ async def get_all_accounts(
                 )
                 for rev in rev_records:
                     r_dict = {
-                        c.name: getattr(rev, c.name)
-                        for c in rev.__table__.columns
+                        c.name: getattr(rev, c.name) for c in rev.__table__.columns
                     }
                     r_dict["id"] = str(r_dict["id"])
                     r_dict["deal_id"] = str(r_dict["deal_id"])
@@ -705,7 +801,7 @@ async def get_all_accounts(
                 Account.source_date,
                 Account.source_type,
                 Account.assignment_date,
-                Account.modified_time
+                Account.modified_time,
             )
             .filter(and_(*filters))
             .offset(offset)
@@ -755,6 +851,7 @@ def get_account_status_history(db: Session, account_id: int, page: int = 1):
 
 async def accounts_csv_update(file: UploadFile, db: Session):
     import pandas as pd
+
     try:
         if file.filename.endswith(".csv"):
             # if the file is csv file process the file
@@ -969,7 +1066,7 @@ async def update_accounts_based_on_csv(file, db: Session, user_id: int, user_rol
                     if new_owner_id and int(new_owner_id) not in allowed_owner_ids:
                         raise HTTPException(
                             status_code=403,
-                            detail=f"Row {row_number}: You do not have permission to assign an account to owner ID {new_owner_id}"
+                            detail=f"Row {row_number}: You do not have permission to assign an account to owner ID {new_owner_id}",
                         )
 
                 if is_new:
@@ -978,14 +1075,20 @@ async def update_accounts_based_on_csv(file, db: Session, user_id: int, user_rol
                     row["created_by_id"] = int(user_id)
                     insertion_accounts.append(row)
                 else:
-                    existing_account = db.query(Account).filter(Account.id == row["id"]).first()
+                    existing_account = (
+                        db.query(Account).filter(Account.id == row["id"]).first()
+                    )
                     if not existing_account:
                         raise ValueError(f"Account with ID {row['id']} not found")
                     if user_role == "manager":
-                        if existing_account.account_owner_id is not None and int(existing_account.account_owner_id) not in allowed_owner_ids:
+                        if (
+                            existing_account.account_owner_id is not None
+                            and int(existing_account.account_owner_id)
+                            not in allowed_owner_ids
+                        ):
                             raise HTTPException(
                                 status_code=403,
-                                detail=f"Row {row_number}: You do not have permission to update account owned by user ID {existing_account.account_owner_id}"
+                                detail=f"Row {row_number}: You do not have permission to update account owned by user ID {existing_account.account_owner_id}",
                             )
                     # Pass the full row (including None values) so blank CSV cells
                     # explicitly clear existing DB values, as requested.
@@ -1023,5 +1126,5 @@ async def update_accounts_based_on_csv(file, db: Session, user_id: int, user_rol
     except Exception as e:
         return JSONResponse(
             status_code=500,
-            content={"detail": f"Processing error: {str(e)}", "row_errors": error_list},
+            content={"detail": f"Processing error: {e!s}", "row_errors": error_list},
         )

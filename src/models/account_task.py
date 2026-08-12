@@ -1,5 +1,6 @@
-from datetime import datetime, timezone, timedelta
+from datetime import UTC, datetime, timedelta
 from zoneinfo import ZoneInfo
+
 from sqlalchemy import (
     BIGINT,
     Column,
@@ -17,14 +18,19 @@ from ..database import Base
 
 IST = ZoneInfo("Asia/Kolkata")
 
+
 def get_call_back_info(call_back_dt):
     if not call_back_dt:
         return "Blank", "Refers to the field not filled up"
 
-    now_utc = datetime.now(timezone.utc)
+    now_utc = datetime.now(UTC)
     try:
         now_ist = now_utc.astimezone(IST)
-        cb_ist = call_back_dt.astimezone(IST) if getattr(call_back_dt, "tzinfo", None) else call_back_dt.replace(tzinfo=IST)
+        cb_ist = (
+            call_back_dt.astimezone(IST)
+            if getattr(call_back_dt, "tzinfo", None)
+            else call_back_dt.replace(tzinfo=IST)
+        )
     except Exception:
         now_ist = now_utc
         cb_ist = call_back_dt
@@ -35,9 +41,15 @@ def get_call_back_info(call_back_dt):
     if cb_ist < now_ist and cb_date < today_date:
         return "Overdue", "Refers to the field past the date"
     elif cb_date == today_date:
-        return "Due Today", "Refers to the calendar date Today starting from \"00:00\" to \"23:59\""
+        return (
+            "Due Today",
+            'Refers to the calendar date Today starting from "00:00" to "23:59"',
+        )
     elif cb_date == today_date + timedelta(days=1):
-        return "Due Tomorrow", "Refers to the calendar date Tomorrow starting from \"00:00\" to \"23:59\""
+        return (
+            "Due Tomorrow",
+            'Refers to the calendar date Tomorrow starting from "00:00" to "23:59"',
+        )
 
     start_of_this_week = today_date - timedelta(days=today_date.weekday())
     end_of_this_week = start_of_this_week + timedelta(days=6)
@@ -45,13 +57,20 @@ def get_call_back_info(call_back_dt):
     end_of_next_week = start_of_next_week + timedelta(days=6)
 
     if start_of_this_week <= cb_date <= end_of_this_week:
-        return "Due This Week", "Refers to the current calendar week starting Monday to Sunday"
+        return (
+            "Due This Week",
+            "Refers to the current calendar week starting Monday to Sunday",
+        )
     elif start_of_next_week <= cb_date <= end_of_next_week:
-        return "Due Next Week", "Refers to the next calendar week starting Monday to Sunday"
+        return (
+            "Due Next Week",
+            "Refers to the next calendar week starting Monday to Sunday",
+        )
     elif cb_date > end_of_next_week:
         return "Due Dates", "As per the dates selected in the date select field"
     else:
         return "Overdue", "Refers to the field past the date"
+
 
 class AccountTask(Base):
     __tablename__ = "account_tasks"
@@ -61,10 +80,14 @@ class AccountTask(Base):
     module_name = Column(String, default="Account", nullable=False)
 
     # Linked Account
-    account_id = Column(BIGINT, ForeignKey("accounts_merged.id"), nullable=False, index=True)
+    account_id = Column(
+        BIGINT, ForeignKey("accounts_merged.id"), nullable=False, index=True
+    )
 
     # Task Fields
-    task_type = Column(String(100), nullable=False)  # Call, Update Record, Email, Move Status
+    task_type = Column(
+        String(100), nullable=False
+    )  # Call, Update Record, Email, Move Status
     task_description = Column(Text, nullable=True)
     task_assigned_date_time = Column(DateTime(timezone=True), nullable=True)
     task_due_date_time = Column(DateTime(timezone=True), nullable=True)
@@ -75,14 +98,27 @@ class AccountTask(Base):
     assigned_to_id = Column(BIGINT, ForeignKey("users.id"), nullable=True, index=True)
     created_by_id = Column(BIGINT, ForeignKey("users.id"), nullable=True)
     modified_by_id = Column(BIGINT, ForeignKey("users.id"), nullable=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+    created_at = Column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
 
     # Relationships
     account = relationship("Account", backref="account_tasks")
-    assigned_to = relationship("User", foreign_keys=[assigned_to_id], backref="assigned_account_tasks")
-    created_by = relationship("User", foreign_keys=[created_by_id], backref="created_account_tasks")
-    modified_by = relationship("User", foreign_keys=[modified_by_id], backref="modified_account_tasks")
+    assigned_to = relationship(
+        "User", foreign_keys=[assigned_to_id], backref="assigned_account_tasks"
+    )
+    created_by = relationship(
+        "User", foreign_keys=[created_by_id], backref="created_account_tasks"
+    )
+    modified_by = relationship(
+        "User", foreign_keys=[modified_by_id], backref="modified_account_tasks"
+    )
 
     @hybrid_property
     def account_name(self):
@@ -117,11 +153,17 @@ class AccountTask(Base):
     def computed_task_status(self):
         if self.task_status in ["Completed", "Verified"]:
             return self.task_status
+        now = datetime.now(UTC)
         if self.task_due_date_time:
-            now = datetime.now(timezone.utc)
             due = self.task_due_date_time
             if due.tzinfo is None:
-                due = due.replace(tzinfo=timezone.utc)
+                due = due.replace(tzinfo=UTC)
             if due < now:
                 return "Overdue"
+            if self.task_assigned_date_time:
+                assigned = self.task_assigned_date_time
+                if assigned.tzinfo is None:
+                    assigned = assigned.replace(tzinfo=UTC)
+                if due < assigned:
+                    return "Overdue"
         return self.task_status

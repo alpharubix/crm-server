@@ -1,7 +1,7 @@
 import math
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 
-from fastapi import HTTPException,UploadFile
+from fastapi import HTTPException, UploadFile
 from fastapi.encoders import jsonable_encoder
 from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session, selectinload
@@ -62,7 +62,13 @@ def get_deals(
         if account_name:
             filters.append(Deal.account_name.ilike(f"%{account_name.strip()}%"))
         if deal_status:
-            statuses = [s.strip() for s in (deal_status if isinstance(deal_status, list) else [deal_status]) if s and s.strip()]
+            statuses = [
+                s.strip()
+                for s in (
+                    deal_status if isinstance(deal_status, list) else [deal_status]
+                )
+                if s and s.strip()
+            ]
             if statuses:
                 filters.append(
                     or_(*[Deal.deal_status.ilike(f"%{s}%") for s in statuses])
@@ -75,7 +81,13 @@ def get_deals(
         if deal_owner_id:
             filters.append(Deal.deal_owner_id.in_(deal_owner_id))
         if lender_name:
-            lenders = [l.strip() for l in (lender_name if isinstance(lender_name, list) else [lender_name]) if l and l.strip()]
+            lenders = [
+                l.strip()
+                for l in (
+                    lender_name if isinstance(lender_name, list) else [lender_name]
+                )
+                if l and l.strip()
+            ]
             if lenders:
                 filters.append(
                     or_(*[Deal.lender_name.ilike(f"%{l}%") for l in lenders])
@@ -85,13 +97,27 @@ def get_deals(
                 Deal.lender_login_type.ilike(f"%{lender_login_type.strip()}%")
             )
         if ticket_login:
-            tickets = [t.strip() for t in (ticket_login if isinstance(ticket_login, list) else [ticket_login]) if t and t.strip()]
+            tickets = [
+                t.strip()
+                for t in (
+                    ticket_login if isinstance(ticket_login, list) else [ticket_login]
+                )
+                if t and t.strip()
+            ]
             if tickets:
                 filters.append(
                     or_(*[Deal.ticket_login.ilike(f"%{t}%") for t in tickets])
                 )
         if type_of_case_login:
-            cases = [c.strip() for c in (type_of_case_login if isinstance(type_of_case_login, list) else [type_of_case_login]) if c and c.strip()]
+            cases = [
+                c.strip()
+                for c in (
+                    type_of_case_login
+                    if isinstance(type_of_case_login, list)
+                    else [type_of_case_login]
+                )
+                if c and c.strip()
+            ]
             if cases:
                 filters.append(
                     or_(*[Deal.type_of_case_login.ilike(f"%{c}%") for c in cases])
@@ -136,7 +162,7 @@ def get_deals(
         if created_from:
             try:
                 date_from = datetime.strptime(created_from, "%Y-%m-%d").replace(
-                    tzinfo=timezone.utc
+                    tzinfo=UTC
                 )
                 filters.append(Deal.created_at >= date_from)
             except ValueError:
@@ -144,9 +170,7 @@ def get_deals(
         if created_to:
             try:
                 date_to = (
-                    datetime.strptime(created_to, "%Y-%m-%d").replace(
-                        tzinfo=timezone.utc
-                    )
+                    datetime.strptime(created_to, "%Y-%m-%d").replace(tzinfo=UTC)
                     + timedelta(days=1)
                     - timedelta(seconds=1)
                 )
@@ -379,15 +403,11 @@ def create_deal(deal, db: Session, user_id, user_role):
 
         # --- Auto-generate deal_name: {account_name}/{account_id}/D{seq} ---
         existing_deal_count = (
-            db.query(Deal)
-            .filter(Deal.account_id == int(deal.account_id))
-            .count()
+            db.query(Deal).filter(Deal.account_id == int(deal.account_id)).count()
         )
         existing_deal_count += 1
         sequence = str(existing_deal_count).zfill(4)
-        generated_deal_name = (
-            f"{deal.account_name}/DL/{sequence}"
-        )
+        generated_deal_name = f"{deal.account_name}/DL/{sequence}"
 
         created_deal = Deal(
             account_id=deal.account_id,
@@ -496,7 +516,6 @@ def update_deal_based_on_id(user_id, user_role, db: Session, deal_id: int, paylo
                 ),
             )
 
-
     for key, value in payload.items():
         if hasattr(db_deal, key):
             if value == "" or value is None:
@@ -517,7 +536,7 @@ def update_deal_based_on_id(user_id, user_role, db: Session, deal_id: int, paylo
                 setattr(db_deal, key, value)
 
     db_deal.modified_by = user_id
-    db_deal.updated_at = datetime.now(timezone.utc)
+    db_deal.updated_at = datetime.now(UTC)
 
     try:
         db.commit()
@@ -526,7 +545,7 @@ def update_deal_based_on_id(user_id, user_role, db: Session, deal_id: int, paylo
         return {"message": "update-success", "updated_deal_id": str(db_deal.id)}
     except Exception as e:
         db.rollback()
-        raise HTTPException(status_code=400, detail=f"Database error: {str(e)}")
+        raise HTTPException(status_code=400, detail=f"Database error: {e!s}")
 
 
 def get_deal_id(user_id: int, role: str, deal_name: str, db: Session):
@@ -537,9 +556,7 @@ def get_deal_id(user_id: int, role: str, deal_name: str, db: Session):
 
         # ---------------- ROLE BASED ACCESS ---------------- #
 
-        if user_id in MANAGERID.BYPASS_USER_IDS:
-            pass
-        elif role in ("super_admin", "admin"):
+        if user_id in MANAGERID.BYPASS_USER_IDS or role in ("super_admin", "admin"):
             pass
 
         elif role == "manager":
@@ -573,6 +590,7 @@ def get_deal_id(user_id: int, role: str, deal_name: str, db: Session):
 
 def update_and_insert_deals(insertion_deals, updation_deals, db: Session):
     from sqlalchemy.exc import SQLAlchemyError
+
     inserted = 0
     updated = 0
     failed_deals = []
@@ -601,9 +619,7 @@ def update_and_insert_deals(insertion_deals, updation_deals, db: Session):
             account_id = deal_data["account_id"]
             account_name = deal_data["account_name"]
             existing_deal_count = (
-                db.query(Deal)
-                .filter(Deal.account_id == account_id)
-                .count()
+                db.query(Deal).filter(Deal.account_id == account_id).count()
             )
             sequence = existing_deal_count + 1
             deal_data["deal_name"] = f"{account_name}/{account_id}/D{sequence:02d}"
@@ -665,14 +681,17 @@ def update_and_insert_deals(insertion_deals, updation_deals, db: Session):
     return {"inserted": inserted, "updated": updated, "failed": failed_deals}
 
 
-async def update_deals_based_on_csv(file: UploadFile, db: Session, user_id: int, user_role: str):
+async def update_deals_based_on_csv(
+    file: UploadFile, db: Session, user_id: int, user_role: str
+):
     import csv
-    import io
+    from decimal import Decimal
+
     from starlette.responses import JSONResponse
+
     from src.models.account import Account
     from src.utility.utils import get_deal_headers
-    from decimal import Decimal
-    
+
     insertion_deals, updation_deals, error_list = [], [], []
     row_number = 1
 
@@ -683,10 +702,7 @@ async def update_deals_based_on_csv(file: UploadFile, db: Session, user_id: int,
         )
 
     # Date fields that must be YYYY-MM-DD
-    DATE_FIELDS = {
-        "deal_expected_closing",
-        "deal_status_closing"
-    }
+    DATE_FIELDS = {"deal_expected_closing", "deal_status_closing"}
 
     # Integer fields
     INT_FIELDS = {
@@ -705,7 +721,7 @@ async def update_deals_based_on_csv(file: UploadFile, db: Session, user_id: int,
         "mm_charges",
         "insurance_amount",
         "pf_percentage",
-        "rate_of_interest"
+        "rate_of_interest",
     }
 
     try:
@@ -750,7 +766,9 @@ async def update_deals_based_on_csv(file: UploadFile, db: Session, user_id: int,
                         try:
                             row[field] = int(row[field])
                         except ValueError:
-                            raise ValueError(f"Invalid integer value for {field}: '{row[field]}'")
+                            raise ValueError(
+                                f"Invalid integer value for {field}: '{row[field]}'"
+                            )
 
                 # Parse Decimal fields
                 for field in DECIMAL_FIELDS:
@@ -758,7 +776,9 @@ async def update_deals_based_on_csv(file: UploadFile, db: Session, user_id: int,
                         try:
                             row[field] = Decimal(row[field])
                         except Exception:
-                            raise ValueError(f"Invalid numeric value for {field}: '{row[field]}'")
+                            raise ValueError(
+                                f"Invalid numeric value for {field}: '{row[field]}'"
+                            )
 
                 # Parse Date fields (expected YYYY-MM-DD)
                 for field in DATE_FIELDS:
@@ -766,7 +786,9 @@ async def update_deals_based_on_csv(file: UploadFile, db: Session, user_id: int,
                         try:
                             row[field] = date.fromisoformat(row[field][:10])
                         except ValueError:
-                            raise ValueError(f"Invalid date for {field}: '{row[field]}'; expected YYYY-MM-DD")
+                            raise ValueError(
+                                f"Invalid date for {field}: '{row[field]}'; expected YYYY-MM-DD"
+                            )
 
                 # Parse Datetime fields
                 if row.get("deal_call_back_datetime"):
@@ -777,7 +799,9 @@ async def update_deals_based_on_csv(file: UploadFile, db: Session, user_id: int,
                     except ValueError:
                         try:
                             # Fallback if already ISO
-                            row["deal_call_back_datetime"] = datetime.fromisoformat(row["deal_call_back_datetime"])
+                            row["deal_call_back_datetime"] = datetime.fromisoformat(
+                                row["deal_call_back_datetime"]
+                            )
                         except ValueError:
                             raise ValueError(
                                 f"Invalid deal_call_back_datetime '{row['deal_call_back_datetime']}'; expected YYYY-MM-DD HH:MM"
@@ -791,13 +815,15 @@ async def update_deals_based_on_csv(file: UploadFile, db: Session, user_id: int,
                     if new_owner_id and int(new_owner_id) not in allowed_owner_ids:
                         raise HTTPException(
                             status_code=403,
-                            detail=f"Row {row_number}: You do not have permission to assign a deal to owner ID {new_owner_id}"
+                            detail=f"Row {row_number}: You do not have permission to assign a deal to owner ID {new_owner_id}",
                         )
 
                 # Validation based on if it's new or update
                 if is_new:
                     if not acc_id:
-                        raise ValueError("Parent ID (account_id) is required for new deals")
+                        raise ValueError(
+                            "Parent ID (account_id) is required for new deals"
+                        )
 
                     # Fetch account to verify it exists and get account_name
                     account = db.query(Account).filter(Account.id == acc_id).first()
@@ -816,10 +842,14 @@ async def update_deals_based_on_csv(file: UploadFile, db: Session, user_id: int,
                     if not existing_deal:
                         raise ValueError(f"Deal with ID {row['id']} not found")
                     if user_role == "manager":
-                        if existing_deal.deal_owner_id is not None and int(existing_deal.deal_owner_id) not in allowed_owner_ids:
+                        if (
+                            existing_deal.deal_owner_id is not None
+                            and int(existing_deal.deal_owner_id)
+                            not in allowed_owner_ids
+                        ):
                             raise HTTPException(
                                 status_code=403,
-                                detail=f"Row {row_number}: You do not have permission to update deal owned by user ID {existing_deal.deal_owner_id}"
+                                detail=f"Row {row_number}: You do not have permission to update deal owned by user ID {existing_deal.deal_owner_id}",
                             )
                     if acc_id:
                         # If account_id is provided, let's verify the account exists
@@ -839,23 +869,25 @@ async def update_deals_based_on_csv(file: UploadFile, db: Session, user_id: int,
         if not insertion_deals and not updation_deals:
             return JSONResponse(
                 status_code=200,
-                content=jsonable_encoder({
-                    "total_inserted": 0,
-                    "total_updated": 0,
-                    "row_errors": error_list,
-                }),
+                content=jsonable_encoder(
+                    {
+                        "total_inserted": 0,
+                        "total_updated": 0,
+                        "row_errors": error_list,
+                    }
+                ),
             )
 
-        db_result = update_and_insert_deals(
-            insertion_deals, updation_deals, db
-        )
+        db_result = update_and_insert_deals(insertion_deals, updation_deals, db)
         return JSONResponse(
             status_code=200,
-            content=jsonable_encoder({
-                "total_inserted": db_result["inserted"],
-                "total_updated": db_result["updated"],
-                "row_errors": error_list + db_result["failed"],
-            }),
+            content=jsonable_encoder(
+                {
+                    "total_inserted": db_result["inserted"],
+                    "total_updated": db_result["updated"],
+                    "row_errors": error_list + db_result["failed"],
+                }
+            ),
         )
 
     except HTTPException:
@@ -863,6 +895,7 @@ async def update_deals_based_on_csv(file: UploadFile, db: Session, user_id: int,
     except Exception as e:
         return JSONResponse(
             status_code=500,
-            content=jsonable_encoder({"detail": f"Processing error: {str(e)}", "row_errors": error_list}),
+            content=jsonable_encoder(
+                {"detail": f"Processing error: {e!s}", "row_errors": error_list}
+            ),
         )
-

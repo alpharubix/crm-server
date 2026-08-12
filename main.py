@@ -10,27 +10,25 @@ from fastapi.middleware.cors import CORSMiddleware
 load_dotenv(override=True)
 
 # Routers
+from src.database import Base, engine
 from src.routers import account as account_router
+from src.routers import account_task as account_task_router
 from src.routers import audit_log as audit_log_router
 from src.routers import contact as contact_router
 from src.routers import project as project_router
+from src.routers import project_log as project_log_router
 from src.routers import user as user_router
 from src.routers.authentication import authentication_router
 from src.routers.deal_documents import deal_docs_router
 from src.routers.deals import deals_router
 from src.routers.export_csv import export_csv_router
 from src.routers.hiring import candidate_router, jr_router
+from src.routers.invoicing_route import invoice_router
 from src.routers.notes import notes_router
 from src.routers.revenue import revenue_router
-from src.routers.tickets import tickets_router
 from src.routers.support_tickets import support_tickets_router
+from src.routers.tickets import tickets_router
 from src.routers.webhook import webhook_api_router
-from src.routers.invoicing_route import invoice_router
-from src.routers import project_log as project_log_router
-
-from src.routers import account_task as account_task_router
-from src.database import Base, engine
-import src.models.account_task
 
 # Ensure tables exist
 Base.metadata.create_all(bind=engine)
@@ -62,7 +60,6 @@ app.add_middleware(
 )
 
 
-
 # Include Routers
 app.include_router(account_router.router)
 app.include_router(account_task_router.router)
@@ -88,7 +85,6 @@ app.include_router(invoice_router)
 @app.get("/")
 def test():
     return {"message": "Hello World"}
-
 
 
 if __name__ == "__main__":

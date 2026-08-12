@@ -58,6 +58,7 @@ def create_account_task(db: Session, task_in: AccountTaskCreate, current_user_id
         )
 
     task = AccountTask(
+        company_id=1,
         module_name=task_in.module_name or "Account",
         account_id=task_in.account_id,
         task_type=task_in.task_type,
@@ -94,7 +95,10 @@ def bulk_create_account_tasks(db: Session, bulk_in: BulkAccountTaskCreate, curre
 
     created_tasks = []
 
-    accounts = db.query(Account).filter(Account.id.in_(bulk_in.account_ids)).all()
+    accounts = db.query(Account).filter(
+        Account.id.in_(bulk_in.account_ids),
+        or_(Account.company_id == 1, Account.company_id.is_(None))
+    ).all()
     account_map = {acc.id: acc for acc in accounts}
 
     now = datetime.now(timezone.utc)
@@ -106,6 +110,7 @@ def bulk_create_account_tasks(db: Session, bulk_in: BulkAccountTaskCreate, curre
             continue
 
         task = AccountTask(
+            company_id=1,
             module_name="Account",
             account_id=acc_id,
             task_type="Update Record",
@@ -168,7 +173,7 @@ def get_account_tasks(
     query = db.query(AccountTask).options(
         joinedload(AccountTask.account).joinedload(Account.owner),
         joinedload(AccountTask.assigned_to)
-    )
+    ).filter(or_(AccountTask.company_id == 1, AccountTask.company_id.is_(None)))
 
     effective_cb_date = cb_date_condition or (call_back_status if call_back_status != "all" else None)
     effective_cb_cond = cb_condition or "Is"
@@ -300,7 +305,10 @@ def get_account_task_by_id(db: Session, task_id: int, mongodb: Optional[Any] = N
     task = db.query(AccountTask).options(
         joinedload(AccountTask.account).joinedload(Account.owner),
         joinedload(AccountTask.assigned_to)
-    ).filter(AccountTask.id == task_id).first()
+    ).filter(
+        AccountTask.id == task_id,
+        or_(AccountTask.company_id == 1, AccountTask.company_id.is_(None))
+    ).first()
 
     if not task:
         raise HTTPException(
@@ -325,7 +333,10 @@ def get_account_task_by_id(db: Session, task_id: int, mongodb: Optional[Any] = N
     return task_dict
 
 def update_account_task(db: Session, task_id: int, task_in: AccountTaskUpdate, current_user_id: int):
-    task = db.query(AccountTask).filter(AccountTask.id == task_id).first()
+    task = db.query(AccountTask).filter(
+        AccountTask.id == task_id,
+        or_(AccountTask.company_id == 1, AccountTask.company_id.is_(None))
+    ).first()
     if not task:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -356,7 +367,10 @@ def update_account_task(db: Session, task_id: int, task_in: AccountTaskUpdate, c
     return task_to_dict(task)
 
 def delete_account_task(db: Session, task_id: int, current_user_id: int):
-    task = db.query(AccountTask).filter(AccountTask.id == task_id).first()
+    task = db.query(AccountTask).filter(
+        AccountTask.id == task_id,
+        or_(AccountTask.company_id == 1, AccountTask.company_id.is_(None))
+    ).first()
     if not task:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

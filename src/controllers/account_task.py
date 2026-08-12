@@ -12,6 +12,7 @@ from src.models.user import User
 from src.schemas.account_task import AccountTaskCreate, AccountTaskUpdate, BulkAccountTaskCreate
 from src.controllers.audit_log import log_action
 from src.controllers.notes import get_notes
+from src.controllers.auth import MANAGERID
 
 IST = ZoneInfo("Asia/Kolkata")
 
@@ -169,6 +170,8 @@ def get_account_tasks(
     cb_date_condition: Optional[str] = None,
     cb_from_date: Optional[str] = None,
     cb_to_date: Optional[str] = None,
+    user_id: Optional[int] = None,
+    user_role: Optional[str] = None,
 ):
     query = db.query(AccountTask).options(
         joinedload(AccountTask.account).joinedload(Account.owner),
@@ -178,13 +181,46 @@ def get_account_tasks(
     effective_cb_date = cb_date_condition or (call_back_status if call_back_status != "all" else None)
     effective_cb_cond = cb_condition or "Is"
 
+    bypass_ids = getattr(MANAGERID, "BYPASS_USER_IDS", set())
+    is_non_admin = bool(
+        user_role and str(user_role).lower() not in ("super_admin", "admin") and (user_id is None or int(user_id) not in bypass_ids)
+    )
+
     needs_account_join = bool(
         account_owner_id or source_type or account_stage or business_status or waba_interested or is_priority_account
-        or effective_cb_cond or cb_users or effective_cb_date or cb_from_date or cb_to_date or search
+        or effective_cb_cond or cb_users or effective_cb_date or cb_from_date or cb_to_date or search or is_non_admin
     )
 
     if needs_account_join:
         query = query.join(AccountTask.account)
+
+    # Role-based visibility filtering
+    if user_id is not None and user_role:
+        uid = int(user_id)
+        role = str(user_role).lower()
+        if role in ("super_admin", "admin") or uid in bypass_ids:
+            pass
+        elif role == "manager":
+            mgr_map = getattr(MANAGERID, "MANAGER_EXECUTIVES_MAP", {})
+            if not mgr_map and callable(MANAGERID):
+                try:
+                    mgr_map = MANAGERID().MANAGER_EXECUTIVES_MAP
+                except Exception:
+                    pass
+            allowed_ids = [uid] + [int(x) for x in mgr_map.get(uid, []) if str(x).isdigit()]
+            query = query.filter(
+                or_(
+                    Account.account_owner_id.in_(allowed_ids),
+                    AccountTask.assigned_to_id.in_(allowed_ids),
+                )
+            )
+        else:
+            query = query.filter(
+                or_(
+                    Account.account_owner_id == uid,
+                    AccountTask.assigned_to_id == uid,
+                )
+            )
 
     if account_id:
         query = query.filter(AccountTask.account_id == account_id)
@@ -301,7 +337,43 @@ def get_account_tasks(
         },
     }
 
-def get_account_task_by_id(db: Session, task_id: int, mongodb: Optional[Any] = None):
+def check_task_access(task: AccountTask, user_id: Optional[int], user_role: Optional[str]):
+    if not user_id or not user_role:
+        return
+    uid = int(user_id)
+    role = str(user_role).lower()
+    bypass_ids = getattr(MANAGERID, "BYPASS_USER_IDS", set())
+    if role in ("super_admin", "admin") or uid in bypass_ids:
+        return
+
+    allowed_ids = []
+    if role == "manager":
+        mgr_map = getattr(MANAGERID, "MANAGER_EXECUTIVES_MAP", {})
+        if not mgr_map and callable(MANAGERID):
+            try:
+                mgr_map = MANAGERID().MANAGER_EXECUTIVES_MAP
+            except Exception:
+                pass
+        allowed_ids = [uid] + [int(x) for x in mgr_map.get(uid, []) if str(x).isdigit()]
+    else:
+        allowed_ids = [uid]
+
+    acc_owner_id = task.account.account_owner_id if task.account else None
+    assigned_id = task.assigned_to_id
+
+    if acc_owner_id not in allowed_ids and assigned_id not in allowed_ids:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You do not have permission to access this account task",
+        )
+
+def get_account_task_by_id(
+    db: Session,
+    task_id: int,
+    mongodb: Optional[Any] = None,
+    user_id: Optional[int] = None,
+    user_role: Optional[str] = None,
+):
     task = db.query(AccountTask).options(
         joinedload(AccountTask.account).joinedload(Account.owner),
         joinedload(AccountTask.assigned_to)
@@ -315,6 +387,8 @@ def get_account_task_by_id(db: Session, task_id: int, mongodb: Optional[Any] = N
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Account Task with ID {task_id} not found",
         )
+    
+    check_task_access(task, user_id, user_role)
     
     task_dict = task_to_dict(task)
     if mongodb is not None:
@@ -332,8 +406,16 @@ def get_account_task_by_id(db: Session, task_id: int, mongodb: Optional[Any] = N
 
     return task_dict
 
-def update_account_task(db: Session, task_id: int, task_in: AccountTaskUpdate, current_user_id: int):
-    task = db.query(AccountTask).filter(
+def update_account_task(
+    db: Session,
+    task_id: int,
+    task_in: AccountTaskUpdate,
+    current_user_id: int,
+    user_role: Optional[str] = None,
+):
+    task = db.query(AccountTask).options(
+        joinedload(AccountTask.account)
+    ).filter(
         AccountTask.id == task_id,
         or_(AccountTask.company_id == 1, AccountTask.company_id.is_(None))
     ).first()
@@ -342,6 +424,8 @@ def update_account_task(db: Session, task_id: int, task_in: AccountTaskUpdate, c
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Account Task with ID {task_id} not found",
         )
+
+    check_task_access(task, current_user_id, user_role)
 
     update_data = task_in.model_dump(exclude_unset=True)
     for field, val in update_data.items():
@@ -357,7 +441,7 @@ def update_account_task(db: Session, task_id: int, task_in: AccountTaskUpdate, c
     log_action(
         db,
         current_user_id,
-        "USER",
+        user_role or "USER",
         "UPDATED",
         "AccountTask",
         task.id,
@@ -366,8 +450,15 @@ def update_account_task(db: Session, task_id: int, task_in: AccountTaskUpdate, c
 
     return task_to_dict(task)
 
-def delete_account_task(db: Session, task_id: int, current_user_id: int):
-    task = db.query(AccountTask).filter(
+def delete_account_task(
+    db: Session,
+    task_id: int,
+    current_user_id: int,
+    user_role: Optional[str] = None,
+):
+    task = db.query(AccountTask).options(
+        joinedload(AccountTask.account)
+    ).filter(
         AccountTask.id == task_id,
         or_(AccountTask.company_id == 1, AccountTask.company_id.is_(None))
     ).first()
@@ -377,13 +468,15 @@ def delete_account_task(db: Session, task_id: int, current_user_id: int):
             detail=f"Account Task with ID {task_id} not found",
         )
 
+    check_task_access(task, current_user_id, user_role)
+
     db.delete(task)
     db.commit()
 
     log_action(
         db,
         current_user_id,
-        "USER",
+        user_role or "USER",
         "DELETED",
         "AccountTask",
         task_id,

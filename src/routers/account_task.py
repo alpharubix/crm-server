@@ -67,6 +67,8 @@ def list_tasks(
     cb_to_date: Optional[str] = Query(None),
     db: Session = Depends(get_db),
 ):
+    user_id = getattr(request.state, "user_id", None)
+    user_role = getattr(request.state, "role", None)
     return controller.get_account_tasks(
         db=db,
         page=page,
@@ -88,6 +90,8 @@ def list_tasks(
         cb_date_condition=cb_date_condition,
         cb_from_date=cb_from_date,
         cb_to_date=cb_to_date,
+        user_id=int(user_id) if user_id and str(user_id).isdigit() else user_id,
+        user_role=user_role,
     )
 
 @router.get(
@@ -95,11 +99,20 @@ def list_tasks(
     response_model=dict,
 )
 def get_task(
+    request: Request,
     task_id: int,
     db: Session = Depends(get_db),
     mongodb = Depends(get_mongodb),
 ):
-    return controller.get_account_task_by_id(db=db, task_id=task_id, mongodb=mongodb)
+    user_id = getattr(request.state, "user_id", None)
+    user_role = getattr(request.state, "role", None)
+    return controller.get_account_task_by_id(
+        db=db,
+        task_id=task_id,
+        mongodb=mongodb,
+        user_id=int(user_id) if user_id and str(user_id).isdigit() else user_id,
+        user_role=user_role,
+    )
 
 @router.put(
     "/account-tasks/{task_id}",
@@ -112,8 +125,13 @@ def update_task(
     db: Session = Depends(get_db),
 ):
     current_user_id = getattr(request.state, "user_id", 1)
+    user_role = getattr(request.state, "role", None)
     return controller.update_account_task(
-        db=db, task_id=task_id, task_in=task_in, current_user_id=int(current_user_id)
+        db=db,
+        task_id=task_id,
+        task_in=task_in,
+        current_user_id=int(current_user_id),
+        user_role=user_role,
     )
 
 @router.delete(
@@ -126,8 +144,12 @@ def delete_task(
     db: Session = Depends(get_db),
 ):
     current_user_id = getattr(request.state, "user_id", 1)
+    user_role = getattr(request.state, "role", None)
     return controller.delete_account_task(
-        db=db, task_id=task_id, current_user_id=int(current_user_id)
+        db=db,
+        task_id=task_id,
+        current_user_id=int(current_user_id),
+        user_role=user_role,
     )
 
 @router.get(
@@ -135,14 +157,19 @@ def delete_task(
     response_model=AccountTaskListResponse,
 )
 def list_tasks_for_account(
+    request: Request,
     account_id: int,
     page: int = Query(1, ge=1),
     page_size: int = Query(10, ge=1, le=100),
     db: Session = Depends(get_db),
 ):
+    user_id = getattr(request.state, "user_id", None)
+    user_role = getattr(request.state, "role", None)
     return controller.get_account_tasks(
         db=db,
         page=page,
         page_size=page_size,
         account_id=account_id,
+        user_id=int(user_id) if user_id and str(user_id).isdigit() else user_id,
+        user_role=user_role,
     )

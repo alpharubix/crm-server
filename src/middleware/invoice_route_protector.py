@@ -4,7 +4,6 @@ from starlette.responses import JSONResponse
 
 async def authorize_invoice_route_user(request,call_next):
     try:
-        print(request)
         if request.url.path.startswith("/invoice") and request.state.role not in ("super_admin", "admin"):
             return JSONResponse(status_code=status.HTTP_403_FORBIDDEN, content={"detail": "You are not authorized to view this resource"})
         else:

@@ -88,6 +88,8 @@ def list_tasks(
     assigned_date_condition: Optional[str] = Query(None),
     assigned_from_date: Optional[str] = Query(None),
     assigned_to_date: Optional[str] = Query(None),
+    created_from_date: Optional[str] = Query(None),
+    created_to_date: Optional[str] = Query(None),
     db: Session = Depends(get_db),
 ):
     user_id = getattr(request.state, "user_id", None)
@@ -116,6 +118,8 @@ def list_tasks(
         assigned_date_condition=assigned_date_condition,
         assigned_from_date=assigned_from_date,
         assigned_to_date=assigned_to_date,
+        created_from_date=created_from_date,
+        created_to_date=created_to_date,
         user_id=int(user_id) if user_id and str(user_id).isdigit() else user_id,
         user_role=user_role,
     )

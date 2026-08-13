@@ -248,6 +248,8 @@ def get_account_tasks(
     assigned_date_condition: str | None = None,
     assigned_from_date: str | None = None,
     assigned_to_date: str | None = None,
+    created_from_date: str | None = None,
+    created_to_date: str | None = None,
     user_id: int | None = None,
     user_role: str | None = None,
 ):
@@ -481,12 +483,36 @@ def get_account_tasks(
         except Exception:
             pass
 
+    # Created Date Filter Section (IST calculations)
+    if created_from_date or created_to_date:
+        try:
+            if created_from_date and created_to_date:
+                f_dt = datetime.strptime(created_from_date, "%Y-%m-%d").replace(
+                    tzinfo=IST
+                )
+                t_dt = datetime.strptime(created_to_date, "%Y-%m-%d").replace(
+                    hour=23, minute=59, second=59, tzinfo=IST
+                )
+                query = query.filter(AccountTask.created_at.between(f_dt, t_dt))
+            elif created_from_date:
+                f_dt = datetime.strptime(created_from_date, "%Y-%m-%d").replace(
+                    tzinfo=IST
+                )
+                query = query.filter(AccountTask.created_at >= f_dt)
+            elif created_to_date:
+                t_dt = datetime.strptime(created_to_date, "%Y-%m-%d").replace(
+                    hour=23, minute=59, second=59, tzinfo=IST
+                )
+                query = query.filter(AccountTask.created_at <= t_dt)
+        except Exception:
+            pass
+
     total_records = query.count()
     total_pages = math.ceil(total_records / page_size) if page_size > 0 else 1
 
     offset = (page - 1) * page_size
     tasks = (
-        query.order_by(desc(AccountTask.created_at))
+        query.order_by(desc(AccountTask.updated_at))
         .offset(offset)
         .limit(page_size)
         .all()

@@ -31,7 +31,15 @@ def task_to_dict(
     # Check if task is overdue based on due date
     effective_status = task.computed_task_status
 
-    assigned_id = task.assigned_to_id or task.account_owner_id
+    acc_owner_id = task.account_owner_id
+    if not acc_owner_id and task.account:
+        acc_owner_id = task.account.account_owner_id
+
+    acc_owner_name = task.account_owner
+    if not acc_owner_name and task.account and task.account.owner:
+        acc_owner_name = task.account.owner.full_name or task.account.owner.email
+
+    assigned_id = task.assigned_to_id or acc_owner_id
     assigned_name = None
     if task.assigned_to:
         assigned_name = task.assigned_to.full_name or task.assigned_to.email
@@ -70,9 +78,9 @@ def task_to_dict(
         "id": str(task.id) if task.id is not None else None,
         "module_name": task.module_name or "Account",
         "account_id": str(task.account_id) if task.account_id is not None else None,
-        "account_name": task.account_name,
-        "account_owner": task.account_owner,
-        "account_owner_id": str(task.account_owner_id) if task.account_owner_id is not None else None,
+        "account_name": task.account_name or (task.account.account_name if task.account else None),
+        "account_owner": acc_owner_name,
+        "account_owner_id": str(acc_owner_id) if acc_owner_id is not None else None,
         "account_status": task.account_status,
         "account_stage": task.account_stage,
         "call_back_date_status": task.call_back_date_status,
@@ -113,6 +121,7 @@ def create_account_task(db: Session, task_in: AccountTaskCreate, current_user_id
         company_id=1,
         module_name=task_in.module_name or "Account",
         account_id=account.id,
+        account_owner_id=account.account_owner_id,
         task_type=task_in.task_type,
         task_description=task_in.task_description or "",
         task_assigned_date_time=task_in.task_assigned_date_time,
@@ -188,6 +197,7 @@ def bulk_create_account_tasks(
             company_id=1,
             module_name="Account",
             account_id=account.id,
+            account_owner_id=account.account_owner_id,
             task_type="Update Record",
             task_description=bulk_in.task_description or "",
             task_assigned_date_time=assigned_dt,
@@ -681,15 +691,36 @@ def update_account_task(
                 detail="Executives are only permitted to mark tasks as completed.",
             )
 
-    # Account Owner restriction for marking task as completed
+    # Account Owner / Manager / Assignee restriction for marking task as completed
     new_requested_status = update_data.get("task_status")
     if new_requested_status == "Completed" and task.task_status != "Completed":
-        acc_owner_id = task.account.account_owner_id if task.account else None
-        if not acc_owner_id or str(current_user_id) != str(acc_owner_id):
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Only the Account Owner can mark this task as completed.",
-            )
+        role = str(user_role).lower() if user_role else ""
+        if role not in ("super_admin", "admin", "manager"):
+            user_ids = {str(current_user_id)}
+            try:
+                u = db.query(User).filter(or_(User.id == current_user_id, User.zuid == str(current_user_id))).first()
+                if u:
+                    user_ids.add(str(u.id))
+                    if getattr(u, "zuid", None):
+                        user_ids.add(str(u.zuid))
+            except Exception:
+                pass
+
+            allowed_ids = set()
+            if task.account_owner_id:
+                allowed_ids.add(str(task.account_owner_id))
+            if task.account and task.account.account_owner_id:
+                allowed_ids.add(str(task.account.account_owner_id))
+            if task.assigned_to_id:
+                allowed_ids.add(str(task.assigned_to_id))
+            if task.created_by_id:
+                allowed_ids.add(str(task.created_by_id))
+
+            if not user_ids.intersection(allowed_ids):
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Only the Account Owner, Assigned User, or Manager/Admin can mark this task as completed.",
+                )
 
     old_status = task.task_status
     for field, val in update_data.items():
@@ -766,18 +797,39 @@ def bulk_update_task_status(
                 detail=f"Mass update task status is allowed only for tasks created by you. (Unauthorized for task IDs: {unauthorized_tasks})",
             )
 
-    # Permission check: Only Account Owner can mark tasks as completed
+    # Permission check for marking tasks as completed
     if new_status == "Completed":
-        unauthorized_completion = [
-            t.id
-            for t in tasks
-            if not t.account or str(t.account.account_owner_id) != str(current_user_id)
-        ]
-        if unauthorized_completion:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"Only the Account Owner can mark tasks as completed. (Unauthorized for task IDs: {unauthorized_completion})",
-            )
+        role = str(current_role).lower() if current_role else ""
+        if role not in ("super_admin", "admin", "manager"):
+            user_ids = {str(current_user_id)}
+            try:
+                u = db.query(User).filter(or_(User.id == current_user_id, User.zuid == str(current_user_id))).first()
+                if u:
+                    user_ids.add(str(u.id))
+                    if getattr(u, "zuid", None):
+                        user_ids.add(str(u.zuid))
+            except Exception:
+                pass
+
+            unauthorized_completion = []
+            for t in tasks:
+                t_allowed = set()
+                if t.account_owner_id:
+                    t_allowed.add(str(t.account_owner_id))
+                if t.account and t.account.account_owner_id:
+                    t_allowed.add(str(t.account.account_owner_id))
+                if t.assigned_to_id:
+                    t_allowed.add(str(t.assigned_to_id))
+                if t.created_by_id:
+                    t_allowed.add(str(t.created_by_id))
+                if not user_ids.intersection(t_allowed):
+                    unauthorized_completion.append(t.id)
+
+            if unauthorized_completion:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail=f"Only the Account Owner, Assigned User, or Manager/Admin can mark tasks as completed. (Unauthorized for task IDs: {unauthorized_completion})",
+                )
 
     updated_count = 0
     from src.controllers.Background_threads import BackgroundThreadPool

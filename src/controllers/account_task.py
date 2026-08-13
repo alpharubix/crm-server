@@ -92,7 +92,17 @@ def task_to_dict(
 
 
 def create_account_task(db: Session, task_in: AccountTaskCreate, current_user_id: int):
-    account = db.query(Account).filter(Account.id == task_in.account_id).first()
+    acc_id_int = None
+    try:
+        acc_id_int = int(task_in.account_id)
+    except Exception:
+        pass
+
+    account = (
+        db.query(Account)
+        .filter(or_(Account.id == task_in.account_id, Account.id == acc_id_int))
+        .first()
+    )
     if not account:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -102,10 +112,10 @@ def create_account_task(db: Session, task_in: AccountTaskCreate, current_user_id
     task = AccountTask(
         company_id=1,
         module_name=task_in.module_name or "Account",
-        account_id=task_in.account_id,
+        account_id=account.id,
         task_type=task_in.task_type,
         task_description=task_in.task_description or "",
-        task_assigned_date_time=task_in.task_assigned_date_time or datetime.now(UTC),
+        task_assigned_date_time=task_in.task_assigned_date_time,
         task_due_date_time=task_in.task_due_date_time,
         task_status=task_in.task_status or "Unassigned",
         assigned_to_id=task_in.assigned_to_id,
@@ -142,30 +152,42 @@ def bulk_create_account_tasks(
             detail="No account IDs provided for bulk creation",
         )
 
+    int_account_ids = []
+    for aid in bulk_in.account_ids:
+        try:
+            int_account_ids.append(int(aid))
+        except Exception:
+            pass
+
     created_tasks = []
 
     accounts = (
         db.query(Account)
         .filter(
-            Account.id.in_(bulk_in.account_ids),
+            or_(Account.id.in_(bulk_in.account_ids), Account.id.in_(int_account_ids)),
             or_(Account.company_id == 1, Account.company_id.is_(None)),
         )
         .all()
     )
-    account_map = {acc.id: acc for acc in accounts}
+    account_map_int = {acc.id: acc for acc in accounts}
+    account_map_str = {str(acc.id): acc for acc in accounts}
 
-    now = datetime.now(UTC)
-    assigned_dt = bulk_in.task_assigned_date_time or now
+    assigned_dt = bulk_in.task_assigned_date_time
 
     for acc_id in bulk_in.account_ids:
-        account = account_map.get(acc_id)
+        account = account_map_str.get(str(acc_id)) or account_map_int.get(acc_id)
+        if not account:
+            try:
+                account = account_map_int.get(int(acc_id))
+            except Exception:
+                pass
         if not account:
             continue
 
         task = AccountTask(
             company_id=1,
             module_name="Account",
-            account_id=acc_id,
+            account_id=account.id,
             task_type="Update Record",
             task_description=bulk_in.task_description or "",
             task_assigned_date_time=assigned_dt,

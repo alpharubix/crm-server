@@ -197,7 +197,6 @@ def bulk_create_account_tasks(
             company_id=1,
             module_name="Account",
             account_id=account.id,
-            account_owner_id=account.account_owner_id,
             task_type="Update Record",
             task_description=bulk_in.task_description or "",
             task_assigned_date_time=assigned_dt,

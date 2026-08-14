@@ -687,39 +687,35 @@ def update_account_task(
         if non_status_changes:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail="Executives are only permitted to mark tasks as completed.",
+                detail="Account Owners are only permitted to update task status.",
             )
 
-    # Account Owner / Manager / Assignee restriction for marking task as completed
     new_requested_status = update_data.get("task_status")
-    if new_requested_status == "Completed" and task.task_status != "Completed":
-        role = str(user_role).lower() if user_role else ""
-        if role not in ("super_admin", "admin", "manager"):
-            user_ids = {str(current_user_id)}
-            try:
-                u = db.query(User).filter(or_(User.id == current_user_id, User.zuid == str(current_user_id))).first()
-                if u:
-                    user_ids.add(str(u.id))
-                    if getattr(u, "zuid", None):
-                        user_ids.add(str(u.zuid))
-            except Exception:
-                pass
+    if new_requested_status:
+        user_ids = {str(current_user_id)}
+        try:
+            u = db.query(User).filter(or_(User.id == current_user_id, User.zuid == str(current_user_id))).first()
+            if u:
+                user_ids.add(str(u.id))
+                if getattr(u, "zuid", None):
+                    user_ids.add(str(u.zuid))
+        except Exception:
+            pass
 
-            allowed_ids = set()
-            if task.account_owner_id:
-                allowed_ids.add(str(task.account_owner_id))
-            if task.account and task.account.account_owner_id:
-                allowed_ids.add(str(task.account.account_owner_id))
-            if task.assigned_to_id:
-                allowed_ids.add(str(task.assigned_to_id))
-            if task.created_by_id:
-                allowed_ids.add(str(task.created_by_id))
+        allowed_owner_ids = set()
+        if task.account_owner_id:
+            allowed_owner_ids.add(str(task.account_owner_id))
+        if task.account and task.account.account_owner_id:
+            allowed_owner_ids.add(str(task.account.account_owner_id))
+        if task.assigned_to_id:
+            allowed_owner_ids.add(str(task.assigned_to_id))
 
-            if not user_ids.intersection(allowed_ids):
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail="Only the Account Owner, Assigned User, or Manager/Admin can mark this task as completed.",
-                )
+        is_owner = bool(user_ids.intersection(allowed_owner_ids))
+        if is_owner and new_requested_status not in ("Pending", "In Progress", "Completed", "Verified"):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Account Owners can only set task status to Pending, In Progress, Completed, or Verified.",
+            )
 
     old_status = task.task_status
     for field, val in update_data.items():

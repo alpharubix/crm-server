@@ -4,6 +4,7 @@ from typing import Optional
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from sqlalchemy import cast, String, or_
 from sqlalchemy.orm import Session
 
 from src.controllers.Background_threads import BackgroundThreadPool
@@ -162,11 +163,14 @@ def get_projects(
     request: Request,
     page: int = 1,
     search: Optional[str] = None,
+    project_id: Optional[str] = None,
     assignee_id: Optional[int] = None,
+    created_by: Optional[int] = None,
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
     project_type: Optional[str] = None,
     project_module: Optional[str] = None,
+    priority: Optional[str] = None,
     status: Optional[str] = None,
     db: Session = Depends(get_db),
 ):
@@ -192,18 +196,58 @@ def get_projects(
         )
 
     # 2. Apply Dynamic Filters
+    if project_id:
+        p_id_str = str(project_id).strip()
+        if p_id_str.isdigit():
+            query = query.filter(
+                or_(
+                    Project.id == int(p_id_str),
+                    cast(Project.id, String).ilike(f"%{p_id_str}%"),
+                )
+            )
+        else:
+            query = query.filter(cast(Project.id, String).ilike(f"%{p_id_str}%"))
+
     if search:
-        query = query.filter(Project.name.ilike(f"%{search}%"))
+        s_str = search.strip()
+        search_term = f"%{s_str}%"
+        if s_str.isdigit():
+            query = query.filter(
+                or_(
+                    Project.name.ilike(search_term),
+                    Project.id == int(s_str),
+                    cast(Project.id, String).ilike(search_term),
+                )
+            )
+        else:
+            query = query.filter(
+                or_(
+                    Project.name.ilike(search_term),
+                    cast(Project.id, String).ilike(search_term),
+                )
+            )
+
     if assignee_id:
         query = query.filter(Project.actioner_ids.any(assignee_id))
+
+    if created_by:
+        query = query.filter(Project.created_by == created_by)
+
     if start_date:
         query = query.filter(Project.start_date >= parse_datetime(start_date))
+
     if end_date:
         query = query.filter(Project.end_date <= parse_datetime(end_date))
+
     if project_type:
         query = query.filter(Project.project_type == project_type)
+
     if project_module:
         query = query.filter(Project.project_module == project_module)
+
+    if priority:
+        query = query.filter(Project.priority == priority)
+
     if status:
         query = query.filter(Project.status == status)
 

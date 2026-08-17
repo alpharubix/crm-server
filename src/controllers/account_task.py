@@ -74,6 +74,16 @@ def task_to_dict(
             except Exception:
                 pass
 
+    call_back_dt = None
+    if task.account and getattr(task.account, 'call_back_date_time', None):
+        cb = task.account.call_back_date_time
+        call_back_dt = cb.isoformat() if hasattr(cb, 'isoformat') else str(cb)
+
+    acc_assigned_dt = None
+    if task.account and getattr(task.account, 'assignment_date', None):
+        ad = task.account.assignment_date
+        acc_assigned_dt = ad.isoformat() if hasattr(ad, 'isoformat') else str(ad)
+
     return {
         "id": str(task.id) if task.id is not None else None,
         "module_name": task.module_name or "Account",
@@ -81,9 +91,11 @@ def task_to_dict(
         "account_name": task.account_name or (task.account.account_name if task.account else None),
         "account_owner": acc_owner_name,
         "account_owner_id": str(acc_owner_id) if acc_owner_id is not None else None,
-        "account_status": task.account_status,
-        "account_stage": task.account_stage,
+        "account_status": task.account_status or (task.account.account_status if task.account else None),
+        "account_stage": task.account_stage or (task.account.account_stage if task.account else None),
         "call_back_date_status": task.call_back_date_status,
+        "call_back_date_time": call_back_dt,
+        "account_assigned_date_time": acc_assigned_dt,
         "task_type": task.task_type,
         "task_description": task.task_description,
         "task_assigned_date_time": task.task_assigned_date_time,

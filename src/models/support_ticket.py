@@ -5,6 +5,7 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     BIGINT,
+    Integer,
     func
 )
 from sqlalchemy.orm import relationship
@@ -12,9 +13,10 @@ from src.database import Base
 
 
 class SupportTicket(Base):
-    __tablename__ = "support_tickets"
+    __tablename__ = "support_tickets_merged"
 
     id = Column(BIGINT, primary_key=True, autoincrement=True)
+    company_id = Column(Integer, default=1, nullable=False, index=True)
     ticket_id = Column(String(50), unique=True, nullable=False, index=True)
     user_id = Column(BIGINT, ForeignKey("users.id"), nullable=False, index=True)
     title = Column(String(255), nullable=False)

@@ -90,12 +90,18 @@ def list_tasks(
     assigned_to_date: Optional[str] = Query(None),
     created_from_date: Optional[str] = Query(None),
     created_to_date: Optional[str] = Query(None),
+    assignment_from_date: Optional[str] = Query(None),
+    assignment_to_date: Optional[str] = Query(None),
+    note_from_date: Optional[str] = Query(None),
+    note_to_date: Optional[str] = Query(None),
     db: Session = Depends(get_db),
+    mongodb=Depends(get_mongodb),
 ):
     user_id = getattr(request.state, "user_id", None)
     user_role = getattr(request.state, "role", None)
     return controller.get_account_tasks(
         db=db,
+        mongodb=mongodb,
         page=page,
         page_size=page_size,
         account_id=account_id,
@@ -120,6 +126,10 @@ def list_tasks(
         assigned_to_date=assigned_to_date,
         created_from_date=created_from_date,
         created_to_date=created_to_date,
+        assignment_from_date=assignment_from_date,
+        assignment_to_date=assignment_to_date,
+        note_from_date=note_from_date,
+        note_to_date=note_to_date,
         user_id=int(user_id) if user_id and str(user_id).isdigit() else user_id,
         user_role=user_role,
     )

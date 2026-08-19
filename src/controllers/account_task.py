@@ -271,8 +271,13 @@ def get_account_tasks(
     assigned_to_date: str | None = None,
     created_from_date: str | None = None,
     created_to_date: str | None = None,
+    assignment_from_date: str | None = None,
+    assignment_to_date: str | None = None,
+    note_from_date: str | None = None,
+    note_to_date: str | None = None,
     user_id: int | None = None,
     user_role: str | None = None,
+    mongodb: Any | None = None,
 ):
     query = (
         db.query(AccountTask)
@@ -527,6 +532,80 @@ def get_account_tasks(
                 query = query.filter(AccountTask.created_at <= t_dt)
         except Exception:
             pass
+
+    # Account Assignment Date Filter Section (Account.assignment_date)
+    if assignment_from_date or assignment_to_date:
+        if not needs_account_join:
+            query = query.join(AccountTask.account)
+        try:
+            if assignment_from_date and assignment_to_date:
+                f_dt = datetime.strptime(assignment_from_date, "%Y-%m-%d").replace(tzinfo=IST)
+                t_dt = datetime.strptime(assignment_to_date, "%Y-%m-%d").replace(
+                    hour=23, minute=59, second=59, tzinfo=IST
+                )
+                query = query.filter(Account.assignment_date.between(f_dt, t_dt))
+            elif assignment_from_date:
+                f_dt = datetime.strptime(assignment_from_date, "%Y-%m-%d").replace(tzinfo=IST)
+                query = query.filter(Account.assignment_date >= f_dt)
+            elif assignment_to_date:
+                t_dt = datetime.strptime(assignment_to_date, "%Y-%m-%d").replace(
+                    hour=23, minute=59, second=59, tzinfo=IST
+                )
+                query = query.filter(Account.assignment_date <= t_dt)
+        except Exception:
+            pass
+
+    # Last Updated Note Date Filter Section
+    if mongodb is not None and (note_from_date or note_to_date):
+        try:
+            notes_coll = mongodb["Notes"]
+            module_query = {"$in": ["Account_Tasks", "AccountTask", "AccountTasks", "Account Task", "account_task", "account_tasks"]}
+
+            date_conds = []
+            f_dt = datetime.strptime(note_from_date, "%Y-%m-%d").replace(hour=0, minute=0, second=0) if note_from_date else None
+            t_dt = datetime.strptime(note_to_date, "%Y-%m-%d").replace(hour=23, minute=59, second=59) if note_to_date else None
+
+            f_str = f"{note_from_date}T00:00:00" if note_from_date else None
+            t_str = f"{note_to_date}T23:59:59.999999" if note_to_date else None
+
+            for field in ["Modified_Time", "Created_Time", "modified_time", "created_time"]:
+                if f_str and t_str:
+                    date_conds.append({field: {"$gte": f_str, "$lte": t_str}})
+                    if f_dt and t_dt:
+                        date_conds.append({field: {"$gte": f_dt, "$lte": t_dt}})
+                elif f_str:
+                    date_conds.append({field: {"$gte": f_str}})
+                    if f_dt:
+                        date_conds.append({field: {"$gte": f_dt}})
+                elif t_str:
+                    date_conds.append({field: {"$lte": t_str}})
+                    if t_dt:
+                        date_conds.append({field: {"$lte": t_dt}})
+
+            n_filter = {
+                "$and": [
+                    {"$or": [{"module": module_query}, {"Parent_Id.module": module_query}]},
+                    {"$or": date_conds} if date_conds else {}
+                ]
+            }
+
+            matching_notes = notes_coll.find(n_filter, {"Parent_Id": 1, "parent_id": 1, "_id": 0})
+            task_ids_from_notes = set()
+
+            for doc in matching_notes:
+                p_id = doc.get("Parent_Id") or doc.get("parent_id")
+                target_id = None
+                if isinstance(p_id, dict):
+                    target_id = p_id.get("id")
+                elif isinstance(p_id, (int, str)):
+                    target_id = p_id
+
+                if target_id and str(target_id).isdigit():
+                    task_ids_from_notes.add(int(target_id))
+
+            query = query.filter(AccountTask.id.in_(list(task_ids_from_notes) if task_ids_from_notes else [-1]))
+        except Exception as e:
+            logging.error(f"Failed to query notes for account task note date filter: {e}")
 
     total_records = query.count()
     total_pages = math.ceil(total_records / page_size) if page_size > 0 else 1

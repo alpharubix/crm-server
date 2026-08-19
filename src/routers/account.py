@@ -57,6 +57,10 @@ async def list_all(
     module: str | None = None,
     from_date: str | None = None,
     to_date: str | None = None,
+    assignment_from_date: str | None = None,
+    assignment_to_date: str | None = None,
+    note_from_date: str | None = None,
+    note_to_date: str | None = None,
 ):
     return await repo.get_all_accounts(
         request=request,
@@ -86,6 +90,10 @@ async def list_all(
         module=module,
         from_date=from_date,
         to_date=to_date,
+        assignment_from_date=assignment_from_date,
+        assignment_to_date=assignment_to_date,
+        note_from_date=note_from_date,
+        note_to_date=note_to_date,
     )
 
 

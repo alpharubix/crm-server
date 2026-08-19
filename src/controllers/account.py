@@ -344,6 +344,10 @@ async def get_all_accounts(
     cb_date_condition: str | None = None,
     cb_from_date: str | None = None,
     cb_to_date: str | None = None,
+    assignment_from_date: str | None = None,
+    assignment_to_date: str | None = None,
+    note_from_date: str | None = None,
+    note_to_date: str | None = None,
 ):
     MANAGER_EXECUTIVES_MAP = MANAGERID().MANAGER_EXECUTIVES_MAP
 
@@ -519,6 +523,98 @@ async def get_all_accounts(
         ]
         if bs_list:
             filters.append(Account.business_status.in_(bs_list))
+
+    # Created Date (from_date / to_date) Filter Section
+    if not module and (from_date or to_date):
+        try:
+            if from_date and to_date:
+                f_dt = datetime.strptime(from_date, "%Y-%m-%d").replace(tzinfo=IST)
+                t_dt = datetime.strptime(to_date, "%Y-%m-%d").replace(
+                    hour=23, minute=59, second=59, tzinfo=IST
+                )
+                filters.append(Account.created_time.between(f_dt, t_dt))
+            elif from_date:
+                f_dt = datetime.strptime(from_date, "%Y-%m-%d").replace(tzinfo=IST)
+                filters.append(Account.created_time >= f_dt)
+            elif to_date:
+                t_dt = datetime.strptime(to_date, "%Y-%m-%d").replace(
+                    hour=23, minute=59, second=59, tzinfo=IST
+                )
+                filters.append(Account.created_time <= t_dt)
+        except Exception:
+            pass
+
+    # Account Assignment Date Filter Section
+    if assignment_from_date or assignment_to_date:
+        try:
+            if assignment_from_date and assignment_to_date:
+                f_dt = datetime.strptime(assignment_from_date, "%Y-%m-%d").replace(tzinfo=IST)
+                t_dt = datetime.strptime(assignment_to_date, "%Y-%m-%d").replace(
+                    hour=23, minute=59, second=59, tzinfo=IST
+                )
+                filters.append(Account.assignment_date.between(f_dt, t_dt))
+            elif assignment_from_date:
+                f_dt = datetime.strptime(assignment_from_date, "%Y-%m-%d").replace(tzinfo=IST)
+                filters.append(Account.assignment_date >= f_dt)
+            elif assignment_to_date:
+                t_dt = datetime.strptime(assignment_to_date, "%Y-%m-%d").replace(
+                    hour=23, minute=59, second=59, tzinfo=IST
+                )
+                filters.append(Account.assignment_date <= t_dt)
+        except Exception:
+            pass
+
+    # Last Updated Note Date Filter Section
+    if mongodb is not None and (note_from_date or note_to_date):
+        try:
+            notes_coll = mongodb["Notes"]
+            module_query = {"$in": ["Accounts", "Account", "accounts", "account"]}
+
+            date_conds = []
+            f_dt = datetime.strptime(note_from_date, "%Y-%m-%d").replace(hour=0, minute=0, second=0) if note_from_date else None
+            t_dt = datetime.strptime(note_to_date, "%Y-%m-%d").replace(hour=23, minute=59, second=59) if note_to_date else None
+
+            f_str = f"{note_from_date}T00:00:00" if note_from_date else None
+            t_str = f"{note_to_date}T23:59:59.999999" if note_to_date else None
+
+            for field in ["Modified_Time", "Created_Time", "modified_time", "created_time"]:
+                if f_str and t_str:
+                    date_conds.append({field: {"$gte": f_str, "$lte": t_str}})
+                    if f_dt and t_dt:
+                        date_conds.append({field: {"$gte": f_dt, "$lte": t_dt}})
+                elif f_str:
+                    date_conds.append({field: {"$gte": f_str}})
+                    if f_dt:
+                        date_conds.append({field: {"$gte": f_dt}})
+                elif t_str:
+                    date_conds.append({field: {"$lte": t_str}})
+                    if t_dt:
+                        date_conds.append({field: {"$lte": t_dt}})
+
+            n_filter = {
+                "$and": [
+                    {"$or": [{"module": module_query}, {"Parent_Id.module": module_query}]},
+                    {"$or": date_conds} if date_conds else {}
+                ]
+            }
+
+            matching_notes = notes_coll.find(n_filter, {"Parent_Id": 1, "parent_id": 1, "_id": 0})
+            acc_ids_from_notes = set()
+
+            for doc in matching_notes:
+                p_id = doc.get("Parent_Id") or doc.get("parent_id")
+                target_id = None
+                if isinstance(p_id, dict):
+                    target_id = p_id.get("id")
+                elif isinstance(p_id, (int, str)):
+                    target_id = p_id
+
+                if target_id and str(target_id).isdigit():
+                    acc_ids_from_notes.add(int(target_id))
+
+            filters.append(Account.id.in_(list(acc_ids_from_notes) if acc_ids_from_notes else [-1]))
+        except Exception as e:
+            logging.error(f"Failed to filter by note date: {e}")
 
     # Advanced Call Back Date/Time Filter Section
     effective_cb_cond = cb_condition or "Is"

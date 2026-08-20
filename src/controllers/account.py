@@ -72,11 +72,14 @@ def create_account(
     db.add(new_account)
     db.flush()
 
+    initial_status = new_account.account_status if new_account.account_status else "Not set"
     history = AccountStatusHistory(
         account_id=new_account.id,
-        old_status=None,
-        new_status=new_account.account_status,
-        changed_by=user_id,
+        company_id=getattr(new_account, "company_id", 1) or 1,
+        status=initial_status,
+        start_time=datetime.now(UTC),
+        end_time=None,
+        moved_by_id=user_id,
     )
     db.add(history)
     db.commit()
@@ -256,11 +259,34 @@ def update_account(
 
     new_status = db_account.account_status
     if new_status != old_status:
+        now_dt = datetime.now(UTC)
+        active_history = (
+            db.query(AccountStatusHistory)
+            .filter(
+                AccountStatusHistory.account_id == account_id,
+                AccountStatusHistory.end_time.is_(None),
+            )
+            .order_by(AccountStatusHistory.start_time.desc())
+            .first()
+        )
+        if active_history:
+            active_history.end_time = now_dt
+            start_t = active_history.start_time
+            if start_t and start_t.tzinfo is None:
+                start_t = start_t.replace(tzinfo=UTC)
+            dur_secs = int((now_dt - start_t).total_seconds()) if start_t else 0
+            if dur_secs < 0:
+                dur_secs = 0
+            active_history.duration_seconds = dur_secs
+            active_history.total_time_stayed = format_duration_long(dur_secs)
+
         history = AccountStatusHistory(
             account_id=account_id,
-            old_status=old_status,
-            new_status=new_status,
-            changed_by=user_id,
+            company_id=getattr(db_account, "company_id", 1) or 1,
+            status=new_status or "Not set",
+            start_time=now_dt,
+            end_time=None,
+            moved_by_id=user_id,
         )
         db.add(history)
 
@@ -923,26 +949,290 @@ def get_account_by_id(db: Session, account_id: int) -> Account:
     return account
 
 
-# Account_Status_history i.e trackin of acc history by id
-def get_account_status_history(db: Session, account_id: int, page: int = 1):
-    limit = 20
-    offset = (page - 1) * limit
+def get_status_color(status_name: str) -> str:
+    if not status_name:
+        return "blue"
+    status_lower = status_name.lower()
+    if "awareness" in status_lower:
+        return "blue"
+    elif "attention" in status_lower or "lender" in status_lower:
+        return "amber"
+    elif "contact" in status_lower or "established" in status_lower:
+        return "emerald"
+    elif "interested" in status_lower or "doc" in status_lower:
+        return "purple"
+    elif "assessment" in status_lower or "review" in status_lower or "not" in status_lower:
+        return "rose"
+    return "blue"
 
-    history = (
+
+def format_duration_short(seconds: int) -> str:
+    if seconds <= 0:
+        return "0m"
+    days = seconds // 86400
+    rem = seconds % 86400
+    hours = rem // 3600
+    rem = rem % 3600
+    minutes = rem // 60
+
+    if days > 0:
+        return f"{days}d {hours}h" if hours > 0 else f"{days}d"
+    elif hours > 0:
+        return f"{hours}h {minutes}m" if minutes > 0 else f"{hours}h"
+    return f"{minutes}m"
+
+
+def format_duration_long(seconds: int) -> str:
+    if seconds <= 0:
+        return "0 mins"
+    days = seconds // 86400
+    rem = seconds % 86400
+    hours = rem // 3600
+    rem = rem % 3600
+    minutes = rem // 60
+
+    parts = []
+    if days > 0:
+        parts.append(f"{days} day{'s' if days > 1 else ''}")
+    if hours > 0:
+        parts.append(f"{hours} hour{'s' if hours > 1 else ''}")
+    if minutes > 0 or (days == 0 and hours == 0):
+        parts.append(f"{minutes} min{'s' if minutes != 1 else ''}")
+
+    return ", ".join(parts)
+
+
+def get_account_status_history(db: Session, account_id: int):
+    history_records = (
         db.query(AccountStatusHistory)
         .filter(AccountStatusHistory.account_id == account_id)
-        .options(joinedload(AccountStatusHistory.changed_by_user))
-        .order_by(AccountStatusHistory.changed_at.desc())
+        .options(joinedload(AccountStatusHistory.moved_by_user))
+        .order_by(AccountStatusHistory.start_time.asc())
+        .all()
+    )
+
+    if not history_records:
+        raise HTTPException(
+            status_code=404, detail="No status history found for this account"
+        )
+
+    now_dt = datetime.now(UTC)
+    result = []
+    for rec in history_records:
+        user_name = "System"
+        if rec.moved_by_user:
+            user_name = rec.moved_by_user.full_name or rec.moved_by_user.email or "System"
+
+        start_time_dt = rec.start_time
+        if start_time_dt and start_time_dt.tzinfo is None:
+            start_time_dt = start_time_dt.replace(tzinfo=UTC)
+
+        start_time_str = start_time_dt.strftime("%d %b %Y, %I:%M %p") if start_time_dt else ""
+        start_date_str = start_time_dt.strftime("%Y-%m-%d") if start_time_dt else ""
+
+        if rec.end_time:
+            end_time_dt = rec.end_time
+            if end_time_dt and end_time_dt.tzinfo is None:
+                end_time_dt = end_time_dt.replace(tzinfo=UTC)
+            end_time_str = end_time_dt.strftime("%d %b %Y, %I:%M %p") if end_time_dt else ""
+            end_date_str = end_time_dt.strftime("%Y-%m-%d") if end_time_dt else ""
+            dur_secs = rec.duration_seconds or (int((end_time_dt - start_time_dt).total_seconds()) if end_time_dt and start_time_dt else 0)
+            if dur_secs < 0:
+                dur_secs = 0
+            duration_long = rec.total_time_stayed or format_duration_long(dur_secs)
+            duration_short = format_duration_short(dur_secs)
+            is_current = False
+        else:
+            end_time_str = "Present"
+            end_date_str = "Present"
+            dur_secs = int((now_dt - start_time_dt).total_seconds()) if start_time_dt else 0
+            if dur_secs < 0:
+                dur_secs = 0
+            duration_long = format_duration_long(dur_secs)
+            duration_short = format_duration_short(dur_secs)
+            is_current = True
+
+        result.append({
+            "id": str(rec.id),
+            "account_id": str(rec.account_id),
+            "company_id": rec.company_id or 1,
+            "status": rec.status,
+            "name": rec.status,
+            "start_time": start_time_dt,
+            "start_time_formatted": start_time_str,
+            "startDate": start_date_str,
+            "end_time": rec.end_time,
+            "end_time_formatted": end_time_str,
+            "endDate": end_date_str,
+            "total_time_stayed": duration_long,
+            "duration_seconds": dur_secs,
+            "duration": duration_short,
+            "is_current": is_current,
+            "moved_by_id": rec.moved_by_id,
+            "moved_by_name": user_name,
+            "updatedBy": user_name,
+            "color": get_status_color(rec.status),
+        })
+
+    return result
+
+
+def get_accounts_status_journey(
+    db: Session, company_id: int = 1, page: int = 1, limit: int = 20
+):
+    offset = (page - 1) * limit
+    accounts = (
+        db.query(Account)
+        .filter(Account.company_id == company_id)
+        .options(joinedload(Account.owner))
         .offset(offset)
         .limit(limit)
         .all()
     )
 
-    if not history:
-        raise HTTPException(
-            status_code=404, detail="No status history found for this account"
+    result = []
+    now_dt = datetime.now(UTC)
+
+    for acc in accounts:
+        history_records = (
+            db.query(AccountStatusHistory)
+            .filter(AccountStatusHistory.account_id == acc.id)
+            .options(joinedload(AccountStatusHistory.moved_by_user))
+            .order_by(AccountStatusHistory.start_time.asc())
+            .all()
         )
-    return history
+
+        owner_name = "Unassigned"
+        if acc.owner:
+            owner_name = acc.owner.full_name or acc.owner.email or "Unassigned"
+
+        journey_items = []
+        for rec in history_records:
+            user_name = "System"
+            if rec.moved_by_user:
+                user_name = rec.moved_by_user.full_name or rec.moved_by_user.email or "System"
+
+            start_time_dt = rec.start_time
+            if start_time_dt and start_time_dt.tzinfo is None:
+                start_time_dt = start_time_dt.replace(tzinfo=UTC)
+
+            start_date_str = start_time_dt.strftime("%Y-%m-%d") if start_time_dt else ""
+
+            if rec.end_time:
+                end_time_dt = rec.end_time
+                if end_time_dt and end_time_dt.tzinfo is None:
+                    end_time_dt = end_time_dt.replace(tzinfo=UTC)
+                end_date_str = end_time_dt.strftime("%Y-%m-%d") if end_time_dt else ""
+                dur_secs = rec.duration_seconds or (int((end_time_dt - start_time_dt).total_seconds()) if end_time_dt and start_time_dt else 0)
+            else:
+                end_date_str = "Present"
+                dur_secs = int((now_dt - start_time_dt).total_seconds()) if start_time_dt else 0
+
+            if dur_secs < 0:
+                dur_secs = 0
+
+            journey_items.append({
+                "name": rec.status,
+                "duration": format_duration_short(dur_secs),
+                "color": get_status_color(rec.status),
+                "startDate": start_date_str,
+                "endDate": end_date_str,
+                "updatedBy": user_name,
+            })
+
+        result.append({
+            "id": str(acc.id),
+            "name": acc.account_name or f"Account #{acc.id}",
+            "owner": owner_name,
+            "currentStatus": acc.account_status or "Not set",
+            "journey": journey_items,
+        })
+
+    return result
+
+
+def get_account_status_journey(db: Session, account_id: int):
+    acc = (
+        db.query(Account)
+        .filter(Account.id == account_id)
+        .options(joinedload(Account.owner))
+        .first()
+    )
+    if not acc:
+        raise HTTPException(status_code=404, detail="Account not found")
+
+    now_dt = datetime.now(UTC)
+
+    history_records = (
+        db.query(AccountStatusHistory)
+        .filter(AccountStatusHistory.account_id == acc.id)
+        .options(joinedload(AccountStatusHistory.moved_by_user))
+        .order_by(AccountStatusHistory.start_time.asc())
+        .all()
+    )
+
+    owner_name = "Unassigned"
+    if acc.owner:
+        owner_name = acc.owner.full_name or acc.owner.email or "Unassigned"
+
+    journey_items = []
+    for rec in history_records:
+        user_name = "System"
+        if rec.moved_by_user:
+            user_name = (
+                rec.moved_by_user.full_name or rec.moved_by_user.email or "System"
+            )
+
+        start_time_dt = rec.start_time
+        if start_time_dt and start_time_dt.tzinfo is None:
+            start_time_dt = start_time_dt.replace(tzinfo=UTC)
+
+        start_date_str = (
+            start_time_dt.strftime("%Y-%m-%d") if start_time_dt else ""
+        )
+
+        if rec.end_time:
+            end_time_dt = rec.end_time
+            if end_time_dt and end_time_dt.tzinfo is None:
+                end_time_dt = end_time_dt.replace(tzinfo=UTC)
+            end_date_str = (
+                end_time_dt.strftime("%Y-%m-%d") if end_time_dt else ""
+            )
+            dur_secs = rec.duration_seconds or (
+                int((end_time_dt - start_time_dt).total_seconds())
+                if end_time_dt and start_time_dt
+                else 0
+            )
+        else:
+            end_date_str = "Present"
+            dur_secs = (
+                int((now_dt - start_time_dt).total_seconds())
+                if start_time_dt
+                else 0
+            )
+
+        if dur_secs < 0:
+            dur_secs = 0
+
+        journey_items.append(
+            {
+                "name": rec.status,
+                "duration": format_duration_short(dur_secs),
+                "color": get_status_color(rec.status),
+                "startDate": start_date_str,
+                "endDate": end_date_str,
+                "updatedBy": user_name,
+            }
+        )
+
+    return {
+        "id": str(acc.id),
+        "name": acc.account_name or f"Account #{acc.id}",
+        "owner": owner_name,
+        "currentStatus": acc.account_status or "Not set",
+        "journey": journey_items,
+    }
+
 
 
 async def accounts_csv_update(file: UploadFile, db: Session):

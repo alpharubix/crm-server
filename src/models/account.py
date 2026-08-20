@@ -2,12 +2,12 @@ from sqlalchemy import (
     BIGINT,
     Boolean,
     Column,
+    Date,
     DateTime,
     ForeignKey,
     Integer,
     String,
     Text,
-    Date,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 
@@ -133,15 +133,23 @@ class Account(Base):
 class AccountStatusHistory(Base):
     __tablename__ = "account_status_history"
 
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    account_id = Column(BIGINT, ForeignKey("accounts_merged.id"), nullable=False, index=True)
-    old_status = Column(String, nullable=True)
-    new_status = Column(String, nullable=False)
-    changed_by = Column(BIGINT, ForeignKey("users.id"), nullable=False)
-    changed_at = Column(
+    id = Column(BIGINT, primary_key=True, autoincrement=True)
+    account_id = Column(
+        BIGINT, ForeignKey("accounts_merged.id"), nullable=False, index=True
+    )
+    company_id = Column(Integer, default=1, nullable=True, index=True)
+    status = Column(String, nullable=False)
+    start_time = Column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    end_time = Column(DateTime(timezone=True), nullable=True)
+    total_time_stayed = Column(String, nullable=True)
+    duration_seconds = Column(Integer, nullable=True)
+    moved_by_id = Column(BIGINT, ForeignKey("users.id"), nullable=False)
+    created_at = Column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
 
     # relationships
     account = relationship("Account", backref="status_history")
-    changed_by_user = relationship("User")
+    moved_by_user = relationship("User", foreign_keys=[moved_by_id])

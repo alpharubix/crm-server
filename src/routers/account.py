@@ -1,19 +1,22 @@
-from datetime import datetime, timezone
-from typing import Any, Dict, Optional
+from typing import Any
 
+import httpx
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from fastapi.params import Body
 from sqlalchemy.orm import Session
-from sqlalchemy.orm.attributes import flag_modified
 from starlette.requests import Request
-from ..controllers.account import update_account as update_account_controller
-from ..controllers import account as repo
-from ..controllers.audit_log import log_action
-from ..database import get_db, get_mongodb
-from ..models.account import Account
-from ..schemas.account import AccountBase, GetlistAccountResponse, ListAccountsResponse, AccountStatusHistoryResponse
+
 from ..config import settings
-import httpx
+from ..controllers import account as repo
+from ..controllers.account import update_account as update_account_controller
+from ..database import get_db, get_mongodb
+from ..schemas.account import (
+    AccountBase,
+    AccountStatusHistoryResponse,
+    AccountStatusJourneyResponse,
+    GetlistAccountResponse,
+    ListAccountsResponse,
+)
 
 router = APIRouter(prefix="/accounts", tags=["accounts"])
 
@@ -38,7 +41,7 @@ async def list_all(
     mongodb=Depends(get_mongodb),
     account_stage: list[str] | None = Query(default=None),
     account_status: list[str] | None = Query(default=None),
-    account_name: Optional[str] = None,
+    account_name: str | None = None,
     account_id: list[str] | str | None = Query(default=None),
     account_owner_id: list[int] | None = Query(default=None),
     industry: list[str] | None = Query(default=None),
@@ -101,7 +104,7 @@ async def list_all(
 async def update_account(
     request: Request,
     account_id: int,
-    payload: Dict[str, Any] = Body(...),
+    payload: dict[str, Any] = Body(...),
     db: Session = Depends(get_db),
 ):
     user_id = int(request.state.user_id)
@@ -110,14 +113,53 @@ async def update_account(
     return {"message": "update-success", "updated_account": updated}
 
 
-#account status trackin route
-@router.get("/status-history/{account_id}", response_model=list[AccountStatusHistoryResponse])
+# account status tracking route
+@router.get(
+    "/status-history/{account_id}", response_model=list[AccountStatusHistoryResponse]
+)
 def get_status_history(
-    account_id: int,
-    page: int = 1,
-    db: Session = Depends(get_db)
+    request: Request, account_id: int, db: Session = Depends(get_db)
 ):
-    return repo.get_account_status_history(db, account_id, page)
+    user_role = str(getattr(request.state, "role", "")).lower()
+    if user_role not in ("admin", "super_admin", "superadmin"):
+        raise HTTPException(
+            status_code=403,
+            detail="Permission denied. Only Admin and Super Admin can view status history.",
+        )
+    return repo.get_account_status_history(db, account_id)
+
+
+@router.get("/status-journey", response_model=list[AccountStatusJourneyResponse])
+def get_status_journey(
+    request: Request,
+    company_id: int = 1,
+    page: int = Query(default=1, ge=1),
+    limit: int = Query(default=20, ge=1, le=500),
+    db: Session = Depends(get_db),
+):
+    user_role = str(getattr(request.state, "role", "")).lower()
+    if user_role not in ("admin", "super_admin", "superadmin"):
+        raise HTTPException(
+            status_code=403,
+            detail="Permission denied. Only Admin and Super Admin can view status journeys.",
+        )
+    return repo.get_accounts_status_journey(db, company_id=1, page=page, limit=limit)
+
+
+@router.get(
+    "/status-journey/{account_id}", response_model=AccountStatusJourneyResponse
+)
+def get_single_status_journey(
+    request: Request, account_id: int, db: Session = Depends(get_db)
+):
+    user_role = str(getattr(request.state, "role", "")).lower()
+    if user_role not in ("admin", "super_admin", "superadmin"):
+        raise HTTPException(
+            status_code=403,
+            detail="Permission denied. Only Admin and Super Admin can view status journeys.",
+        )
+    return repo.get_account_status_journey(db, account_id)
+
 
 
 @router.post("/accounts-reassignment-csv-upload")
@@ -151,7 +193,7 @@ async def accounts_update_csv(
         raise
     except Exception as e:
         raise HTTPException(
-            status_code=500, detail=f"unable to process csv error: {str(e)}"
+            status_code=500, detail=f"unable to process csv error: {e!s}"
         )
 
 
@@ -159,6 +201,7 @@ async def accounts_update_csv(
 # async def accounts_update_csv(file:UploadFile=File(...), db: Session = Depends(get_db)):
 #     await repo.update_accounts_based_on_csv(file, db)
 #     return {"message":"file upload success"}
+
 
 @router.get("/r1xcrm-summary-of-debit-and-credit_monthwise/{acc_id}")
 async def get_r1xcrm_summary_of_debit_and_credit_monthwise(
@@ -181,17 +224,16 @@ async def get_r1xcrm_summary_of_debit_and_credit_monthwise(
 
         if response.status_code != 200:
             raise HTTPException(
-                status_code=response.status_code,
-                detail=response.json()
+                status_code=response.status_code, detail=response.json()
             )
 
         return response.json()
 
     except httpx.RequestError as e:
         raise HTTPException(
-            status_code=500,
-            detail=f"Unable to connect to 5PointCredit: {e}"
+            status_code=500, detail=f"Unable to connect to 5PointCredit: {e}"
         )
+
 
 @router.get("/r1xcrm-cashflow/{acc_id}")
 async def get_r1xcrm_cashflow(
@@ -199,17 +241,19 @@ async def get_r1xcrm_cashflow(
     acc_id: int,
 ):
     try:
-        url = (
-            f"{settings.FIVE_POINT_CREDIT_BACKEND_URL}"
-            f"/bsa/r1xcrm-cashflow/{acc_id}"
-        )
+        url = f"{settings.FIVE_POINT_CREDIT_BACKEND_URL}/bsa/r1xcrm-cashflow/{acc_id}"
         async with httpx.AsyncClient(timeout=30) as client:
             response = await client.get(url, params=request.query_params)
         if response.status_code != 200:
-            raise HTTPException(status_code=response.status_code, detail=response.json())
+            raise HTTPException(
+                status_code=response.status_code, detail=response.json()
+            )
         return response.json()
     except httpx.RequestError as e:
-        raise HTTPException(status_code=500, detail=f"Unable to connect to 5PointCredit: {e}")
+        raise HTTPException(
+            status_code=500, detail=f"Unable to connect to 5PointCredit: {e}"
+        )
+
 
 @router.get("/r1xcrm-month-wise-overview/{acc_id}")
 async def get_r1xcrm_month_wise_overview(
@@ -231,10 +275,15 @@ async def get_r1xcrm_month_wise_overview(
         async with httpx.AsyncClient(timeout=30) as client:
             response = await client.get(url, params=params)
         if response.status_code != 200:
-            raise HTTPException(status_code=response.status_code, detail=response.json())
+            raise HTTPException(
+                status_code=response.status_code, detail=response.json()
+            )
         return response.json()
     except httpx.RequestError as e:
-        raise HTTPException(status_code=500, detail=f"Unable to connect to 5PointCredit: {e}")
+        raise HTTPException(
+            status_code=500, detail=f"Unable to connect to 5PointCredit: {e}"
+        )
+
 
 @router.get("/r1xcrm-report-date-range/{acc_id}")
 async def get_r1xcrm_report_date_range(
@@ -249,10 +298,14 @@ async def get_r1xcrm_report_date_range(
         async with httpx.AsyncClient(timeout=30) as client:
             response = await client.get(url, params=request.query_params)
         if response.status_code != 200:
-            raise HTTPException(status_code=response.status_code, detail=response.json())
+            raise HTTPException(
+                status_code=response.status_code, detail=response.json()
+            )
         return response.json()
     except httpx.RequestError as e:
-        raise HTTPException(status_code=500, detail=f"Unable to connect to 5PointCredit: {e}")
+        raise HTTPException(
+            status_code=500, detail=f"Unable to connect to 5PointCredit: {e}"
+        )
 
 
 # routers for tax calculation
@@ -269,10 +322,15 @@ async def get_r1xcrm_tax_calculation(
         async with httpx.AsyncClient(timeout=30) as client:
             response = await client.get(url)
         if response.status_code != 200:
-            raise HTTPException(status_code=response.status_code, detail=response.json())
+            raise HTTPException(
+                status_code=response.status_code, detail=response.json()
+            )
         return response.json()
     except httpx.RequestError as e:
-        raise HTTPException(status_code=500, detail=f"Unable to connect to 5PointCredit: {e}")
+        raise HTTPException(
+            status_code=500, detail=f"Unable to connect to 5PointCredit: {e}"
+        )
+
 
 @router.get("/r1xcrm-balance_sheet/{acc_id}")
 async def get_r1xcrm_balance_sheet(
@@ -287,10 +345,15 @@ async def get_r1xcrm_balance_sheet(
         async with httpx.AsyncClient(timeout=30) as client:
             response = await client.get(url)
         if response.status_code != 200:
-            raise HTTPException(status_code=response.status_code, detail=response.json())
+            raise HTTPException(
+                status_code=response.status_code, detail=response.json()
+            )
         return response.json()
     except httpx.RequestError as e:
-        raise HTTPException(status_code=500, detail=f"Unable to connect to 5PointCredit: {e}")
+        raise HTTPException(
+            status_code=500, detail=f"Unable to connect to 5PointCredit: {e}"
+        )
+
 
 @router.get("/r1xcrm-profit-and-loss-statement/{acc_id}")
 async def get_r1xcrm_profit_and_loss_statement(
@@ -305,10 +368,15 @@ async def get_r1xcrm_profit_and_loss_statement(
         async with httpx.AsyncClient(timeout=30) as client:
             response = await client.get(url)
         if response.status_code != 200:
-            raise HTTPException(status_code=response.status_code, detail=response.json())
+            raise HTTPException(
+                status_code=response.status_code, detail=response.json()
+            )
         return response.json()
     except httpx.RequestError as e:
-        raise HTTPException(status_code=500, detail=f"Unable to connect to 5PointCredit: {e}")
+        raise HTTPException(
+            status_code=500, detail=f"Unable to connect to 5PointCredit: {e}"
+        )
+
 
 @router.get("/r1xcrm-ratio-analysis/{acc_id}")
 async def get_r1xcrm_ratio_analysis(
@@ -323,12 +391,18 @@ async def get_r1xcrm_ratio_analysis(
         async with httpx.AsyncClient(timeout=30) as client:
             response = await client.get(url)
         if response.status_code != 200:
-            raise HTTPException(status_code=response.status_code, detail=response.json())
+            raise HTTPException(
+                status_code=response.status_code, detail=response.json()
+            )
         return response.json()
     except httpx.RequestError as e:
-        raise HTTPException(status_code=500, detail=f"Unable to connect to 5PointCredit: {e}")
+        raise HTTPException(
+            status_code=500, detail=f"Unable to connect to 5PointCredit: {e}"
+        )
+
 
 # rouers for gst
+
 
 @router.get("/r1xcrm-gst-basic-info/{acc_id}")
 async def get_r1xcrm_gst_basic_info(
@@ -343,10 +417,14 @@ async def get_r1xcrm_gst_basic_info(
         async with httpx.AsyncClient(timeout=30) as client:
             response = await client.get(url)
         if response.status_code != 200:
-            raise HTTPException(status_code=response.status_code, detail=response.json())
+            raise HTTPException(
+                status_code=response.status_code, detail=response.json()
+            )
         return response.json()
     except httpx.RequestError as e:
-        raise HTTPException(status_code=500, detail=f"Unable to connect to 5PointCredit: {e}")
+        raise HTTPException(
+            status_code=500, detail=f"Unable to connect to 5PointCredit: {e}"
+        )
 
 
 @router.post("/r1xcrm-overview")
@@ -354,19 +432,19 @@ async def get_r1xcrm_overview(
     request: Request,
 ):
     try:
-        url = (
-            f"{settings.FIVE_POINT_CREDIT_BACKEND_URL}"
-            f"/gst/r1xcrm-overview"
-        )
+        url = f"{settings.FIVE_POINT_CREDIT_BACKEND_URL}/gst/r1xcrm-overview"
         body = await request.json()
         async with httpx.AsyncClient(timeout=30) as client:
-            response = await client.post(url,json=body)
+            response = await client.post(url, json=body)
         if response.status_code != 200:
-            raise HTTPException(status_code=response.status_code, detail=response.json())
+            raise HTTPException(
+                status_code=response.status_code, detail=response.json()
+            )
         return response.json()
     except httpx.RequestError as e:
-        raise HTTPException(status_code=500, detail=f"Unable to connect to 5PointCredit: {e}")
-
+        raise HTTPException(
+            status_code=500, detail=f"Unable to connect to 5PointCredit: {e}"
+        )
 
 
 @router.post("/r1xcrm-top-suppliers-and-customers")
@@ -380,12 +458,16 @@ async def get_r1xcrm_top_suppliers_and_customers(
         )
         body = await request.json()
         async with httpx.AsyncClient(timeout=30) as client:
-            response = await client.post(url,json=body)
+            response = await client.post(url, json=body)
         if response.status_code != 200:
-            raise HTTPException(status_code=response.status_code, detail=response.json())
+            raise HTTPException(
+                status_code=response.status_code, detail=response.json()
+            )
         return response.json()
     except httpx.RequestError as e:
-        raise HTTPException(status_code=500, detail=f"Unable to connect to 5PointCredit: {e}")
+        raise HTTPException(
+            status_code=500, detail=f"Unable to connect to 5PointCredit: {e}"
+        )
 
 
 @router.post("/r1xcrm-monthly-sales-purchase-summary")
@@ -400,12 +482,16 @@ async def get_r1xcrm_monthly_sales_purchase_summary(
         body = await request.json()
         print(body)
         async with httpx.AsyncClient(timeout=30) as client:
-            response = await client.post(url,json=body)
+            response = await client.post(url, json=body)
         if response.status_code != 200:
-            raise HTTPException(status_code=response.status_code, detail=response.json())
+            raise HTTPException(
+                status_code=response.status_code, detail=response.json()
+            )
         return response.json()
     except httpx.RequestError as e:
-        raise HTTPException(status_code=500, detail=f"Unable to connect to 5PointCredit: {e}")
+        raise HTTPException(
+            status_code=500, detail=f"Unable to connect to 5PointCredit: {e}"
+        )
 
 
 @router.get("/check-r1xchange-account/{acc_id}")
@@ -421,10 +507,15 @@ async def check_r1xchange_account(
         async with httpx.AsyncClient(timeout=30) as client:
             response = await client.get(url)
         if response.status_code != 200:
-            raise HTTPException(status_code=response.status_code, detail=response.json())
+            raise HTTPException(
+                status_code=response.status_code, detail=response.json()
+            )
         return response.json()
     except httpx.RequestError as e:
-        raise HTTPException(status_code=500, detail=f"Unable to connect to 5PointCredit: {e}")
+        raise HTTPException(
+            status_code=500, detail=f"Unable to connect to 5PointCredit: {e}"
+        )
+
 
 @router.get("/r1xcrm-list-reports/{acc_id}")
 async def r1xcrm_list_reports(
@@ -432,18 +523,21 @@ async def r1xcrm_list_reports(
     acc_id: int,
 ):
     try:
-        url = ( 
+        url = (
             f"{settings.FIVE_POINT_CREDIT_BACKEND_URL}"
             f"/cibil/r1xcrm-list-reports/{acc_id}"
         )
         async with httpx.AsyncClient(timeout=30) as client:
             response = await client.get(url)
         if response.status_code != 200:
-            raise HTTPException(status_code=response.status_code, detail=response.json())
+            raise HTTPException(
+                status_code=response.status_code, detail=response.json()
+            )
         return response.json()
     except httpx.RequestError as e:
-        raise HTTPException(status_code=500, detail=f"Unable to connect to 5PointCredit: {e}")
-
+        raise HTTPException(
+            status_code=500, detail=f"Unable to connect to 5PointCredit: {e}"
+        )
 
 
 @router.get("/r1xcrm-overview/{reference_id}")
@@ -459,11 +553,14 @@ async def get_cibil_r1xcrm_overview(
         async with httpx.AsyncClient(timeout=30) as client:
             response = await client.get(url)
         if response.status_code != 200:
-            raise HTTPException(status_code=response.status_code, detail=response.json())
+            raise HTTPException(
+                status_code=response.status_code, detail=response.json()
+            )
         return response.json()
     except httpx.RequestError as e:
-        raise HTTPException(status_code=500, detail=f"Unable to connect to 5PointCredit: {e}")
-
+        raise HTTPException(
+            status_code=500, detail=f"Unable to connect to 5PointCredit: {e}"
+        )
 
 
 @router.get("/r1xcrm-account-summary/{reference_id}")
@@ -479,10 +576,14 @@ async def get_r1xcrm_account_summary(
         async with httpx.AsyncClient(timeout=30) as client:
             response = await client.get(url)
         if response.status_code != 200:
-            raise HTTPException(status_code=response.status_code, detail=response.json())
+            raise HTTPException(
+                status_code=response.status_code, detail=response.json()
+            )
         return response.json()
     except httpx.RequestError as e:
-        raise HTTPException(status_code=500, detail=f"Unable to connect to 5PointCredit: {e}")
+        raise HTTPException(
+            status_code=500, detail=f"Unable to connect to 5PointCredit: {e}"
+        )
 
 
 @router.get("/r1xcrm-payment-history/{reference_id}")
@@ -498,10 +599,14 @@ async def get_r1xcrm_payment_history(
         async with httpx.AsyncClient(timeout=30) as client:
             response = await client.get(url)
         if response.status_code != 200:
-            raise HTTPException(status_code=response.status_code, detail=response.json())
+            raise HTTPException(
+                status_code=response.status_code, detail=response.json()
+            )
         return response.json()
     except httpx.RequestError as e:
-        raise HTTPException(status_code=500, detail=f"Unable to connect to 5PointCredit: {e}")
+        raise HTTPException(
+            status_code=500, detail=f"Unable to connect to 5PointCredit: {e}"
+        )
 
 
 @router.get("/r1xcrm-analysis/{reference_id}")
@@ -517,8 +622,11 @@ async def get_r1xcrm_analysis(
         async with httpx.AsyncClient(timeout=30) as client:
             response = await client.get(url)
         if response.status_code != 200:
-            raise HTTPException(status_code=response.status_code, detail=response.json())
+            raise HTTPException(
+                status_code=response.status_code, detail=response.json()
+            )
         return response.json()
     except httpx.RequestError as e:
-        raise HTTPException(status_code=500, detail=f"Unable to connect to 5PointCredit: {e}")
-
+        raise HTTPException(
+            status_code=500, detail=f"Unable to connect to 5PointCredit: {e}"
+        )

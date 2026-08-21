@@ -15,6 +15,7 @@ import httpx
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, joinedload, selectinload
 from sqlalchemy.orm.attributes import flag_modified
+from sqlalchemy.sql import func
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
@@ -72,7 +73,9 @@ def create_account(
     db.add(new_account)
     db.flush()
 
-    initial_status = new_account.account_status if new_account.account_status else "Not set"
+    initial_status = (
+        new_account.account_status if new_account.account_status else "Not set"
+    )
     history = AccountStatusHistory(
         account_id=new_account.id,
         company_id=getattr(new_account, "company_id", 1) or 1,
@@ -275,8 +278,7 @@ def update_account(
             if start_t and start_t.tzinfo is None:
                 start_t = start_t.replace(tzinfo=UTC)
             dur_secs = int((now_dt - start_t).total_seconds()) if start_t else 0
-            if dur_secs < 0:
-                dur_secs = 0
+            dur_secs = max(dur_secs, 0)
             active_history.duration_seconds = dur_secs
             active_history.total_time_stayed = format_duration_long(dur_secs)
 
@@ -339,6 +341,64 @@ def update_account(
         raise HTTPException(status_code=400, detail=f"Database error: {e!s}")
 
 
+def build_batch_status_journeys(db: Session, account_ids: list[int]):
+    if not account_ids:
+        return {}
+    now_dt = datetime.now(UTC)
+    history_records = (
+        db.query(AccountStatusHistory)
+        .filter(AccountStatusHistory.account_id.in_(account_ids))
+        .options(joinedload(AccountStatusHistory.moved_by_user))
+        .order_by(AccountStatusHistory.start_time.asc())
+        .all()
+    )
+
+    journeys_by_account = {acc_id: [] for acc_id in account_ids}
+    for rec in history_records:
+        user_name = "System"
+        if rec.moved_by_user:
+            user_name = (
+                rec.moved_by_user.full_name or rec.moved_by_user.email or "System"
+            )
+
+        start_time_dt = rec.start_time
+        if start_time_dt and start_time_dt.tzinfo is None:
+            start_time_dt = start_time_dt.replace(tzinfo=UTC)
+
+        start_date_str = start_time_dt.strftime("%Y-%m-%d") if start_time_dt else ""
+
+        if rec.end_time:
+            end_time_dt = rec.end_time
+            if end_time_dt and end_time_dt.tzinfo is None:
+                end_time_dt = end_time_dt.replace(tzinfo=UTC)
+            end_date_str = end_time_dt.strftime("%Y-%m-%d") if end_time_dt else ""
+            dur_secs = rec.duration_seconds or (
+                int((end_time_dt - start_time_dt).total_seconds())
+                if end_time_dt and start_time_dt
+                else 0
+            )
+        else:
+            end_date_str = "Present"
+            dur_secs = (
+                int((now_dt - start_time_dt).total_seconds()) if start_time_dt else 0
+            )
+
+        dur_secs = max(dur_secs, 0)
+
+        item = {
+            "name": rec.status,
+            "duration": format_duration_short(dur_secs),
+            "color": get_status_color(rec.status),
+            "startDate": start_date_str,
+            "endDate": end_date_str,
+            "updatedBy": user_name,
+        }
+        if rec.account_id in journeys_by_account:
+            journeys_by_account[rec.account_id].append(item)
+
+    return journeys_by_account
+
+
 async def get_all_accounts(
     request: Request,
     db: Session,
@@ -374,6 +434,10 @@ async def get_all_accounts(
     assignment_to_date: str | None = None,
     note_from_date: str | None = None,
     note_to_date: str | None = None,
+    status_filter_name: str | None = None,
+    status_from_date: str | None = None,
+    status_to_date: str | None = None,
+    status_min_days: float | None = None,
 ):
     MANAGER_EXECUTIVES_MAP = MANAGERID().MANAGER_EXECUTIVES_MAP
 
@@ -385,6 +449,65 @@ async def get_all_accounts(
     role = request.state.role
     single_id_request = False
     allowed_owner_ids = None
+
+    # Status & Period Subquery Filter
+    if status_filter_name:
+        sh_query = db.query(AccountStatusHistory.account_id).filter(
+            AccountStatusHistory.status == status_filter_name
+        )
+        if status_from_date:
+            try:
+                if "T" in status_from_date:
+                    dt_from = datetime.fromisoformat(status_from_date)
+                else:
+                    dt_from = datetime.strptime(status_from_date, "%Y-%m-%d").replace(
+                        hour=0, minute=0, second=0, tzinfo=UTC
+                    )
+                sh_query = sh_query.filter(AccountStatusHistory.start_time >= dt_from)
+            except Exception:
+                pass
+        if status_to_date:
+            try:
+                if "T" in status_to_date:
+                    dt_to = datetime.fromisoformat(status_to_date)
+                else:
+                    dt_to = datetime.strptime(status_to_date, "%Y-%m-%d").replace(
+                        hour=23, minute=59, second=59, tzinfo=UTC
+                    )
+                sh_query = sh_query.filter(
+                    or_(
+                        AccountStatusHistory.end_time <= dt_to,
+                        AccountStatusHistory.end_time.is_(None),
+                    )
+                )
+            except Exception:
+                pass
+        if status_min_days and float(status_min_days) > 0:
+            min_secs = int(float(status_min_days) * 86400)
+            sh_query = sh_query.filter(
+                or_(
+                    AccountStatusHistory.duration_seconds >= min_secs,
+                    and_(
+                        AccountStatusHistory.end_time.is_(None),
+                        func.extract(
+                            "epoch", func.now() - AccountStatusHistory.start_time
+                        )
+                        >= min_secs,
+                    ),
+                )
+            )
+
+        matching_acc_ids = [r[0] for r in sh_query.distinct().all()]
+        if not matching_acc_ids:
+            return {
+                "data": [],
+                "page_info": {
+                    "page": page,
+                    "total_pages": 0,
+                    "data_size": 0,
+                },
+            }
+        filters.append(Account.id.in_(matching_acc_ids))
 
     # Internal server-to-server API call to Underwriting Tool Backend (localhost:5050)
     if module:
@@ -574,13 +697,17 @@ async def get_all_accounts(
     if assignment_from_date or assignment_to_date:
         try:
             if assignment_from_date and assignment_to_date:
-                f_dt = datetime.strptime(assignment_from_date, "%Y-%m-%d").replace(tzinfo=IST)
+                f_dt = datetime.strptime(assignment_from_date, "%Y-%m-%d").replace(
+                    tzinfo=IST
+                )
                 t_dt = datetime.strptime(assignment_to_date, "%Y-%m-%d").replace(
                     hour=23, minute=59, second=59, tzinfo=IST
                 )
                 filters.append(Account.assignment_date.between(f_dt, t_dt))
             elif assignment_from_date:
-                f_dt = datetime.strptime(assignment_from_date, "%Y-%m-%d").replace(tzinfo=IST)
+                f_dt = datetime.strptime(assignment_from_date, "%Y-%m-%d").replace(
+                    tzinfo=IST
+                )
                 filters.append(Account.assignment_date >= f_dt)
             elif assignment_to_date:
                 t_dt = datetime.strptime(assignment_to_date, "%Y-%m-%d").replace(
@@ -597,13 +724,30 @@ async def get_all_accounts(
             module_query = {"$in": ["Accounts", "Account", "accounts", "account"]}
 
             date_conds = []
-            f_dt = datetime.strptime(note_from_date, "%Y-%m-%d").replace(hour=0, minute=0, second=0) if note_from_date else None
-            t_dt = datetime.strptime(note_to_date, "%Y-%m-%d").replace(hour=23, minute=59, second=59) if note_to_date else None
+            f_dt = (
+                datetime.strptime(note_from_date, "%Y-%m-%d").replace(
+                    hour=0, minute=0, second=0
+                )
+                if note_from_date
+                else None
+            )
+            t_dt = (
+                datetime.strptime(note_to_date, "%Y-%m-%d").replace(
+                    hour=23, minute=59, second=59
+                )
+                if note_to_date
+                else None
+            )
 
             f_str = f"{note_from_date}T00:00:00" if note_from_date else None
             t_str = f"{note_to_date}T23:59:59.999999" if note_to_date else None
 
-            for field in ["Modified_Time", "Created_Time", "modified_time", "created_time"]:
+            for field in [
+                "Modified_Time",
+                "Created_Time",
+                "modified_time",
+                "created_time",
+            ]:
                 if f_str and t_str:
                     date_conds.append({field: {"$gte": f_str, "$lte": t_str}})
                     if f_dt and t_dt:
@@ -619,12 +763,19 @@ async def get_all_accounts(
 
             n_filter = {
                 "$and": [
-                    {"$or": [{"module": module_query}, {"Parent_Id.module": module_query}]},
-                    {"$or": date_conds} if date_conds else {}
+                    {
+                        "$or": [
+                            {"module": module_query},
+                            {"Parent_Id.module": module_query},
+                        ]
+                    },
+                    {"$or": date_conds} if date_conds else {},
                 ]
             }
 
-            matching_notes = notes_coll.find(n_filter, {"Parent_Id": 1, "parent_id": 1, "_id": 0})
+            matching_notes = notes_coll.find(
+                n_filter, {"Parent_Id": 1, "parent_id": 1, "_id": 0}
+            )
             acc_ids_from_notes = set()
 
             for doc in matching_notes:
@@ -638,7 +789,9 @@ async def get_all_accounts(
                 if target_id and str(target_id).isdigit():
                     acc_ids_from_notes.add(int(target_id))
 
-            filters.append(Account.id.in_(list(acc_ids_from_notes) if acc_ids_from_notes else [-1]))
+            filters.append(
+                Account.id.in_(list(acc_ids_from_notes) if acc_ids_from_notes else [-1])
+            )
         except Exception as e:
             logging.error(f"Failed to filter by note date: {e}")
 
@@ -892,6 +1045,13 @@ async def get_all_accounts(
                 pair_filters=note_pairs, notes_collection=mongodb["Notes"]
             )
 
+        acc_ids = [acc.id for acc in data if hasattr(acc, "id")]
+        journeys_map = build_batch_status_journeys(db, acc_ids)
+        for acc in data:
+            j_list = journeys_map.get(acc.id, [])
+            acc.status_journey = j_list
+            acc.journey = j_list
+
         total_pages = math.ceil(total_data_size / limit)
         return {
             "data": data,
@@ -903,8 +1063,7 @@ async def get_all_accounts(
         }
 
     else:
-        # Standard list view query
-        data = (
+        rows = (
             db.query(
                 Account.id,
                 Account.account_name,
@@ -932,6 +1091,18 @@ async def get_all_accounts(
         )
         total_data_size = query.filter(*filters).count()
         total_pages = math.ceil(total_data_size / limit)
+
+        acc_ids = [r.id for r in rows if r.id]
+        journeys_map = build_batch_status_journeys(db, acc_ids)
+
+        data = []
+        for r in rows:
+            item_dict = dict(r._mapping)
+            j_list = journeys_map.get(r.id, [])
+            item_dict["status_journey"] = j_list
+            item_dict["journey"] = j_list
+            data.append(item_dict)
+
         return {
             "data": data,
             "page_info": {
@@ -946,6 +1117,10 @@ def get_account_by_id(db: Session, account_id: int) -> Account:
     account = db.query(Account).filter(Account.id == account_id).first()
     if not account:
         raise HTTPException(status_code=404, detail="Account not found")
+    journeys_map = build_batch_status_journeys(db, [account.id])
+    j_list = journeys_map.get(account.id, [])
+    account.status_journey = j_list
+    account.journey = j_list
     return account
 
 
@@ -961,7 +1136,11 @@ def get_status_color(status_name: str) -> str:
         return "emerald"
     elif "interested" in status_lower or "doc" in status_lower:
         return "purple"
-    elif "assessment" in status_lower or "review" in status_lower or "not" in status_lower:
+    elif (
+        "assessment" in status_lower
+        or "review" in status_lower
+        or "not" in status_lower
+    ):
         return "rose"
     return "blue"
 
@@ -1021,58 +1200,70 @@ def get_account_status_history(db: Session, account_id: int):
     for rec in history_records:
         user_name = "System"
         if rec.moved_by_user:
-            user_name = rec.moved_by_user.full_name or rec.moved_by_user.email or "System"
+            user_name = (
+                rec.moved_by_user.full_name or rec.moved_by_user.email or "System"
+            )
 
         start_time_dt = rec.start_time
         if start_time_dt and start_time_dt.tzinfo is None:
             start_time_dt = start_time_dt.replace(tzinfo=UTC)
 
-        start_time_str = start_time_dt.strftime("%d %b %Y, %I:%M %p") if start_time_dt else ""
+        start_time_str = (
+            start_time_dt.strftime("%d %b %Y, %I:%M %p") if start_time_dt else ""
+        )
         start_date_str = start_time_dt.strftime("%Y-%m-%d") if start_time_dt else ""
 
         if rec.end_time:
             end_time_dt = rec.end_time
             if end_time_dt and end_time_dt.tzinfo is None:
                 end_time_dt = end_time_dt.replace(tzinfo=UTC)
-            end_time_str = end_time_dt.strftime("%d %b %Y, %I:%M %p") if end_time_dt else ""
+            end_time_str = (
+                end_time_dt.strftime("%d %b %Y, %I:%M %p") if end_time_dt else ""
+            )
             end_date_str = end_time_dt.strftime("%Y-%m-%d") if end_time_dt else ""
-            dur_secs = rec.duration_seconds or (int((end_time_dt - start_time_dt).total_seconds()) if end_time_dt and start_time_dt else 0)
-            if dur_secs < 0:
-                dur_secs = 0
+            dur_secs = rec.duration_seconds or (
+                int((end_time_dt - start_time_dt).total_seconds())
+                if end_time_dt and start_time_dt
+                else 0
+            )
+            dur_secs = max(dur_secs, 0)
             duration_long = rec.total_time_stayed or format_duration_long(dur_secs)
             duration_short = format_duration_short(dur_secs)
             is_current = False
         else:
             end_time_str = "Present"
             end_date_str = "Present"
-            dur_secs = int((now_dt - start_time_dt).total_seconds()) if start_time_dt else 0
-            if dur_secs < 0:
-                dur_secs = 0
+            dur_secs = (
+                int((now_dt - start_time_dt).total_seconds()) if start_time_dt else 0
+            )
+            dur_secs = max(dur_secs, 0)
             duration_long = format_duration_long(dur_secs)
             duration_short = format_duration_short(dur_secs)
             is_current = True
 
-        result.append({
-            "id": str(rec.id),
-            "account_id": str(rec.account_id),
-            "company_id": rec.company_id or 1,
-            "status": rec.status,
-            "name": rec.status,
-            "start_time": start_time_dt,
-            "start_time_formatted": start_time_str,
-            "startDate": start_date_str,
-            "end_time": rec.end_time,
-            "end_time_formatted": end_time_str,
-            "endDate": end_date_str,
-            "total_time_stayed": duration_long,
-            "duration_seconds": dur_secs,
-            "duration": duration_short,
-            "is_current": is_current,
-            "moved_by_id": rec.moved_by_id,
-            "moved_by_name": user_name,
-            "updatedBy": user_name,
-            "color": get_status_color(rec.status),
-        })
+        result.append(
+            {
+                "id": str(rec.id),
+                "account_id": str(rec.account_id),
+                "company_id": rec.company_id or 1,
+                "status": rec.status,
+                "name": rec.status,
+                "start_time": start_time_dt,
+                "start_time_formatted": start_time_str,
+                "startDate": start_date_str,
+                "end_time": rec.end_time,
+                "end_time_formatted": end_time_str,
+                "endDate": end_date_str,
+                "total_time_stayed": duration_long,
+                "duration_seconds": dur_secs,
+                "duration": duration_short,
+                "is_current": is_current,
+                "moved_by_id": rec.moved_by_id,
+                "moved_by_name": user_name,
+                "updatedBy": user_name,
+                "color": get_status_color(rec.status),
+            }
+        )
 
     return result
 
@@ -1110,7 +1301,9 @@ def get_accounts_status_journey(
         for rec in history_records:
             user_name = "System"
             if rec.moved_by_user:
-                user_name = rec.moved_by_user.full_name or rec.moved_by_user.email or "System"
+                user_name = (
+                    rec.moved_by_user.full_name or rec.moved_by_user.email or "System"
+                )
 
             start_time_dt = rec.start_time
             if start_time_dt and start_time_dt.tzinfo is None:
@@ -1123,30 +1316,41 @@ def get_accounts_status_journey(
                 if end_time_dt and end_time_dt.tzinfo is None:
                     end_time_dt = end_time_dt.replace(tzinfo=UTC)
                 end_date_str = end_time_dt.strftime("%Y-%m-%d") if end_time_dt else ""
-                dur_secs = rec.duration_seconds or (int((end_time_dt - start_time_dt).total_seconds()) if end_time_dt and start_time_dt else 0)
+                dur_secs = rec.duration_seconds or (
+                    int((end_time_dt - start_time_dt).total_seconds())
+                    if end_time_dt and start_time_dt
+                    else 0
+                )
             else:
                 end_date_str = "Present"
-                dur_secs = int((now_dt - start_time_dt).total_seconds()) if start_time_dt else 0
+                dur_secs = (
+                    int((now_dt - start_time_dt).total_seconds())
+                    if start_time_dt
+                    else 0
+                )
 
-            if dur_secs < 0:
-                dur_secs = 0
+            dur_secs = max(dur_secs, 0)
 
-            journey_items.append({
-                "name": rec.status,
-                "duration": format_duration_short(dur_secs),
-                "color": get_status_color(rec.status),
-                "startDate": start_date_str,
-                "endDate": end_date_str,
-                "updatedBy": user_name,
-            })
+            journey_items.append(
+                {
+                    "name": rec.status,
+                    "duration": format_duration_short(dur_secs),
+                    "color": get_status_color(rec.status),
+                    "startDate": start_date_str,
+                    "endDate": end_date_str,
+                    "updatedBy": user_name,
+                }
+            )
 
-        result.append({
-            "id": str(acc.id),
-            "name": acc.account_name or f"Account #{acc.id}",
-            "owner": owner_name,
-            "currentStatus": acc.account_status or "Not set",
-            "journey": journey_items,
-        })
+        result.append(
+            {
+                "id": str(acc.id),
+                "name": acc.account_name or f"Account #{acc.id}",
+                "owner": owner_name,
+                "currentStatus": acc.account_status or "Not set",
+                "journey": journey_items,
+            }
+        )
 
     return result
 
@@ -1187,17 +1391,13 @@ def get_account_status_journey(db: Session, account_id: int):
         if start_time_dt and start_time_dt.tzinfo is None:
             start_time_dt = start_time_dt.replace(tzinfo=UTC)
 
-        start_date_str = (
-            start_time_dt.strftime("%Y-%m-%d") if start_time_dt else ""
-        )
+        start_date_str = start_time_dt.strftime("%Y-%m-%d") if start_time_dt else ""
 
         if rec.end_time:
             end_time_dt = rec.end_time
             if end_time_dt and end_time_dt.tzinfo is None:
                 end_time_dt = end_time_dt.replace(tzinfo=UTC)
-            end_date_str = (
-                end_time_dt.strftime("%Y-%m-%d") if end_time_dt else ""
-            )
+            end_date_str = end_time_dt.strftime("%Y-%m-%d") if end_time_dt else ""
             dur_secs = rec.duration_seconds or (
                 int((end_time_dt - start_time_dt).total_seconds())
                 if end_time_dt and start_time_dt
@@ -1206,13 +1406,10 @@ def get_account_status_journey(db: Session, account_id: int):
         else:
             end_date_str = "Present"
             dur_secs = (
-                int((now_dt - start_time_dt).total_seconds())
-                if start_time_dt
-                else 0
+                int((now_dt - start_time_dt).total_seconds()) if start_time_dt else 0
             )
 
-        if dur_secs < 0:
-            dur_secs = 0
+        dur_secs = max(dur_secs, 0)
 
         journey_items.append(
             {
@@ -1232,7 +1429,6 @@ def get_account_status_journey(db: Session, account_id: int):
         "currentStatus": acc.account_status or "Not set",
         "journey": journey_items,
     }
-
 
 
 async def accounts_csv_update(file: UploadFile, db: Session):

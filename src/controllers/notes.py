@@ -226,7 +226,9 @@ def get_notes(
             "module": 1,
         }
 
-        notes_cursor = notes_collection.find(filter_query, projection)
+        notes_cursor = notes_collection.find(filter_query, projection).sort(
+            [("Created_Time", -1), ("_id", -1)]
+        )
         notes = []
         for note in notes_cursor:
             # Time formatting

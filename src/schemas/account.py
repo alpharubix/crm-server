@@ -172,6 +172,15 @@ from typing import Any
 from pydantic import BaseModel
 
 
+class AccountStatusJourneyItem(BaseModel):
+    name: str
+    duration: str
+    color: str
+    startDate: str
+    endDate: str
+    updatedBy: str
+
+
 class AccountResponse(BaseModel):
     # Existing fields (keep all)
     id: str | None = None
@@ -230,6 +239,10 @@ class AccountResponse(BaseModel):
     # Customer Salary Details — optional; frontend enforces when profile_type = "Salaried"
     customer_salary_details: dict[str, Any] | None = Field(default_factory=dict)
 
+    # Account Status Journey
+    status_journey: list[AccountStatusJourneyItem] | None = Field(default_factory=list)
+    journey: list[AccountStatusJourneyItem] | None = Field(default_factory=list)
+
     model_config = {"from_attributes": True}
 
     @model_validator(mode="before")
@@ -260,6 +273,8 @@ class AccountResponse(BaseModel):
                 "customer_salary_details",
                 "custom_fields",
                 "parent_account",
+                "status_journey",
+                "journey",
             ):
                 if hasattr(value, attr):
                     data[attr] = getattr(value, attr)
@@ -390,13 +405,6 @@ class AccountStatusHistoryResponse(BaseModel):
         from_attributes = True
 
 
-class AccountStatusJourneyItem(BaseModel):
-    name: str
-    duration: str
-    color: str
-    startDate: str
-    endDate: str
-    updatedBy: str
 
 
 class AccountStatusJourneyResponse(BaseModel):

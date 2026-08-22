@@ -177,6 +177,17 @@ from typing import Any, Dict, List, Optional
 from pydantic import BaseModel
 
 
+class AccountStatusJourneyItem(BaseModel):
+    name: str
+    duration: str
+    color: str
+    startDate: str
+    endDate: str
+    updatedBy: str
+
+    model_config = {"from_attributes": True}
+
+
 class AccountResponse(BaseModel):
     # Existing fields (keep all)
     id: Optional[str] = None
@@ -237,12 +248,16 @@ class AccountResponse(BaseModel):
     # Customer Salary Details — optional; frontend enforces when profile_type = "Salaried"
     customer_salary_details: Optional[Dict[str, Any]] = Field(default_factory=dict)
 
+    # Account Status Journey
+    status_journey: Optional[List[AccountStatusJourneyItem]] = Field(default_factory=list)
+    journey: Optional[List[AccountStatusJourneyItem]] = Field(default_factory=list)
+
     model_config = {"from_attributes": True}
 
     @model_validator(mode="before")
     @classmethod
     def extract_custom_attributes(cls, value):
-        if hasattr(value, "_tickets_list") or hasattr(value, "_deal_documents_list") or hasattr(value, "_revenue_list"):
+        if hasattr(value, "_tickets_list") or hasattr(value, "_deal_documents_list") or hasattr(value, "_revenue_list") or hasattr(value, "status_journey"):
             data = {}
             if hasattr(value, "__table__"):
                 for c in value.__table__.columns:
@@ -253,7 +268,7 @@ class AccountResponse(BaseModel):
                 "deals", "notes", "business_details", "business_premise_address",
                 "applicant_residence_address", "co_applicant_residence_address",
                 "customer_references", "customer_salary_details", "custom_fields",
-                "parent_account"
+                "parent_account", "status_journey", "journey"
             ):
                 if hasattr(value, attr):
                     data[attr] = getattr(value, attr)

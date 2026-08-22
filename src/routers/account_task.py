@@ -1,19 +1,18 @@
-from typing import Optional, List
 from fastapi import APIRouter, Depends, Query, Request, status
 from sqlalchemy.orm import Session
 
+from src.controllers import account_task as controller
 from src.database import get_db, get_mongodb
 from src.schemas.account_task import (
     AccountTaskCreate,
+    AccountTaskListResponse,
+    AccountTaskUpdate,
     BulkAccountTaskCreate,
     BulkTaskStatusUpdate,
-    AccountTaskUpdate,
-    AccountTaskSchema,
-    AccountTaskListResponse,
 )
-from src.controllers import account_task as controller
 
 router = APIRouter(tags=["Account Tasks"])
+
 
 @router.post(
     "/account-tasks",
@@ -26,7 +25,10 @@ def create_task(
     db: Session = Depends(get_db),
 ):
     current_user_id = getattr(request.state, "user_id", 1)
-    return controller.create_account_task(db=db, task_in=task_in, current_user_id=int(current_user_id))
+    return controller.create_account_task(
+        db=db, task_in=task_in, current_user_id=int(current_user_id)
+    )
+
 
 @router.post(
     "/account-tasks/bulk",
@@ -39,7 +41,10 @@ def bulk_create_tasks(
     db: Session = Depends(get_db),
 ):
     current_user_id = getattr(request.state, "user_id", 1)
-    return controller.bulk_create_account_tasks(db=db, bulk_in=bulk_in, current_user_id=int(current_user_id))
+    return controller.bulk_create_account_tasks(
+        db=db, bulk_in=bulk_in, current_user_id=int(current_user_id)
+    )
+
 
 @router.put(
     "/account-tasks/bulk-status",
@@ -56,9 +61,12 @@ def bulk_update_task_status(
         db=db,
         task_ids=payload.task_ids,
         new_status=payload.task_status,
-        current_user_id=int(current_user_id) if current_user_id and str(current_user_id).isdigit() else None,
+        current_user_id=int(current_user_id)
+        if current_user_id and str(current_user_id).isdigit()
+        else None,
         current_role=user_role,
     )
+
 
 @router.get(
     "/account-tasks",
@@ -68,32 +76,32 @@ def list_tasks(
     request: Request,
     page: int = Query(1, ge=1),
     page_size: int = Query(10, ge=1, le=100),
-    account_id: Optional[int] = Query(None),
-    task_status: Optional[str] = Query(None),
-    task_type: Optional[str] = Query(None),
-    call_back_status: Optional[str] = Query(None),
-    search: Optional[str] = Query(None),
-    assigned_to_id: Optional[int] = Query(None),
-    account_owner_id: Optional[List[str] | List[int] | str | int] = Query(None),
-    source_type: Optional[List[str]] = Query(None),
-    account_stage: Optional[List[str]] = Query(None),
-    business_status: Optional[List[str]] = Query(None),
-    waba_interested: Optional[str] = Query(None),
-    is_priority_account: Optional[str] = Query(None),
-    cb_condition: Optional[str] = Query(None),
-    cb_users: Optional[List[str] | List[int] | str | int] = Query(None),
-    cb_date_condition: Optional[str] = Query(None),
-    cb_from_date: Optional[str] = Query(None),
-    cb_to_date: Optional[str] = Query(None),
-    assigned_date_condition: Optional[str] = Query(None),
-    assigned_from_date: Optional[str] = Query(None),
-    assigned_to_date: Optional[str] = Query(None),
-    created_from_date: Optional[str] = Query(None),
-    created_to_date: Optional[str] = Query(None),
-    assignment_from_date: Optional[str] = Query(None),
-    assignment_to_date: Optional[str] = Query(None),
-    note_from_date: Optional[str] = Query(None),
-    note_to_date: Optional[str] = Query(None),
+    account_id: str | int | None = Query(None),
+    task_status: str | None = Query(None),
+    task_type: str | None = Query(None),
+    call_back_status: str | None = Query(None),
+    search: str | None = Query(None),
+    assigned_to_id: str | int | None = Query(None),
+    account_owner_id: list[str] | list[int] | str | int | None = Query(None),
+    source_type: list[str] | None = Query(None),
+    account_stage: list[str] | None = Query(None),
+    business_status: list[str] | None = Query(None),
+    waba_interested: str | None = Query(None),
+    is_priority_account: str | None = Query(None),
+    cb_condition: str | None = Query(None),
+    cb_users: list[str] | list[int] | str | int | None = Query(None),
+    cb_date_condition: str | None = Query(None),
+    cb_from_date: str | None = Query(None),
+    cb_to_date: str | None = Query(None),
+    assigned_date_condition: str | None = Query(None),
+    assigned_from_date: str | None = Query(None),
+    assigned_to_date: str | None = Query(None),
+    created_from_date: str | None = Query(None),
+    created_to_date: str | None = Query(None),
+    assignment_from_date: str | None = Query(None),
+    assignment_to_date: str | None = Query(None),
+    note_from_date: str | None = Query(None),
+    note_to_date: str | None = Query(None),
     db: Session = Depends(get_db),
     mongodb=Depends(get_mongodb),
 ):
@@ -134,15 +142,16 @@ def list_tasks(
         user_role=user_role,
     )
 
+
 @router.get(
     "/account-tasks/{task_id}",
     response_model=dict,
 )
 def get_task(
     request: Request,
-    task_id: int,
+    task_id: str,
     db: Session = Depends(get_db),
-    mongodb = Depends(get_mongodb),
+    mongodb=Depends(get_mongodb),
 ):
     user_id = getattr(request.state, "user_id", None)
     user_role = getattr(request.state, "role", None)
@@ -154,13 +163,14 @@ def get_task(
         user_role=user_role,
     )
 
+
 @router.put(
     "/account-tasks/{task_id}",
     response_model=dict,
 )
 def update_task(
     request: Request,
-    task_id: int,
+    task_id: str,
     task_in: AccountTaskUpdate,
     db: Session = Depends(get_db),
 ):
@@ -170,9 +180,12 @@ def update_task(
         db=db,
         task_id=task_id,
         task_in=task_in,
-        current_user_id=int(current_user_id),
+        current_user_id=int(current_user_id)
+        if str(current_user_id).isdigit()
+        else current_user_id,
         user_role=user_role,
     )
+
 
 @router.delete(
     "/account-tasks/{task_id}",
@@ -180,7 +193,7 @@ def update_task(
 )
 def delete_task(
     request: Request,
-    task_id: int,
+    task_id: str,
     db: Session = Depends(get_db),
 ):
     current_user_id = getattr(request.state, "user_id", 1)
@@ -188,9 +201,12 @@ def delete_task(
     return controller.delete_account_task(
         db=db,
         task_id=task_id,
-        current_user_id=int(current_user_id),
+        current_user_id=int(current_user_id)
+        if str(current_user_id).isdigit()
+        else current_user_id,
         user_role=user_role,
     )
+
 
 @router.get(
     "/accounts/{account_id}/tasks",
@@ -198,7 +214,7 @@ def delete_task(
 )
 def list_tasks_for_account(
     request: Request,
-    account_id: int,
+    account_id: str,
     page: int = Query(1, ge=1),
     page_size: int = Query(10, ge=1, le=100),
     db: Session = Depends(get_db),

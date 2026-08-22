@@ -1,4 +1,3 @@
-import calendar
 import math
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -56,7 +55,12 @@ def task_to_dict(
             created_by_name = users_map[c_str]
         elif db:
             try:
-                u = db.query(User).filter(or_(User.id == int(task.created_by_id), User.zuid == c_str)).first()
+                c_int = int(c_str) if c_str.isdigit() else None
+                u = (
+                    db.query(User)
+                    .filter(or_(User.id == c_int, User.zuid == c_str))
+                    .first()
+                )
                 if u:
                     created_by_name = u.full_name or u.email
             except Exception:
@@ -68,31 +72,39 @@ def task_to_dict(
             assigned_name = users_map[a_str]
         elif db:
             try:
-                u = db.query(User).filter(or_(User.id == int(assigned_id), User.zuid == a_str)).first()
+                a_int = int(a_str) if a_str.isdigit() else None
+                u = (
+                    db.query(User)
+                    .filter(or_(User.id == a_int, User.zuid == a_str))
+                    .first()
+                )
                 if u:
                     assigned_name = u.full_name or u.email
             except Exception:
                 pass
 
     call_back_dt = None
-    if task.account and getattr(task.account, 'call_back_date_time', None):
+    if task.account and getattr(task.account, "call_back_date_time", None):
         cb = task.account.call_back_date_time
-        call_back_dt = cb.isoformat() if hasattr(cb, 'isoformat') else str(cb)
+        call_back_dt = cb.isoformat() if hasattr(cb, "isoformat") else str(cb)
 
     acc_assigned_dt = None
-    if task.account and getattr(task.account, 'assignment_date', None):
+    if task.account and getattr(task.account, "assignment_date", None):
         ad = task.account.assignment_date
-        acc_assigned_dt = ad.isoformat() if hasattr(ad, 'isoformat') else str(ad)
+        acc_assigned_dt = ad.isoformat() if hasattr(ad, "isoformat") else str(ad)
 
     return {
         "id": str(task.id) if task.id is not None else None,
         "module_name": task.module_name or "Account",
         "account_id": str(task.account_id) if task.account_id is not None else None,
-        "account_name": task.account_name or (task.account.account_name if task.account else None),
+        "account_name": task.account_name
+        or (task.account.account_name if task.account else None),
         "account_owner": acc_owner_name,
         "account_owner_id": str(acc_owner_id) if acc_owner_id is not None else None,
-        "account_status": task.account_status or (task.account.account_status if task.account else None),
-        "account_stage": task.account_stage or (task.account.account_stage if task.account else None),
+        "account_status": task.account_status
+        or (task.account.account_status if task.account else None),
+        "account_stage": task.account_stage
+        or (task.account.account_stage if task.account else None),
         "call_back_date_status": task.call_back_date_status,
         "call_back_date_time": call_back_dt,
         "account_assigned_date_time": acc_assigned_dt,
@@ -103,9 +115,13 @@ def task_to_dict(
         "task_status": effective_status,
         "assigned_to_id": str(assigned_id) if assigned_id is not None else None,
         "assigned_to_name": assigned_name,
-        "created_by_id": str(task.created_by_id) if task.created_by_id is not None else None,
+        "created_by_id": str(task.created_by_id)
+        if task.created_by_id is not None
+        else None,
         "created_by_name": created_by_name,
-        "modified_by_id": str(task.modified_by_id) if task.modified_by_id is not None else None,
+        "modified_by_id": str(task.modified_by_id)
+        if task.modified_by_id is not None
+        else None,
         "created_at": task.created_at,
         "updated_at": task.updated_at,
     }
@@ -133,7 +149,6 @@ def create_account_task(db: Session, task_in: AccountTaskCreate, current_user_id
         company_id=1,
         module_name=task_in.module_name or "Account",
         account_id=account.id,
-        account_owner_id=account.account_owner_id,
         task_type=task_in.task_type,
         task_description=task_in.task_description or "",
         task_assigned_date_time=task_in.task_assigned_date_time,
@@ -384,7 +399,9 @@ def get_account_tasks(
         owner_ids = []
         for item in raw_ids:
             if isinstance(item, str) and "," in item:
-                owner_ids.extend([int(x.strip()) for x in item.split(",") if x.strip().isdigit()])
+                owner_ids.extend(
+                    [int(x.strip()) for x in item.split(",") if x.strip().isdigit()]
+                )
             elif str(item).isdigit():
                 owner_ids.append(int(item))
 
@@ -497,14 +514,24 @@ def get_account_tasks(
     if assigned_from_date or assigned_to_date:
         try:
             if assigned_from_date and assigned_to_date:
-                f_dt = datetime.strptime(assigned_from_date, "%Y-%m-%d").replace(tzinfo=IST)
-                t_dt = datetime.strptime(assigned_to_date, "%Y-%m-%d").replace(hour=23, minute=59, second=59, tzinfo=IST)
-                query = query.filter(AccountTask.task_assigned_date_time.between(f_dt, t_dt))
+                f_dt = datetime.strptime(assigned_from_date, "%Y-%m-%d").replace(
+                    tzinfo=IST
+                )
+                t_dt = datetime.strptime(assigned_to_date, "%Y-%m-%d").replace(
+                    hour=23, minute=59, second=59, tzinfo=IST
+                )
+                query = query.filter(
+                    AccountTask.task_assigned_date_time.between(f_dt, t_dt)
+                )
             elif assigned_from_date:
-                f_dt = datetime.strptime(assigned_from_date, "%Y-%m-%d").replace(tzinfo=IST)
+                f_dt = datetime.strptime(assigned_from_date, "%Y-%m-%d").replace(
+                    tzinfo=IST
+                )
                 query = query.filter(AccountTask.task_assigned_date_time >= f_dt)
             elif assigned_to_date:
-                t_dt = datetime.strptime(assigned_to_date, "%Y-%m-%d").replace(hour=23, minute=59, second=59, tzinfo=IST)
+                t_dt = datetime.strptime(assigned_to_date, "%Y-%m-%d").replace(
+                    hour=23, minute=59, second=59, tzinfo=IST
+                )
                 query = query.filter(AccountTask.task_assigned_date_time <= t_dt)
         except Exception:
             pass
@@ -539,13 +566,17 @@ def get_account_tasks(
             query = query.join(AccountTask.account)
         try:
             if assignment_from_date and assignment_to_date:
-                f_dt = datetime.strptime(assignment_from_date, "%Y-%m-%d").replace(tzinfo=IST)
+                f_dt = datetime.strptime(assignment_from_date, "%Y-%m-%d").replace(
+                    tzinfo=IST
+                )
                 t_dt = datetime.strptime(assignment_to_date, "%Y-%m-%d").replace(
                     hour=23, minute=59, second=59, tzinfo=IST
                 )
                 query = query.filter(Account.assignment_date.between(f_dt, t_dt))
             elif assignment_from_date:
-                f_dt = datetime.strptime(assignment_from_date, "%Y-%m-%d").replace(tzinfo=IST)
+                f_dt = datetime.strptime(assignment_from_date, "%Y-%m-%d").replace(
+                    tzinfo=IST
+                )
                 query = query.filter(Account.assignment_date >= f_dt)
             elif assignment_to_date:
                 t_dt = datetime.strptime(assignment_to_date, "%Y-%m-%d").replace(
@@ -559,16 +590,42 @@ def get_account_tasks(
     if mongodb is not None and (note_from_date or note_to_date):
         try:
             notes_coll = mongodb["Notes"]
-            module_query = {"$in": ["Account_Tasks", "AccountTask", "AccountTasks", "Account Task", "account_task", "account_tasks"]}
+            module_query = {
+                "$in": [
+                    "Account_Tasks",
+                    "AccountTask",
+                    "AccountTasks",
+                    "Account Task",
+                    "account_task",
+                    "account_tasks",
+                ]
+            }
 
             date_conds = []
-            f_dt = datetime.strptime(note_from_date, "%Y-%m-%d").replace(hour=0, minute=0, second=0) if note_from_date else None
-            t_dt = datetime.strptime(note_to_date, "%Y-%m-%d").replace(hour=23, minute=59, second=59) if note_to_date else None
+            f_dt = (
+                datetime.strptime(note_from_date, "%Y-%m-%d").replace(
+                    hour=0, minute=0, second=0
+                )
+                if note_from_date
+                else None
+            )
+            t_dt = (
+                datetime.strptime(note_to_date, "%Y-%m-%d").replace(
+                    hour=23, minute=59, second=59
+                )
+                if note_to_date
+                else None
+            )
 
             f_str = f"{note_from_date}T00:00:00" if note_from_date else None
             t_str = f"{note_to_date}T23:59:59.999999" if note_to_date else None
 
-            for field in ["Modified_Time", "Created_Time", "modified_time", "created_time"]:
+            for field in [
+                "Modified_Time",
+                "Created_Time",
+                "modified_time",
+                "created_time",
+            ]:
                 if f_str and t_str:
                     date_conds.append({field: {"$gte": f_str, "$lte": t_str}})
                     if f_dt and t_dt:
@@ -584,12 +641,19 @@ def get_account_tasks(
 
             n_filter = {
                 "$and": [
-                    {"$or": [{"module": module_query}, {"Parent_Id.module": module_query}]},
-                    {"$or": date_conds} if date_conds else {}
+                    {
+                        "$or": [
+                            {"module": module_query},
+                            {"Parent_Id.module": module_query},
+                        ]
+                    },
+                    {"$or": date_conds} if date_conds else {},
                 ]
             }
 
-            matching_notes = notes_coll.find(n_filter, {"Parent_Id": 1, "parent_id": 1, "_id": 0})
+            matching_notes = notes_coll.find(
+                n_filter, {"Parent_Id": 1, "parent_id": 1, "_id": 0}
+            )
             task_ids_from_notes = set()
 
             for doc in matching_notes:
@@ -603,9 +667,15 @@ def get_account_tasks(
                 if target_id and str(target_id).isdigit():
                     task_ids_from_notes.add(int(target_id))
 
-            query = query.filter(AccountTask.id.in_(list(task_ids_from_notes) if task_ids_from_notes else [-1]))
+            query = query.filter(
+                AccountTask.id.in_(
+                    list(task_ids_from_notes) if task_ids_from_notes else [-1]
+                )
+            )
         except Exception as e:
-            logging.error(f"Failed to query notes for account task note date filter: {e}")
+            logging.error(
+                f"Failed to query notes for account task note date filter: {e}"
+            )
 
     total_records = query.count()
     total_pages = math.ceil(total_records / page_size) if page_size > 0 else 1
@@ -693,11 +763,12 @@ def check_task_access(task: AccountTask, user_id: int | None, user_role: str | N
 
 def get_account_task_by_id(
     db: Session,
-    task_id: int,
+    task_id: str | int,
     mongodb: Any | None = None,
-    user_id: int | None = None,
+    user_id: str | int | None = None,
     user_role: str | None = None,
 ):
+    t_int = int(task_id) if str(task_id).isdigit() else None
     task = (
         db.query(AccountTask)
         .options(
@@ -705,7 +776,7 @@ def get_account_task_by_id(
             joinedload(AccountTask.assigned_to),
         )
         .filter(
-            AccountTask.id == task_id,
+            or_(AccountTask.id == task_id, AccountTask.id == t_int),
             or_(AccountTask.company_id == 1, AccountTask.company_id.is_(None)),
         )
         .first()
@@ -717,7 +788,7 @@ def get_account_task_by_id(
             detail=f"Account Task with ID {task_id} not found",
         )
 
-    check_task_access(task, user_id, user_role)
+    check_task_access(task, int(user_id) if user_id else None, user_role)
 
     task_dict = task_to_dict(task, db=db)
     if mongodb is not None:
@@ -743,16 +814,17 @@ def get_account_task_by_id(
 
 def update_account_task(
     db: Session,
-    task_id: int,
+    task_id: str | int,
     task_in: AccountTaskUpdate,
-    current_user_id: int,
+    current_user_id: str | int,
     user_role: str | None = None,
 ):
+    t_int = int(task_id) if str(task_id).isdigit() else None
     task = (
         db.query(AccountTask)
         .options(joinedload(AccountTask.account))
         .filter(
-            AccountTask.id == task_id,
+            or_(AccountTask.id == task_id, AccountTask.id == t_int),
             or_(AccountTask.company_id == 1, AccountTask.company_id.is_(None)),
         )
         .first()
@@ -763,16 +835,21 @@ def update_account_task(
             detail=f"Account Task with ID {task_id} not found",
         )
 
-    check_task_access(task, current_user_id, user_role)
+    check_task_access(task, int(current_user_id), user_role)
 
     update_data = task_in.model_dump(exclude_unset=True)
 
     # Executive field update restriction: Executives can only mark tasks as completed
     role = str(user_role).lower() if user_role else ""
     bypass_ids = getattr(MANAGERID, "BYPASS_USER_IDS", set())
+    bypass_str_set = {str(b) for b in bypass_ids}
+    curr_user_str = str(current_user_id) if current_user_id is not None else ""
+    curr_user_int = int(current_user_id) if curr_user_str.isdigit() else None
+
     if (
         role not in ("super_admin", "admin", "manager")
-        and current_user_id not in bypass_ids
+        and curr_user_str not in bypass_str_set
+        and (curr_user_int is None or curr_user_int not in bypass_ids)
     ):
         non_status_changes = [k for k in update_data.keys() if k != "task_status"]
         if non_status_changes:
@@ -783,9 +860,14 @@ def update_account_task(
 
     new_requested_status = update_data.get("task_status")
     if new_requested_status:
-        user_ids = {str(current_user_id)}
+        user_ids = {curr_user_str}
+        if curr_user_int is not None:
+            user_ids.add(str(curr_user_int))
         try:
-            u = db.query(User).filter(or_(User.id == current_user_id, User.zuid == str(current_user_id))).first()
+            u_filter = [User.zuid == curr_user_str]
+            if curr_user_int is not None:
+                u_filter.append(User.id == curr_user_int)
+            u = db.query(User).filter(or_(*u_filter)).first()
             if u:
                 user_ids.add(str(u.id))
                 if getattr(u, "zuid", None):
@@ -802,7 +884,12 @@ def update_account_task(
             allowed_owner_ids.add(str(task.assigned_to_id))
 
         is_owner = bool(user_ids.intersection(allowed_owner_ids))
-        if is_owner and new_requested_status not in ("Pending", "In Progress", "Completed", "Verified"):
+        if is_owner and new_requested_status not in (
+            "Pending",
+            "In Progress",
+            "Completed",
+            "Verified",
+        ):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Account Owners can only set task status to Pending, In Progress, Completed, or Verified.",
@@ -816,7 +903,7 @@ def update_account_task(
     if new_status != "Unassigned" and not task.assigned_to_id and task.account:
         task.assigned_to_id = task.account.account_owner_id
 
-    task.modified_by_id = current_user_id
+    task.modified_by_id = int(current_user_id)
     task.updated_at = datetime.now(UTC)
 
     db.add(task)
@@ -833,7 +920,7 @@ def update_account_task(
 
     log_action(
         db,
-        current_user_id,
+        int(current_user_id),
         user_role or "USER",
         "UPDATED",
         "AccountTask",
@@ -846,19 +933,19 @@ def update_account_task(
 
 def bulk_update_task_status(
     db: Session,
-    task_ids: list[int],
+    task_ids: list[str | int],
     new_status: str,
-    current_user_id: int | None,
+    current_user_id: str | int,
     current_role: str | None = None,
 ):
-    if not task_ids:
-        return {"message": "No tasks provided", "updated_count": 0}
-
+    id_strs = [str(tid) for tid in task_ids]
+    id_ints = [int(tid) for tid in task_ids if str(tid).isdigit()]
+    all_targets = id_strs + id_ints
     tasks = (
         db.query(AccountTask)
         .options(joinedload(AccountTask.account))
         .filter(
-            AccountTask.id.in_(task_ids),
+            AccountTask.id.in_(all_targets),
             or_(AccountTask.company_id == 1, AccountTask.company_id.is_(None)),
         )
         .all()
@@ -873,10 +960,21 @@ def bulk_update_task_status(
     # Permission check: Mass update of task status is available ONLY to the task creator
     role = str(current_role).lower() if current_role else ""
     bypass_ids = getattr(MANAGERID, "BYPASS_USER_IDS", set())
+    bypass_str_set = {str(b) for b in bypass_ids}
+    curr_user_str = str(current_user_id) if current_user_id is not None else ""
+    curr_user_int = int(current_user_id) if curr_user_str.isdigit() else None
+
     if role not in ("super_admin", "admin") and (
-        current_user_id not in bypass_ids if current_user_id else True
+        (
+            curr_user_str not in bypass_str_set
+            and (curr_user_int is None or curr_user_int not in bypass_ids)
+        )
+        if current_user_id
+        else True
     ):
-        unauthorized_tasks = [t.id for t in tasks if t.created_by_id != current_user_id]
+        unauthorized_tasks = [
+            t.id for t in tasks if str(t.created_by_id) != curr_user_str
+        ]
         if unauthorized_tasks:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
@@ -887,9 +985,14 @@ def bulk_update_task_status(
     if new_status == "Completed":
         role = str(current_role).lower() if current_role else ""
         if role not in ("super_admin", "admin", "manager"):
-            user_ids = {str(current_user_id)}
+            user_ids = {curr_user_str}
+            if curr_user_int is not None:
+                user_ids.add(str(curr_user_int))
             try:
-                u = db.query(User).filter(or_(User.id == current_user_id, User.zuid == str(current_user_id))).first()
+                u_filter = [User.zuid == curr_user_str]
+                if curr_user_int is not None:
+                    u_filter.append(User.id == curr_user_int)
+                u = db.query(User).filter(or_(*u_filter)).first()
                 if u:
                     user_ids.add(str(u.id))
                     if getattr(u, "zuid", None):
@@ -925,7 +1028,7 @@ def bulk_update_task_status(
         old_status = task.task_status
         if old_status != new_status:
             task.task_status = new_status
-            task.modified_by_id = current_user_id
+            task.modified_by_id = int(current_user_id)
             task.updated_at = datetime.now(UTC)
             db.add(task)
             updated_count += 1
@@ -943,7 +1046,7 @@ def bulk_update_task_status(
     if current_user_id:
         log_action(
             db,
-            current_user_id,
+            int(current_user_id),
             current_role or "USER",
             "BULK_UPDATED_STATUS",
             "AccountTask",
@@ -961,39 +1064,20 @@ def bulk_update_task_status(
     }
 
 
-def delete_account_task(
-    db: Session,
-    task_id: int,
-    current_user_id: int,
-    user_role: str | None = None,
-):
-    task = (
-        db.query(AccountTask)
-        .options(joinedload(AccountTask.account))
-        .filter(
-            AccountTask.id == task_id,
-            or_(AccountTask.company_id == 1, AccountTask.company_id.is_(None)),
-        )
-        .first()
-    )
-    if not task:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Account Task with ID {task_id} not found",
-        )
+# def delete_account_task(
+#     db: Session,
+#     check_task_access(task, current_user_id, user_role)
 
-    check_task_access(task, current_user_id, user_role)
+#     db.delete(task)
+#     db.commit()
 
-    db.delete(task)
-    db.commit()
-
-    log_action(
-        db,
-        current_user_id,
-        user_role or "USER",
-        "DELETED",
-        "AccountTask",
-        task_id,
-        {},
-    )
-    return {"message": "Account Task deleted successfully"}
+#     log_action(
+#         db,
+#         current_user_id,
+#         user_role or "USER",
+#         "DELETED",
+#         "AccountTask",
+#         task_id,
+#         {},
+#     )
+#     return {"message": "Account Task deleted successfully"}

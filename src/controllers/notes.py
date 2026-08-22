@@ -1,10 +1,11 @@
 import re
-from datetime import datetime, timezone
-from typing import Any, Dict, List
+from datetime import UTC, datetime
+from typing import Any
 from zoneinfo import ZoneInfo
 
 # from fastapi.exceptions import HTTPException
 from pymongo.synchronous.collection import Collection
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 from starlette.responses import JSONResponse
 
@@ -117,14 +118,18 @@ def insert_notes(user_id, user_role, note, parent_id, db, module_name, pg_db: Se
             }
         elif module_name in ["Account_Tasks", "AccountTasks", "AccountTask"]:
             from src.models.account_task import AccountTask
+
+            p_int = int(parent_id) if str(parent_id).isdigit() else None
             raw_parent_task = (
                 pg_db.query(AccountTask.id, AccountTask.task_type)
-                .filter(AccountTask.id == int(parent_id))
+                .filter(or_(AccountTask.id == parent_id, AccountTask.id == p_int))
                 .first()
             )
             Parent_Id = {
                 "id": str(raw_parent_task.id) if raw_parent_task else str(parent_id),
-                "task_name": f"Account Task #{raw_parent_task.id}" if raw_parent_task else "Account Task",
+                "task_name": f"Account Task #{raw_parent_task.id}"
+                if raw_parent_task
+                else "Account Task",
             }
         else:
             raw_parent_deal = (
@@ -154,8 +159,8 @@ def insert_notes(user_id, user_role, note, parent_id, db, module_name, pg_db: Se
                 "Note_Content": note,
                 "Parent_Id": Parent_Id,
                 "module": module_name,
-                "Created_Time": datetime.now(timezone.utc).isoformat(),
-                "Modified_Time": datetime.now(timezone.utc).isoformat(),
+                "Created_Time": datetime.now(UTC).isoformat(),
+                "Modified_Time": datetime.now(UTC).isoformat(),
             }
         )
         print("Insertion result", result)
@@ -187,7 +192,7 @@ def insert_notes(user_id, user_role, note, parent_id, db, module_name, pg_db: Se
 
 def get_notes(
     notes_collection: Collection,
-    pair_filters: List[Dict[str, str]] = None,
+    pair_filters: list[dict[str, str]] = None,
     id_list: Any = None,
     module_name: str | list[str] = None,
 ):
@@ -239,7 +244,7 @@ def get_notes(
                         )
                         # assume UTC if timezone missing
                         if dt.tzinfo is None:
-                            dt = dt.replace(tzinfo=timezone.utc)
+                            dt = dt.replace(tzinfo=UTC)
 
                         # convert to IST
                         dt = dt.astimezone(IST)
@@ -310,7 +315,7 @@ def mentions(note, module_name, parent_id):
             # after collection all the emails of the user time to prepare the body and send the email
             mail.process_mention_emails(email_list)
             print("All emails sent successfully")
-            return None
+            return
     except Exception as e:
         print(e)
-        return None
+        return

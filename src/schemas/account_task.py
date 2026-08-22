@@ -38,12 +38,12 @@ class AccountTaskUpdate(BaseModel):
 
 
 class AccountTaskSchema(BaseModel):
-    id: str | int
+    id: str
     module_name: str
-    account_id: str | int
+    account_id: str
     account_name: str | None = None
     account_owner: str | None = None
-    account_owner_id: str | int | None = None
+    account_owner_id: str | None = None
     account_status: str | None = None
     account_stage: str | None = None
     call_back_date_status: str | None = None
@@ -52,10 +52,10 @@ class AccountTaskSchema(BaseModel):
     task_assigned_date_time: datetime | None = None
     task_due_date_time: datetime | None = None
     task_status: str
-    assigned_to_id: str | int | None = None
+    assigned_to_id: str | None = None
     assigned_to_name: str | None = None
-    created_by_id: str | int | None = None
-    modified_by_id: str | int | None = None
+    created_by_id: str | None = None
+    modified_by_id: str | None = None
     created_at: datetime
     updated_at: datetime
 

@@ -65,6 +65,7 @@ class MANAGERID:
             3899927000000221552,  # Sarada
             3899927000000452950,  # Vinod
             3899927000000527649,  # Ambika
+            3899927000000580845,  # Santhosh Kumar S
         ],
         # Ashwini R
         3899927000000319812: [
@@ -179,6 +180,12 @@ class MANAGERID:
             3899927000005965050,  # Sahil
             3899927000000650180,  # Pranay
             3899927000000452950,  # Vinod
+        ],
+        # Sachin Vitthal Jadhav
+        3899927000000631533: [
+            3899927000000631533,  # Sachin Vitthal Jadhav
+            3899927000000154963,  # Santosh Yoganand Pawar
+            3899927000000433736,  # Niteen Bhausaheb Bansode
         ],
         # # Digamber
         # 3899927000005114020: [

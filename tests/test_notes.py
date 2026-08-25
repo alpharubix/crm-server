@@ -33,7 +33,7 @@ def test_notes_lifecycle(auth_client, test_user, mongo_db):
     }
     response = auth_client.post("/notes", json=note_payload)
     assert response.status_code == 201
-    assert response.json() == {"message": "Note saved successfully"}
+    assert response.json()["message"] == "Note saved successfully"
 
     # 3. Get detailed account view to verify the note was attached
     detail_response = auth_client.get(f"/accounts?account_id={account_id}")

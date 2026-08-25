@@ -54,7 +54,7 @@ def process_mention_emails(email_list):
             "body": prepare_mail_body(
                 module_name=email.get("module"),
                 parent_id=email.get("entity_id"),
-                user_name=email.get("user_name"),
+                user_name=email.get("creator_name") or email.get("user_name"),
                 note=email.get("note"),
             ),
         }

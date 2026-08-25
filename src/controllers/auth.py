@@ -213,6 +213,9 @@ class MANAGERID:
         3899927000005965002,  # "Subhasini T S"
         3899927000005114050,  # "Sutapa Roy"
         3899927000000452950,  # "Vinod Kumar"
+        3899927000000631533,  # "Sachin Vitthal Jadhav"
+        3899927000000154963,  # "Santosh Yoganand Pawar"
+        3899927000000433736,  # "Niteen Bhausaheb Bansode"
     }
 
 

@@ -18,12 +18,12 @@ from src.models.ticket import Ticket
 from src.models.user import User
 
 from .audit_log import log_action
+from src.controllers.Background_threads import BackgroundThreadPool
 
-# from src.controllers.Background_threads import BackgroundThreadPool
 IST = ZoneInfo("Asia/Kolkata")
 
 
-def insert_notes(user_id, user_role, note, parent_id, db, module_name, pg_db: Session):
+def insert_notes(user_id, user_role, note, parent_id, db, module_name, pg_db: Session, notes_parent_id: str | None = None):
     try:
         notes_coll = db["Notes"]
 
@@ -151,19 +151,32 @@ def insert_notes(user_id, user_role, note, parent_id, db, module_name, pg_db: Se
             else None
         )
 
-        result = notes_coll.insert_one(
-            {
-                "Owner": Owner,
-                "Created_By": Created_By,
-                "Modified_By": Modified_By,
-                "Note_Content": note,
-                "Parent_Id": Parent_Id,
-                "module": module_name,
-                "Created_Time": datetime.now(UTC).isoformat(),
-                "Modified_Time": datetime.now(UTC).isoformat(),
-            }
-        )
+        now_iso = datetime.now(UTC).isoformat()
+        note_doc = {
+            "Owner": Owner,
+            "Created_By": Created_By,
+            "Modified_By": Modified_By,
+            "Note_Content": note,
+            "Parent_Id": Parent_Id,
+            "module": module_name,
+            "notesParentId": notes_parent_id,
+            "Created_Time": now_iso,
+            "Modified_Time": now_iso,
+        }
+
+        result = notes_coll.insert_one(note_doc)
         print("Insertion result", result)
+
+        inserted_id = str(result.inserted_id)
+        note_doc["_id"] = inserted_id
+
+        # Format Created_Time / Modified_Time to readable string for response consistency
+        try:
+            dt = datetime.fromisoformat(now_iso).astimezone(IST)
+            note_doc["Created_Time"] = dt.strftime("%d %b %Y, %I:%M %p")
+            note_doc["Modified_Time"] = dt.strftime("%d %b %Y, %I:%M %p")
+        except Exception:
+            pass
 
         log_action(
             pg_db,
@@ -172,18 +185,24 @@ def insert_notes(user_id, user_role, note, parent_id, db, module_name, pg_db: Se
             "CREATED",
             "Note",
             int(parent_id),
-            {"note": note, "parent_id": parent_id},
+            {"note": note, "parent_id": parent_id, "notesParentId": notes_parent_id},
         )
-        # create a background worker to send mention emails in a separate eventloop
-        # BackgroundThreadPool.execute_task(
-        #     mentions,
-        #     note,
-        #     module_name,
-        #     parent_id,
-        # )
+
+        creator_name = pg_user.full_name if pg_user else "A CRM User"
+        BackgroundThreadPool.execute_task(
+            mentions,
+            note,
+            module_name,
+            parent_id,
+            creator_name,
+        )
 
         return JSONResponse(
-            status_code=201, content={"message": "Note saved successfully"}
+            status_code=201,
+            content={
+                "message": "Note saved successfully",
+                "data": note_doc,
+            },
         )
     except Exception as e:
         print(e)
@@ -220,7 +239,8 @@ def get_notes(
             return []
 
         projection = {
-            "_id": 0,
+            "_id": 1,
+            "id": 1,
             "Owner": 1,
             "Note_Content": 1,
             "Parent_Id": 1,
@@ -229,11 +249,17 @@ def get_notes(
             "Created_Time": 1,
             "Modified_Time": 1,
             "module": 1,
+            "notesParentId": 1,
         }
 
         notes_cursor = notes_collection.find(filter_query, projection)
         notes = []
         for note in notes_cursor:
+            if "_id" in note:
+                note["_id"] = str(note["_id"])
+            if "notesParentId" not in note:
+                note["notesParentId"] = None
+
             # Time formatting
             for time_key in ["Created_Time", "Modified_Time"]:
                 if note.get(time_key):
@@ -288,7 +314,7 @@ def is_note_has_comment(note_text: str) -> bool:
     return bool(pattern.search(note_text))
 
 
-def mentions(note, module_name, parent_id):
+def mentions(note, module_name, parent_id, creator_name: str = "A CRM User"):
     try:  # check if the note_content have mentions in them
         is_note_there = is_note_has_comment(note)
         if is_note_there:  # mention is there in the comment
@@ -305,7 +331,9 @@ def mentions(note, module_name, parent_id):
             for user in users:
                 email_list.append(
                     {
-                        "user_name": user.full_name,
+                        "recipient_name": user.full_name,
+                        "creator_name": creator_name,
+                        "user_name": creator_name,
                         "user_email_address": user.email,
                         "module": module_name,
                         "entity_id": parent_id,

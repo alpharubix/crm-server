@@ -4,8 +4,10 @@ from pydantic import BaseModel, field_validator
 class Note(BaseModel):
     id: str
     note: str
-    module:str = "Accounts"
-    @field_validator('id',mode='after')
+    module: str = "Accounts"
+    notesParentId: str | None = None
+
+    @field_validator('id', mode='after')
     @classmethod
     def validate_note_id(cls, v):
         if isinstance(v,int):

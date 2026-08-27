@@ -30,8 +30,16 @@ from src.routers.support_tickets import support_tickets_router
 from src.routers.tickets import tickets_router
 from src.routers.webhook import webhook_api_router
 
+from sqlalchemy import text
+
 # Ensure tables exist
 Base.metadata.create_all(bind=engine)
+try:
+    with engine.connect() as conn:
+        conn.execute(text("ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS company_id INTEGER DEFAULT 1;"))
+        conn.commit()
+except Exception:
+    pass
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(levelname)s - %(name)s - %(message)s"

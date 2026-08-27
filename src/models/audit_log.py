@@ -1,4 +1,4 @@
-from sqlalchemy import BigInteger, Column, DateTime, String
+from sqlalchemy import BigInteger, Column, DateTime, Integer, String
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.sql import func
 
@@ -9,6 +9,7 @@ class AuditLog(Base):
     __tablename__ = "audit_logs"
 
     id = Column(BigInteger, primary_key=True, autoincrement=True)
+    company_id = Column(Integer, default=1, nullable=True, index=True)
     user_id = Column(BigInteger, nullable=False)
     user_role = Column(String(50), nullable=False)
     action = Column(String(20), nullable=False)  # CREATED / UPDATED

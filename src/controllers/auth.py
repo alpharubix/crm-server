@@ -216,6 +216,7 @@ class MANAGERID:
         3899927000000631533,  # "Sachin Vitthal Jadhav"
         3899927000000154963,  # "Santosh Yoganand Pawar"
         3899927000000433736,  # "Niteen Bhausaheb Bansode"
+        3899927000000580845,  # "Santhosh Kumar S"
     }
 
 

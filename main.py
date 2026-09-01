@@ -17,6 +17,7 @@ from src.routers import audit_log as audit_log_router
 from src.routers import contact as contact_router
 from src.routers import project as project_router
 from src.routers import project_log as project_log_router
+from src.routers import tele_crm as tele_crm_router
 from src.routers import user as user_router
 from src.routers.authentication import authentication_router
 from src.routers.deal_documents import deal_docs_router
@@ -88,6 +89,7 @@ app.include_router(revenue_router)
 app.include_router(webhook_api_router)
 app.include_router(support_tickets_router)
 app.include_router(invoice_router)
+app.include_router(tele_crm_router.router, prefix="/tele-crm")
 
 
 @app.get("/")

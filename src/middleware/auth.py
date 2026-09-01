@@ -10,7 +10,7 @@ async def authorization(request: Request, call_next):
     # Bypass OPTIONS and Public Routes
     public_paths = ["/auth/login", "/", "/docs", "/openapi.json",""]
 
-    if request.method == "OPTIONS" or request.url.path in public_paths or request.url.path.startswith("/webhook/update-account-name/"):
+    if request.method == "OPTIONS" or request.url.path in public_paths or request.url.path.startswith("/webhook/update-account-name/") or request.url.path.startswith("/tele-crm"):
         return await call_next(request)
 
     """

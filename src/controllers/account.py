@@ -473,6 +473,7 @@ async def get_all_accounts(
     pincode: str | None = None,
     waba_interested: str | bool | None = None,
     is_priority_account: str | None = None,
+    is_active: str | None = None,
     business_status: list[str] | str | None = None,
     call_back_date_time: datetime | None = None,
     account_owner_id: list[int] | None = None,
@@ -716,6 +717,8 @@ async def get_all_accounts(
             filters.append(Account.waba_interested == waba_interested)
     if is_priority_account and is_priority_account != "all":
         filters.append(Account.is_priority_account == is_priority_account)
+    if is_active and is_active != "all":
+        filters.append(Account.is_active.ilike(is_active))
     if business_status:
         bs_list = [
             s.strip()

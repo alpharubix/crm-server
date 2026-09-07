@@ -73,6 +73,7 @@ def get_account_headers():
         "business_premise_state",
         "business_premise_pincode",
         "waba_interested",
+        "is_active",
         "call_back_date_time",
         "gstn",
         "pan",

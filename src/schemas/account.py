@@ -127,6 +127,7 @@ class AccountBase(BaseModel):
 
     # Flags & Dates (Optional)
     waba_interested: Optional[bool] = False
+    is_active: Optional[str] = "no"
     call_back_date_time: Optional[datetime] = None
     created_time: Optional[datetime] = Field(default_factory=lambda: datetime.now(IST))
 
@@ -209,6 +210,7 @@ class AccountResponse(BaseModel):
     account_stage: Optional[Any] = None
     profile_type: Optional[str] = None
     is_priority_account: Optional[str] = None
+    is_active: Optional[str] = "no"
     created_by_id: Optional[str] = None
     created_time: Optional[datetime] = None
     modified_time: Optional[datetime] = None

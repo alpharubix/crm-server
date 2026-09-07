@@ -47,6 +47,7 @@ class Account(Base):
     industry = Column(String, nullable=True, index=True)
     profile_type = Column(String, nullable=True, index=True)
     is_priority_account = Column(String, nullable=True, index=True)
+    is_active = Column(String, default="no", server_default="no", nullable=True, index=True)
 
     # Location (Core - Filtered)
     city = Column(String, nullable=True, index=True)

@@ -153,6 +153,7 @@ def export_accounts_csv(
             Account.state,
             Account.pincode,
             Account.waba_interested,
+            Account.is_active,
             Account.call_back_date_time,
             Account.created_time,
             Account.modified_time,

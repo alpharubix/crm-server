@@ -12,6 +12,8 @@ class AccountTaskCreate(BaseModel):
     task_due_date_time: datetime | None = None
     task_status: str = "Unassigned"  # Unassigned, Assigned, Pending, In Progress, Completed, Verified, Overdue
     assigned_to_id: str | int | None = None
+    target_account_status: str | None = None
+    target_call_back_date_time: datetime | None = None
 
 
 class BulkAccountTaskCreate(BaseModel):
@@ -35,6 +37,9 @@ class AccountTaskUpdate(BaseModel):
     task_status: str | None = None
     assigned_to_id: str | int | None = None
     account_id: str | int | None = None
+    target_account_status: str | None = None
+    target_call_back_date_time: datetime | None = None
+    completed_at: datetime | None = None
 
 
 class AccountTaskSchema(BaseModel):
@@ -52,6 +57,9 @@ class AccountTaskSchema(BaseModel):
     task_assigned_date_time: datetime | None = None
     task_due_date_time: datetime | None = None
     task_status: str
+    target_account_status: str | None = None
+    target_call_back_date_time: datetime | None = None
+    completed_at: datetime | None = None
     assigned_to_id: str | None = None
     assigned_to_name: str | None = None
     created_by_id: str | None = None

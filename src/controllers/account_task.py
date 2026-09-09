@@ -93,6 +93,16 @@ def task_to_dict(
         ad = task.account.assignment_date
         acc_assigned_dt = ad.isoformat() if hasattr(ad, "isoformat") else str(ad)
 
+    target_cb_dt = None
+    if getattr(task, "target_call_back_date_time", None):
+        tcb = task.target_call_back_date_time
+        target_cb_dt = tcb.isoformat() if hasattr(tcb, "isoformat") else str(tcb)
+
+    completed_at_dt = None
+    if getattr(task, "completed_at", None):
+        ca = task.completed_at
+        completed_at_dt = ca.isoformat() if hasattr(ca, "isoformat") else str(ca)
+
     return {
         "id": str(task.id) if task.id is not None else None,
         "module_name": task.module_name or "Account",
@@ -113,6 +123,9 @@ def task_to_dict(
         "task_assigned_date_time": task.task_assigned_date_time,
         "task_due_date_time": task.task_due_date_time,
         "task_status": effective_status,
+        "target_account_status": getattr(task, "target_account_status", None),
+        "target_call_back_date_time": target_cb_dt,
+        "completed_at": completed_at_dt,
         "assigned_to_id": str(assigned_id) if assigned_id is not None else None,
         "assigned_to_name": assigned_name,
         "created_by_id": str(task.created_by_id)
@@ -125,6 +138,61 @@ def task_to_dict(
         "created_at": task.created_at,
         "updated_at": task.updated_at,
     }
+
+
+def validate_target_fields_for_completion(
+    task: AccountTask,
+    target_status: str | None = None,
+    target_cb: datetime | None = None,
+):
+    account = task.account
+    if not account:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot complete task: Linked account not found.",
+        )
+
+    if target_status and str(target_status).strip():
+        acc_status = (account.account_status or "").strip()
+        expected_status = str(target_status).strip()
+        if acc_status.lower() != expected_status.lower():
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Cannot complete task: Account status ('{acc_status or 'Blank'}') does not match target account status ('{expected_status}').",
+            )
+
+    if target_cb is not None:
+        acc_cb = account.call_back_date_time
+        if acc_cb is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Cannot complete task: Account call back date time is not set on the account.",
+            )
+
+        acc_cb_utc = (
+            acc_cb.astimezone(UTC)
+            if getattr(acc_cb, "tzinfo", None)
+            else acc_cb.replace(tzinfo=UTC)
+        )
+        target_cb_utc = (
+            target_cb.astimezone(UTC)
+            if getattr(target_cb, "tzinfo", None)
+            else target_cb.replace(tzinfo=UTC)
+        )
+
+        if acc_cb_utc < target_cb_utc:
+            acc_str = (
+                acc_cb.isoformat() if hasattr(acc_cb, "isoformat") else str(acc_cb)
+            )
+            targ_str = (
+                target_cb.isoformat()
+                if hasattr(target_cb, "isoformat")
+                else str(target_cb)
+            )
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Cannot complete task: Account call back date time ({acc_str}) is earlier than target call back date time ({targ_str}).",
+            )
 
 
 def create_account_task(db: Session, task_in: AccountTaskCreate, current_user_id: int):
@@ -154,10 +222,18 @@ def create_account_task(db: Session, task_in: AccountTaskCreate, current_user_id
         task_assigned_date_time=task_in.task_assigned_date_time,
         task_due_date_time=task_in.task_due_date_time,
         task_status=task_in.task_status or "Unassigned",
+        target_account_status=task_in.target_account_status,
+        target_call_back_date_time=task_in.target_call_back_date_time,
         assigned_to_id=task_in.assigned_to_id,
         created_by_id=current_user_id,
         modified_by_id=current_user_id,
     )
+    if task.task_status == "Completed":
+        validate_target_fields_for_completion(
+            task, task.target_account_status, task.target_call_back_date_time
+        )
+        task.completed_at = datetime.now(UTC)
+
     db.add(task)
     db.commit()
     db.refresh(task)
@@ -839,6 +915,15 @@ def update_account_task(
 
     update_data = task_in.model_dump(exclude_unset=True)
 
+    # Immutability check: completed tasks cannot have status changed
+    if task.task_status == "Completed":
+        requested_status = update_data.get("task_status")
+        if requested_status and requested_status != "Completed":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="This task is already Completed. Completed task status cannot be changed.",
+            )
+
     # Executive field update restriction: Executives can only mark tasks as completed
     role = str(user_role).lower() if user_role else ""
     bypass_ids = getattr(MANAGERID, "BYPASS_USER_IDS", set())
@@ -896,6 +981,20 @@ def update_account_task(
             )
 
     old_status = task.task_status
+    if new_requested_status == "Completed" and old_status != "Completed":
+        target_st = (
+            update_data["target_account_status"]
+            if "target_account_status" in update_data
+            else task.target_account_status
+        )
+        target_cb = (
+            update_data["target_call_back_date_time"]
+            if "target_call_back_date_time" in update_data
+            else task.target_call_back_date_time
+        )
+        validate_target_fields_for_completion(task, target_st, target_cb)
+        task.completed_at = datetime.now(UTC)
+
     for field, val in update_data.items():
         setattr(task, field, val)
     new_status = task.task_status
@@ -1020,13 +1119,29 @@ def bulk_update_task_status(
                     detail=f"Only the Account Owner, Assigned User, or Manager/Admin can mark tasks as completed. (Unauthorized for task IDs: {unauthorized_completion})",
                 )
 
+    # Check immutability for already completed tasks
+    if new_status != "Completed":
+        already_completed = [t.id for t in tasks if t.task_status == "Completed"]
+        if already_completed:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Task status cannot be changed for already completed tasks (Task IDs: {already_completed}).",
+            )
+
     updated_count = 0
     from src.controllers.Background_threads import BackgroundThreadPool
     from src.controllers.mail import notify_task_unassigned_status_change
 
+    now_completion = datetime.now(UTC)
     for task in tasks:
         old_status = task.task_status
         if old_status != new_status:
+            if new_status == "Completed":
+                validate_target_fields_for_completion(
+                    task, task.target_account_status, task.target_call_back_date_time
+                )
+                task.completed_at = now_completion
+
             task.task_status = new_status
             task.modified_by_id = int(current_user_id)
             task.updated_at = datetime.now(UTC)

@@ -179,17 +179,18 @@ def validate_target_fields_for_completion(
     if target_status and str(target_status).strip():
         expected_status = str(target_status).strip()
         norm_expected = expected_status.lower()
-        is_target_matched = norm_acc_status == norm_expected
+        if norm_expected not in ("n/a", "na"):
+            is_target_matched = norm_acc_status == expected_status.lower()
 
-        if not (is_target_matched or is_fallback):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=(
-                    f"Cannot complete task: Account status ('{acc_status or 'Blank'}') "
-                    f"does not match target account status ('{expected_status}') "
-                    f"and is not one of: On Hold, Not Interested, Location Unserviceable, Business Closed."
-                ),
-            )
+            if not (is_target_matched or is_fallback):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=(
+                        f"Cannot complete task: Account status ('{acc_status or 'Blank'}') "
+                        f"does not match target account status ('{expected_status}') "
+                        f"and is not one of: On Hold, Not Interested, Location Unserviceable, Business Closed."
+                    ),
+                )
 
     if target_cb is not None and not is_fallback:
         acc_cb = account.call_back_date_time

@@ -67,6 +67,8 @@ app.add_middleware(
         "http://localhost:5174",
         "https://r1xchange-crm.netlify.app",
         "https://r1xchange-crm.vercel.app",
+        "https://sail.r1xchange.com",
+        "https://r1xchange.com",
     ],
     allow_credentials=True,
     allow_methods=["*"],

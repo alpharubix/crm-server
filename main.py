@@ -10,11 +10,14 @@ from fastapi.middleware.cors import CORSMiddleware
 load_dotenv(override=True)
 
 # Routers
+from sqlalchemy import text
+
 from src.database import Base, engine
 from src.routers import account as account_router
 from src.routers import account_task as account_task_router
 from src.routers import audit_log as audit_log_router
 from src.routers import contact as contact_router
+from src.routers import deal_task as deal_task_router
 from src.routers import project as project_router
 from src.routers import project_log as project_log_router
 from src.routers import tele_crm as tele_crm_router
@@ -31,13 +34,15 @@ from src.routers.support_tickets import support_tickets_router
 from src.routers.tickets import tickets_router
 from src.routers.webhook import webhook_api_router
 
-from sqlalchemy import text
-
 # Ensure tables exist
 Base.metadata.create_all(bind=engine)
 try:
     with engine.connect() as conn:
-        conn.execute(text("ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS company_id INTEGER DEFAULT 1;"))
+        conn.execute(
+            text(
+                "ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS company_id INTEGER DEFAULT 1;"
+            )
+        )
         conn.commit()
 except Exception:
     pass
@@ -72,6 +77,7 @@ app.add_middleware(
 # Include Routers
 app.include_router(account_router.router)
 app.include_router(account_task_router.router)
+app.include_router(deal_task_router.router)
 app.include_router(contact_router.router)
 app.include_router(user_router.router)
 app.include_router(authentication_router)

@@ -236,6 +236,17 @@ def get_deals(
                 if getattr(deal, "crm_deal_id", None):
                     ids_list.append(str(deal.crm_deal_id))
 
+                try:
+                    from src.models.deal_task import DealTask
+
+                    deal_task_records = (
+                        db.query(DealTask.id).filter(DealTask.deal_id == deal.id).all()
+                    )
+                    for task_rec in deal_task_records:
+                        ids_list.append(str(task_rec.id))
+                except Exception:
+                    pass
+
                 tickets_records = (
                     db.query(Ticket).filter(Ticket.deal_id == deal.id).all()
                 )
@@ -286,7 +297,14 @@ def get_deals(
                 notes = get_notes(
                     id_list=ids_list,
                     notes_collection=mongodb_conn["Notes"],
-                    module_name=["Deals", "Tickets"],
+                    module_name=[
+                        "Deals",
+                        "Tickets",
+                        "Deal_Tasks",
+                        "DealTask",
+                        "DealTasks",
+                        "Deal Task",
+                    ],
                 )
 
                 deal_dict = {

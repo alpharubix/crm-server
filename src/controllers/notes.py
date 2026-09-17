@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from starlette.responses import JSONResponse
 
 from src.controllers import auth, mail
+from src.controllers.Background_threads import BackgroundThreadPool
 from src.database import SessionLocal
 from src.models.account import Account
 from src.models.contact import Contact
@@ -18,12 +19,20 @@ from src.models.ticket import Ticket
 from src.models.user import User
 
 from .audit_log import log_action
-from src.controllers.Background_threads import BackgroundThreadPool
 
 IST = ZoneInfo("Asia/Kolkata")
 
 
-def insert_notes(user_id, user_role, note, parent_id, db, module_name, pg_db: Session, notes_parent_id: str | None = None):
+def insert_notes(
+    user_id,
+    user_role,
+    note,
+    parent_id,
+    db,
+    module_name,
+    pg_db: Session,
+    notes_parent_id: str | None = None,
+):
     try:
         notes_coll = db["Notes"]
 
@@ -116,7 +125,12 @@ def insert_notes(user_id, user_role, note, parent_id, db, module_name, pg_db: Se
                 if raw_parent_can
                 else "Unknown",
             }
-        elif module_name in ["Account_Tasks", "AccountTasks", "AccountTask"]:
+        elif module_name in [
+            "Account_Tasks",
+            "AccountTasks",
+            "AccountTask",
+            "Account Task",
+        ]:
             from src.models.account_task import AccountTask
 
             p_int = int(parent_id) if str(parent_id).isdigit() else None
@@ -130,6 +144,21 @@ def insert_notes(user_id, user_role, note, parent_id, db, module_name, pg_db: Se
                 "task_name": f"Account Task #{raw_parent_task.id}"
                 if raw_parent_task
                 else "Account Task",
+            }
+        elif module_name in ["Deal_Tasks", "DealTasks", "DealTask", "Deal Task"]:
+            from src.models.deal_task import DealTask
+
+            p_int = int(parent_id) if str(parent_id).isdigit() else None
+            raw_parent_task = (
+                pg_db.query(DealTask.id, DealTask.task_type)
+                .filter(or_(DealTask.id == parent_id, DealTask.id == p_int))
+                .first()
+            )
+            Parent_Id = {
+                "id": str(raw_parent_task.id) if raw_parent_task else str(parent_id),
+                "task_name": f"Deal Task #{raw_parent_task.id}"
+                if raw_parent_task
+                else "Deal Task",
             }
         else:
             raw_parent_deal = (

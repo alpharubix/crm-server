@@ -220,7 +220,9 @@ def notify_task_unassigned_status_change(
         if acc_owner_id:
             owner = db.query(User).filter(User.id == acc_owner_id).first()
             if owner:
-                acc_owner_name = getattr(owner, "full_name", None) or getattr(owner, "email", "Unassigned")
+                acc_owner_name = getattr(owner, "full_name", None) or getattr(
+                    owner, "email", "Unassigned"
+                )
                 if owner.email:
                     recipients.add(owner.email)
 
@@ -244,13 +246,17 @@ def notify_task_unassigned_status_change(
 
         assigned_to_name = "N/A"
         if task.assigned_to:
-            assigned_to_name = getattr(task.assigned_to, "full_name", None) or getattr(task.assigned_to, "email", "N/A")
+            assigned_to_name = getattr(task.assigned_to, "full_name", None) or getattr(
+                task.assigned_to, "email", "N/A"
+            )
         elif task.assigned_to_id:
             assigned_user = (
                 db.query(User).filter(User.id == task.assigned_to_id).first()
             )
             if assigned_user:
-                assigned_to_name = getattr(assigned_user, "full_name", None) or getattr(assigned_user, "email", "N/A")
+                assigned_to_name = getattr(assigned_user, "full_name", None) or getattr(
+                    assigned_user, "email", "N/A"
+                )
 
         acc_name = task.account_name or (
             task.account.account_name if task.account else "N/A"
@@ -278,6 +284,115 @@ def notify_task_unassigned_status_change(
     except Exception as e:
         logger.error(
             f"Failed to send task status change email for task #{task_id}: {e}"
+        )
+    finally:
+        db.close()
+
+
+def notify_deal_task_unassigned_status_change(
+    task_id: int, old_status: str, new_status: str
+):
+    """
+    Sends email notification to Deal Owner, Task Creator, and Deal Owner's Manager
+    when a deal task status changes from 'Unassigned' to any other status.
+    """
+    from sqlalchemy.orm import joinedload
+
+    from src.controllers.auth import MANAGERID
+    from src.database import SessionLocal
+    from src.models.deal import Deal
+    from src.models.deal_task import DealTask
+    from src.models.user import User
+
+    db = SessionLocal()
+    try:
+        task = (
+            db.query(DealTask)
+            .options(
+                joinedload(DealTask.deal).joinedload(Deal.owner),
+                joinedload(DealTask.assigned_to),
+            )
+            .filter(DealTask.id == task_id)
+            .first()
+        )
+        if not task:
+            return
+
+        recipients = set()
+
+        # 1. Task Creator
+        if task.created_by_id:
+            creator = db.query(User).filter(User.id == task.created_by_id).first()
+            if creator and creator.email:
+                recipients.add(creator.email)
+
+        deal_owner_name = "Unassigned"
+        deal_owner_id = task.deal.deal_owner_id if task.deal else None
+        if deal_owner_id:
+            owner = db.query(User).filter(User.id == deal_owner_id).first()
+            if owner:
+                deal_owner_name = getattr(owner, "full_name", None) or getattr(
+                    owner, "email", "Unassigned"
+                )
+                if owner.email:
+                    recipients.add(owner.email)
+
+            # 3. Deal Owner's Manager
+            mgr_map = getattr(MANAGERID, "MANAGER_EXECUTIVES_MAP", {})
+            if not mgr_map and callable(MANAGERID):
+                try:
+                    mgr_map = MANAGERID().MANAGER_EXECUTIVES_MAP
+                except Exception:
+                    pass
+
+            for mgr_id, exec_ids in mgr_map.items():
+                if deal_owner_id in exec_ids and mgr_id != deal_owner_id:
+                    manager = db.query(User).filter(User.id == mgr_id).first()
+                    if manager and manager.email:
+                        recipients.add(manager.email)
+                    break
+
+        if not recipients:
+            return
+
+        assigned_to_name = "N/A"
+        if task.assigned_to:
+            assigned_to_name = getattr(task.assigned_to, "full_name", None) or getattr(
+                task.assigned_to, "email", "N/A"
+            )
+        elif task.assigned_to_id:
+            assigned_user = (
+                db.query(User).filter(User.id == task.assigned_to_id).first()
+            )
+            if assigned_user:
+                assigned_to_name = getattr(assigned_user, "full_name", None) or getattr(
+                    assigned_user, "email", "N/A"
+                )
+
+        deal_name = task.deal_name or (task.deal.deal_name if task.deal else "N/A")
+        subject = f"Deal Task #{task.id} Status Updated to '{new_status}'"
+
+        body = f"""
+        <p>Hello,</p>
+        <p>A Deal Task status has been updated from <strong>{old_status}</strong> to <strong>{new_status}</strong>.</p>
+        <table border="1" cellpadding="6" cellspacing="0" style="border-collapse: collapse;">
+          <tr><td><strong>Task ID</strong></td><td>#{task.id}</td></tr>
+          <tr><td><strong>Deal Name</strong></td><td>{deal_name}</td></tr>
+          <tr><td><strong>Deal Owner</strong></td><td>{deal_owner_name}</td></tr>
+          <tr><td><strong>Assigned To</strong></td><td>{assigned_to_name}</td></tr>
+          <tr><td><strong>Task Type</strong></td><td>{task.task_type}</td></tr>
+          <tr><td><strong>Previous Status</strong></td><td>{old_status}</td></tr>
+          <tr><td><strong>New Status</strong></td><td>{new_status}</td></tr>
+          <tr><td><strong>Description</strong></td><td>{task.task_description or "N/A"}</td></tr>
+        </table>
+        <p>Please log in to the CRM system to view full details.</p>
+        <p>Regards,<br>R1xchange CRM System</p>
+        """
+
+        send_general_email_list(to=list(recipients), subject=subject, body=body)
+    except Exception as e:
+        logger.error(
+            f"Failed to send deal task status change email for task #{task_id}: {e}"
         )
     finally:
         db.close()

@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session, joinedload
 from src.controllers.audit_log import log_action
 from src.controllers.auth import MANAGERID
 from src.controllers.notes import get_notes
+from src.models.account import Account
 from src.models.deal import Deal
 from src.models.deal_task import DealTask
 from src.models.user import User
@@ -82,6 +83,33 @@ def task_to_dict(
             except Exception:
                 pass
 
+    acc_owner_id = getattr(task, "account_owner_id", None)
+    if not acc_owner_id and task.deal and task.deal.account:
+        acc_owner_id = task.deal.account.account_owner_id
+
+    acc_owner_name = getattr(task, "account_owner", None)
+    if not acc_owner_name and task.deal and task.deal.account and task.deal.account.owner:
+        acc_owner_name = (
+            task.deal.account.owner.full_name or task.deal.account.owner.email
+        )
+
+    if not acc_owner_name and acc_owner_id:
+        acc_str = str(acc_owner_id)
+        if users_map and acc_str in users_map:
+            acc_owner_name = users_map[acc_str]
+        elif db:
+            try:
+                acc_int = int(acc_str) if acc_str.isdigit() else None
+                u = (
+                    db.query(User)
+                    .filter(or_(User.id == acc_int, User.zuid == acc_str))
+                    .first()
+                )
+                if u:
+                    acc_owner_name = u.full_name or u.email
+            except Exception:
+                pass
+
     call_back_dt = None
     if task.deal and getattr(task.deal, "deal_call_back_datetime", None):
         cb = task.deal.deal_call_back_datetime
@@ -104,6 +132,8 @@ def task_to_dict(
         ),
         "account_name": task.account_name
         or (task.deal.account_name if task.deal else None),
+        "account_owner": acc_owner_name,
+        "account_owner_id": str(acc_owner_id) if acc_owner_id is not None else None,
         "deal_owner": d_owner_name,
         "deal_owner_id": str(d_owner_id) if d_owner_id is not None else None,
         "deal_status": task.deal_status
@@ -219,15 +249,18 @@ def create_deal_task(db: Session, task_in: DealTaskCreate, current_user_id: int)
             detail=f"Deal with ID {task_in.deal_id} not found",
         )
 
+    init_status = task_in.task_status or "Unassigned"
+    assigned_dt = datetime.now(UTC) if init_status == "Assigned" else None
+
     task = DealTask(
         company_id=1,
         module_name=task_in.module_name or "Deal",
         deal_id=deal.id,
         task_type=task_in.task_type,
         task_description=task_in.task_description or "",
-        task_assigned_date_time=task_in.task_assigned_date_time,
+        task_assigned_date_time=assigned_dt,
         task_due_date_time=task_in.task_due_date_time,
-        task_status=task_in.task_status or "Unassigned",
+        task_status=init_status,
         target_deal_status=task_in.target_deal_status,
         assigned_to_id=task_in.assigned_to_id or deal.deal_owner_id,
         created_by_id=current_user_id,
@@ -288,7 +321,8 @@ def bulk_create_deal_tasks(
     deal_map_int = {d.id: d for d in deals}
     deal_map_str = {str(d.id): d for d in deals}
 
-    assigned_dt = bulk_in.task_assigned_date_time
+    bulk_status = bulk_in.task_status or "Unassigned"
+    assigned_dt = datetime.now(UTC) if bulk_status == "Assigned" else None
 
     for did in bulk_in.deal_ids:
         deal = deal_map_str.get(str(did)) or deal_map_int.get(did)
@@ -308,7 +342,7 @@ def bulk_create_deal_tasks(
             task_description=bulk_in.task_description or "",
             task_assigned_date_time=assigned_dt,
             task_due_date_time=bulk_in.task_due_date_time,
-            task_status=bulk_in.task_status or "Unassigned",
+            task_status=bulk_status,
             assigned_to_id=deal.deal_owner_id,
             created_by_id=current_user_id,
             modified_by_id=current_user_id,
@@ -379,6 +413,7 @@ def get_deal_tasks(
     page_size: int = 10,
     deal_id: int | None = None,
     account_id: int | None = None,
+    account_owner_id: str | None = None,
     task_status: str | None = None,
     task_type: str | None = None,
     call_back_status: str | None = None,
@@ -408,6 +443,7 @@ def get_deal_tasks(
         db.query(DealTask)
         .options(
             joinedload(DealTask.deal).joinedload(Deal.owner),
+            joinedload(DealTask.deal).joinedload(Deal.account).joinedload(Account.owner),
             joinedload(DealTask.assigned_to),
             joinedload(DealTask.created_by),
         )
@@ -667,6 +703,8 @@ def get_deal_tasks(
             all_user_ids.add(task.assigned_to_id)
         if task.deal_owner_id:
             all_user_ids.add(task.deal_owner_id)
+        if getattr(task, "account_owner_id", None):
+            all_user_ids.add(task.account_owner_id)
 
     users_map = {}
     if all_user_ids:
@@ -726,6 +764,7 @@ def get_deal_task_by_id(
         db.query(DealTask)
         .options(
             joinedload(DealTask.deal).joinedload(Deal.owner),
+            joinedload(DealTask.deal).joinedload(Deal.account).joinedload(Account.owner),
             joinedload(DealTask.assigned_to),
         )
         .filter(
@@ -874,6 +913,20 @@ def update_deal_task(
                 detail="Task/Deal Owners can only set task status to Pending, In Progress, Completed, or Verified.",
             )
 
+        if task.task_status != "Unassigned" and new_requested_status == "Unassigned":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Cannot unassign a task once it has been assigned.",
+            )
+        if (
+            task.task_status not in ("Unassigned", "Assigned")
+            and new_requested_status == "Assigned"
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Cannot revert task back to Assigned once it has progressed.",
+            )
+
     old_status = task.task_status
     if new_requested_status == "Completed" and old_status != "Completed":
         target_st = (
@@ -883,6 +936,18 @@ def update_deal_task(
         )
         validate_target_fields_for_completion(task, target_st)
         update_data["completed_at"] = datetime.now(UTC)
+
+    # Assigned date handling:
+    # Assigned date cannot be modified by anyone.
+    # If status is not set to 'Assigned', date must be empty (None).
+    # If status is set to 'Assigned', auto-set to current UTC time if not already set.
+    update_data.pop("task_assigned_date_time", None)
+    effective_status = update_data.get("task_status", task.task_status)
+    if effective_status == "Assigned":
+        if not task.task_assigned_date_time:
+            task.task_assigned_date_time = datetime.now(UTC)
+    else:
+        task.task_assigned_date_time = None
 
     for field, value in update_data.items():
         setattr(task, field, value)

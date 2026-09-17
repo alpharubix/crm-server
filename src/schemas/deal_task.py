@@ -47,6 +47,8 @@ class DealTaskSchema(BaseModel):
     deal_name: str | None = None
     account_id: str | None = None
     account_name: str | None = None
+    account_owner: str | None = None
+    account_owner_id: str | None = None
     deal_owner: str | None = None
     deal_owner_id: str | None = None
     deal_status: str | None = None

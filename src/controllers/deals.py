@@ -4,12 +4,13 @@ from datetime import UTC, date, datetime, timedelta
 from fastapi import HTTPException, UploadFile
 from fastapi.encoders import jsonable_encoder
 from sqlalchemy import and_, or_
-from sqlalchemy.orm import Session, selectinload
+from sqlalchemy.orm import Session, selectinload, joinedload
 
 from src.controllers.audit_log import log_action
 from src.controllers.auth import MANAGERID
 from src.controllers.notes import get_notes
 from src.models.deal import Deal
+from src.models.account import Account
 
 
 def get_deals(
@@ -226,7 +227,11 @@ def get_deals(
         # Single Deal Detail View Scenario
         if deal_id:
             deals = (
-                base_query.options(selectinload(Deal.owner), selectinload(Deal.revenue))
+                base_query.options(
+                    selectinload(Deal.owner),
+                    selectinload(Deal.revenue),
+                    selectinload(Deal.account).selectinload(Account.owner),
+                )
                 .limit(1)
                 .all()
             )
@@ -317,6 +322,33 @@ def get_deals(
                     deal_dict["account_id"] = str(deal.account_id)
                 if deal.account and deal.account.account_name:
                     deal_dict["account_name"] = deal.account.account_name
+
+                acc_owner_id = None
+                acc_owner_name = None
+                if deal.account:
+                    acc_owner_id = deal.account.account_owner_id
+                    if deal.account.owner:
+                        acc_owner_name = deal.account.owner.full_name or deal.account.owner.email
+                elif deal.account_id:
+                    try:
+                        acc = (
+                            db.query(Account)
+                            .options(joinedload(Account.owner))
+                            .filter(Account.id == deal.account_id)
+                            .first()
+                        )
+                        if acc:
+                            acc_owner_id = acc.account_owner_id
+                            if acc.owner:
+                                acc_owner_name = acc.owner.full_name or acc.owner.email
+                    except Exception:
+                        pass
+
+                if acc_owner_id:
+                    deal_dict["account_owner_id"] = str(acc_owner_id)
+                if acc_owner_name:
+                    deal_dict["account_owner"] = acc_owner_name
+
                 if deal.modified_by:
                     deal_dict["updated_by"] = str(deal.modified_by)
 

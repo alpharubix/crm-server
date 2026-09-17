@@ -168,6 +168,26 @@ class DealTask(Base):
         return status_name
 
     @hybrid_property
+    def account_owner_id(self):
+        return (
+            self.deal.account.account_owner_id
+            if (self.deal and getattr(self.deal, "account", None))
+            else None
+        )
+
+    @hybrid_property
+    def account_owner(self):
+        if (
+            self.deal
+            and getattr(self.deal, "account", None)
+            and getattr(self.deal.account, "owner", None)
+        ):
+            return (
+                self.deal.account.owner.full_name or self.deal.account.owner.email
+            )
+        return None
+
+    @hybrid_property
     def computed_task_status(self):
         if self.task_status in ["Completed", "Verified"]:
             return self.task_status

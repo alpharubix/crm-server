@@ -92,6 +92,16 @@ class Deal(Base):
     @hybrid_property
     def modified_time(self):
         return self.updated_at
+
+    @hybrid_property
+    def account_owner_id(self):
+        return self.account.account_owner_id if self.account else None
+
+    @hybrid_property
+    def account_owner(self):
+        if self.account and self.account.owner:
+            return self.account.owner.full_name or self.account.owner.email
+        return None
     
     # Documentation
     documents = relationship("DealDocument", back_populates="deal", cascade="all, delete-orphan")

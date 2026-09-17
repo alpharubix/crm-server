@@ -83,6 +83,8 @@ class DealSchema(BaseModel):
 
     # Account
     account_name: str | None = None
+    account_owner_id: str | None = None
+    account_owner: str | None = None
     deal_name: str | None = None  # Auto-generated on creation
 
     # Timestamps
@@ -110,7 +112,7 @@ class DealSchema(BaseModel):
             data["tickets"] = value._tickets_list
             data["modified_time"] = getattr(value, "updated_at", getattr(value, "modified_time", None))
             data["created_time"] = getattr(value, "created_at", getattr(value, "created_time", None))
-            for attr in ("owner", "notes"):
+            for attr in ("owner", "notes", "account_owner_id", "account_owner"):
                 if hasattr(value, attr):
                     data[attr] = getattr(value, attr)
             return data
@@ -137,6 +139,7 @@ class DealSchema(BaseModel):
         "modified_by",
         "deal_owner_id",
         "crm_deal_id",
+        "account_owner_id",
         mode="before",
     )
     @classmethod

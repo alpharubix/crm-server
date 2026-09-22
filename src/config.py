@@ -1,13 +1,16 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+
 class Settings(BaseSettings):
     database_url: str
     JWT_SECRET_KEY: str
-    MONGODB_URI:str
-    APP_PASSWORD:str
-    DEV:str
-    FIVE_POINT_CREDIT_BACKEND_URL:str
+    MONGODB_URI: str
+    APP_PASSWORD: str
+    DEV: str
+    FIVE_POINT_CREDIT_BACKEND_URL: str
+    TELECRM_URL: str
+    TELECRM_TOKEN: str
     model_config = SettingsConfigDict(env_file=".env")
 
-settings = Settings()  # type: ignore
 
+settings = Settings()  # type: ignore

@@ -455,6 +455,369 @@ def build_batch_status_journeys(db: Session, account_ids: list[int]):
     return journeys_by_account
 
 
+def serialize_mongo_doc(doc: Any) -> Any:
+    if not isinstance(doc, dict):
+        return doc
+    clean_doc = {}
+    for k, v in doc.items():
+        if k == "_id":
+            clean_doc["_id"] = str(v)
+            if "id" not in doc:
+                clean_doc["id"] = str(v)
+        elif isinstance(v, datetime):
+            clean_doc[k] = v.isoformat()
+        elif isinstance(v, dict):
+            clean_doc[k] = serialize_mongo_doc(v)
+        elif isinstance(v, list):
+            clean_doc[k] = [
+                serialize_mongo_doc(item) if isinstance(item, dict) else item
+                for item in v
+            ]
+        else:
+            clean_doc[k] = v
+    return clean_doc
+
+
+def format_to_ist_str(ts_val) -> str:
+    if not ts_val:
+        return ""
+    try:
+        if isinstance(ts_val, (int, float)):
+            sec = ts_val / 1000.0 if ts_val > 1e11 else float(ts_val)
+            dt = datetime.fromtimestamp(sec, tz=IST)
+        elif isinstance(ts_val, str) and ts_val.isdigit():
+            val = int(ts_val)
+            sec = val / 1000.0 if val > 1e11 else float(val)
+            dt = datetime.fromtimestamp(sec, tz=IST)
+        elif isinstance(ts_val, str):
+            clean_str = ts_val.replace("Z", "+00:00")
+            dt = datetime.fromisoformat(clean_str)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=UTC)
+            dt = dt.astimezone(IST)
+        elif isinstance(ts_val, datetime):
+            dt = ts_val.astimezone(IST) if ts_val.tzinfo else ts_val.replace(tzinfo=UTC).astimezone(IST)
+        else:
+            return str(ts_val)
+        return dt.strftime("%-I:%M %p %a, %-d %b %y")
+    except Exception:
+        return str(ts_val)
+
+
+def calculate_relative_time_str(ts_val) -> str:
+    if not ts_val:
+        return ""
+    try:
+        now = datetime.now(IST)
+        if isinstance(ts_val, (int, float)):
+            sec = ts_val / 1000.0 if ts_val > 1e11 else float(ts_val)
+            dt = datetime.fromtimestamp(sec, tz=IST)
+        elif isinstance(ts_val, str) and ts_val.isdigit():
+            val = int(ts_val)
+            sec = val / 1000.0 if val > 1e11 else float(val)
+            dt = datetime.fromtimestamp(sec, tz=IST)
+        elif isinstance(ts_val, str):
+            clean_str = ts_val.replace("Z", "+00:00")
+            dt = datetime.fromisoformat(clean_str)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=UTC)
+            dt = dt.astimezone(IST)
+        elif isinstance(ts_val, datetime):
+            dt = ts_val.astimezone(IST) if ts_val.tzinfo else ts_val.replace(tzinfo=UTC).astimezone(IST)
+        else:
+            return ""
+
+        diff = now - dt
+        diff_sec = int(diff.total_seconds())
+        if diff_sec < 0:
+            return "Just now"
+        if diff_sec < 60:
+            return f"{diff_sec}s"
+        diff_min = diff_sec // 60
+        if diff_min < 60:
+            return f"{diff_min}m"
+        diff_hours = diff_min // 60
+        if diff_hours < 24:
+            return f"{diff_hours}h"
+        diff_days = diff_hours // 24
+        if diff_days < 30:
+            return f"{diff_days}d"
+        diff_months = diff_days // 30
+        if diff_months < 12:
+            return f"{diff_months}mo"
+        return f"{diff_months // 12}y"
+    except Exception:
+        return ""
+
+
+def normalize_call_type_str(act_type: str) -> str:
+    s = str(act_type or "").lower().strip()
+    if "miss" in s:
+        return "missed"
+    if "out" in s or "dial" in s:
+        return "outgoing"
+    if "in" in s or "received" in s:
+        return "incoming"
+    return "outgoing"
+
+
+def build_telecrm_activities(serialized_doc: dict) -> list[dict]:
+    activities = []
+    lead_data = serialized_doc.get("data")
+    if isinstance(lead_data, dict):
+        telecrm_id = str(lead_data.get("id") or serialized_doc.get("_id") or "")
+        telecrm_url = (
+            f"https://next.telecrm.in/6a8c537f3aeed414e38866a5/views/all-leads-v2/overlay/l/{telecrm_id}"
+            if telecrm_id
+            else None
+        )
+        fields = (
+            lead_data.get("fields", {})
+            if isinstance(lead_data.get("fields"), dict)
+            else {}
+        )
+        actions = (
+            lead_data.get("actions", [])
+            if isinstance(lead_data.get("actions"), list)
+            else []
+        )
+        if actions:
+            for action in actions:
+                if not isinstance(action, dict):
+                    continue
+                act_type = str(action.get("type") or action.get("call_type") or "outgoing")
+                c_type = normalize_call_type_str(act_type)
+                action_ts = (
+                    action.get("performed_at")
+                    or action.get("creation_timestamp")
+                    or action.get("created_on")
+                    or fields.get("last_call")
+                    or fields.get("last_outgoing_activity_on")
+                    or serialized_doc.get("created_at")
+                    or ""
+                )
+                formatted_ts = format_to_ist_str(action_ts)
+                rel_time = calculate_relative_time_str(action_ts)
+                # Recording redirect: TeleCRM requires opening via website
+                rec_url = (
+                    telecrm_url
+                    or action.get("call_recording_url")
+                    or action.get("url")
+                    or action.get("recording_url")
+                )
+                activities.append(
+                    {
+                        "id": str(action.get("id") or telecrm_id),
+                        "telecrm_lead_id": telecrm_id,
+                        "telecrm_url": telecrm_url,
+                        "relative_time": rel_time,
+                        "call_action": {
+                            "type": c_type,
+                            "duration": str(action.get("duration", "0s")),
+                            "creation_timestamp": formatted_ts,
+                            "raw_timestamp": action_ts,
+                            "feedback": action.get("feedback")
+                            or action.get("status")
+                            or "Connected",
+                            "call_recording_url": rec_url,
+                            "actor_employee_email": action.get("actor_employee_email")
+                            or action.get("employee_email")
+                            or lead_data.get("employeeid")
+                            or lead_data.get("createdBy"),
+                        },
+                        "leads": {
+                            "name": fields.get("name"),
+                            "alternate_phone": fields.get("phone")
+                            or serialized_doc.get("phone"),
+                            "status": lead_data.get("status") or fields.get("status"),
+                            "lead_source": fields.get("lead_source"),
+                            "created_on": format_to_ist_str(fields.get("created_on", "")),
+                            "callback_date_time": fields.get("callback_date_time"),
+                        },
+                        "status": lead_data.get("status") or fields.get("status"),
+                        "raw": action,
+                    }
+                )
+        else:
+            last_act_type = (
+                fields.get("last_outgoing_activity_type")
+                or fields.get("last_activity_type")
+                or "Outgoing Call"
+            )
+            c_type = normalize_call_type_str(last_act_type)
+            dur = fields.get("total_call_duration", 0)
+            call_ts = (
+                fields.get("last_call")
+                or fields.get("last_outgoing_activity_on")
+                or fields.get("first_call")
+                or fields.get("first_attempted_call")
+                or fields.get("last_activity_on")
+                or serialized_doc.get("created_at")
+                or ""
+            )
+            formatted_ts = format_to_ist_str(call_ts)
+            rel_time = calculate_relative_time_str(call_ts)
+            rec_url = (
+                telecrm_url
+                or fields.get("call_recording_url")
+                or fields.get("recording_url")
+                or serialized_doc.get("call_recording_url")
+            )
+            activities.append(
+                {
+                    "id": telecrm_id,
+                    "telecrm_lead_id": telecrm_id,
+                    "telecrm_url": telecrm_url,
+                    "relative_time": rel_time,
+                    "call_action": {
+                        "type": c_type,
+                        "duration": f"{dur}s",
+                        "creation_timestamp": formatted_ts,
+                        "raw_timestamp": call_ts,
+                        "feedback": fields.get("last_activity_type")
+                        or lead_data.get("status")
+                        or "Logged Activity",
+                        "call_recording_url": rec_url,
+                        "actor_employee_email": lead_data.get("employeeid")
+                        or lead_data.get("createdBy"),
+                    },
+                    "leads": {
+                        "name": fields.get("name"),
+                        "alternate_phone": fields.get("phone")
+                        or serialized_doc.get("phone"),
+                        "status": lead_data.get("status") or fields.get("status"),
+                        "lead_source": fields.get("lead_source"),
+                        "created_on": format_to_ist_str(fields.get("created_on", "")),
+                        "callback_date_time": fields.get("callback_date_time"),
+                    },
+                    "status": lead_data.get("status") or fields.get("status"),
+                    "raw": lead_data,
+                }
+            )
+    else:
+        telecrm_id = str(serialized_doc.get("id") or serialized_doc.get("_id") or "")
+        telecrm_url = (
+            f"https://next.telecrm.in/6a8c537f3aeed414e38866a5/views/all-leads-v2/overlay/l/{telecrm_id}"
+            if telecrm_id
+            else None
+        )
+        raw_type = (
+            serialized_doc.get("type")
+            or serialized_doc.get("call_type")
+            or "outgoing"
+        )
+        c_type = normalize_call_type_str(raw_type)
+        dur = (
+            serialized_doc.get("duration")
+            or serialized_doc.get("call_duration")
+            or "0"
+        )
+        raw_ts = (
+            serialized_doc.get("last_call")
+            or serialized_doc.get("creation_timestamp")
+            or serialized_doc.get("call_date")
+            or serialized_doc.get("created_at")
+            or ""
+        )
+        formatted_ts = format_to_ist_str(raw_ts)
+        rel_time = calculate_relative_time_str(raw_ts)
+        rec_url = (
+            telecrm_url
+            or serialized_doc.get("call_recording_url")
+            or serialized_doc.get("call_recording")
+        )
+        activities.append(
+            {
+                "id": str(serialized_doc.get("_id")),
+                "telecrm_lead_id": telecrm_id,
+                "telecrm_url": telecrm_url,
+                "relative_time": rel_time,
+                "call_action": {
+                    "type": c_type,
+                    "duration": f"{dur}s" if not str(dur).endswith("s") else str(dur),
+                    "creation_timestamp": formatted_ts,
+                    "raw_timestamp": raw_ts,
+                    "feedback": serialized_doc.get("status")
+                    or serialized_doc.get("call_note")
+                    or "Call logged",
+                    "call_recording_url": rec_url,
+                    "actor_employee_email": serialized_doc.get("actor_employee_email")
+                    or serialized_doc.get("caller_email")
+                    or serialized_doc.get("my_email"),
+                },
+                "leads": {
+                    "name": serialized_doc.get("lead_name")
+                    or serialized_doc.get("call_name"),
+                    "alternate_phone": serialized_doc.get("lead_phone")
+                    or serialized_doc.get("phone"),
+                    "status": serialized_doc.get("status"),
+                    "callback_date_time": serialized_doc.get("call_back_date_time"),
+                },
+                "status": serialized_doc.get("status"),
+                "user_note": {
+                    "text": serialized_doc.get("call_note")
+                    or serialized_doc.get("user_note"),
+                    "actor_employee_email": serialized_doc.get("actor_employee_email"),
+                },
+                "system_note": {
+                    "text": serialized_doc.get("system_note"),
+                },
+                "raw": serialized_doc,
+            }
+        )
+    return activities
+
+
+def fetch_account_call_recording(
+    acc: Account, mongodb: Any
+) -> tuple[dict | None, list[dict]]:
+    if mongodb is None or not getattr(acc, "phone", None):
+        return None, []
+
+    raw_phone = str(acc.phone)
+    clean_digits = "".join(filter(str.isdigit, raw_phone))
+    phone_10 = clean_digits[-10:] if len(clean_digits) >= 10 else clean_digits
+    if not phone_10:
+        return None, []
+
+    try:
+        tele_crm_coll = mongodb["tele-crm-calls"]
+        q_filters: list[dict[str, Any]] = [
+            {"phone": {"$regex": f"{phone_10}$"}},
+            {"lead_phone": {"$regex": f"{phone_10}$"}},
+            {"data.fields.phone": {"$regex": f"{phone_10}$"}},
+        ]
+        if phone_10.isdigit():
+            q_filters.append({"phone": int(phone_10)})
+            q_filters.append({"data.fields.phone": int(phone_10)})
+
+        call_docs = list(
+            tele_crm_coll.find({"$or": q_filters}).sort("created_at", -1)
+        )
+        if not call_docs:
+            return None, []
+
+        serialized_docs = [serialize_mongo_doc(doc) for doc in call_docs]
+        latest_doc = serialized_docs[0]
+        telecrm_id = (
+            latest_doc.get("data", {}).get("id")
+            if isinstance(latest_doc.get("data"), dict)
+            else latest_doc.get("id") or str(latest_doc.get("_id"))
+        )
+        if telecrm_id:
+            latest_doc["telecrm_url"] = f"https://next.telecrm.in/6a8c537f3aeed414e38866a5/views/all-leads-v2/overlay/l/{telecrm_id}"
+            latest_doc["call_recording_url"] = latest_doc["telecrm_url"]
+
+        all_activities = []
+        for s_doc in serialized_docs:
+            all_activities.extend(build_telecrm_activities(s_doc))
+
+        return latest_doc, all_activities
+    except Exception as e:
+        logging.error(f"Failed to fetch call recording for account phone {phone_10}: {e}")
+        return None, []
+
+
 async def get_all_accounts(
     request: Request,
     db: Session,
@@ -1110,6 +1473,9 @@ async def get_all_accounts(
             j_list = journeys_map.get(acc.id, [])
             acc.status_journey = j_list
             acc.journey = j_list
+            call_rec, activities = fetch_account_call_recording(acc, mongodb)
+            acc.call_recording = call_rec
+            acc.telecrm_activities = activities
 
         total_pages = math.ceil(total_data_size / limit)
         return {

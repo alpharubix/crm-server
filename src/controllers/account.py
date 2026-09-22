@@ -770,15 +770,15 @@ def build_telecrm_activities(serialized_doc: dict) -> list[dict]:
 
 def fetch_account_call_recording(
     acc: Account, mongodb: Any
-) -> tuple[dict | None, list[dict]]:
+) -> list[dict]:
     if mongodb is None or not getattr(acc, "phone", None):
-        return None, []
+        return []
 
     raw_phone = str(acc.phone)
     clean_digits = "".join(filter(str.isdigit, raw_phone))
     phone_10 = clean_digits[-10:] if len(clean_digits) >= 10 else clean_digits
     if not phone_10:
-        return None, []
+        return []
 
     try:
         tele_crm_coll = mongodb["tele-crm-calls"]
@@ -795,27 +795,17 @@ def fetch_account_call_recording(
             tele_crm_coll.find({"$or": q_filters}).sort("created_at", -1)
         )
         if not call_docs:
-            return None, []
+            return []
 
         serialized_docs = [serialize_mongo_doc(doc) for doc in call_docs]
-        latest_doc = serialized_docs[0]
-        telecrm_id = (
-            latest_doc.get("data", {}).get("id")
-            if isinstance(latest_doc.get("data"), dict)
-            else latest_doc.get("id") or str(latest_doc.get("_id"))
-        )
-        if telecrm_id:
-            latest_doc["telecrm_url"] = f"https://next.telecrm.in/6a8c537f3aeed414e38866a5/views/all-leads-v2/overlay/l/{telecrm_id}"
-            latest_doc["call_recording_url"] = latest_doc["telecrm_url"]
-
         all_activities = []
         for s_doc in serialized_docs:
             all_activities.extend(build_telecrm_activities(s_doc))
 
-        return latest_doc, all_activities
+        return all_activities
     except Exception as e:
         logging.error(f"Failed to fetch call recording for account phone {phone_10}: {e}")
-        return None, []
+        return []
 
 
 async def get_all_accounts(
@@ -1473,9 +1463,7 @@ async def get_all_accounts(
             j_list = journeys_map.get(acc.id, [])
             acc.status_journey = j_list
             acc.journey = j_list
-            call_rec, activities = fetch_account_call_recording(acc, mongodb)
-            acc.call_recording = call_rec
-            acc.telecrm_activities = activities
+            acc.telecrm_activities = fetch_account_call_recording(acc, mongodb)
 
         total_pages = math.ceil(total_data_size / limit)
         return {

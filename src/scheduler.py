@@ -17,7 +17,7 @@ def start_scheduler():
     if not scheduler.running:
         scheduler.add_job(
             scheduled_sync_yesterday_telecrm_leads,
-            trigger=CronTrigger(hour=13, minute=35, timezone=IST),
+            trigger=CronTrigger(hour=2, minute=0, timezone=IST),
             id="sync_yesterday_telecrm_leads_job",
             name="Sync yesterday TeleCRM leads",
             replace_existing=True,

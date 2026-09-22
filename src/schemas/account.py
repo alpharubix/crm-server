@@ -254,12 +254,23 @@ class AccountResponse(BaseModel):
     status_journey: Optional[List[AccountStatusJourneyItem]] = Field(default_factory=list)
     journey: Optional[List[AccountStatusJourneyItem]] = Field(default_factory=list)
 
+    # Call Recording & TeleCRM Activities
+    call_recording: Any | None = None
+    telecrm_activities: Optional[List[Dict[str, Any]]] = Field(default_factory=list)
+
     model_config = {"from_attributes": True}
 
     @model_validator(mode="before")
     @classmethod
     def extract_custom_attributes(cls, value):
-        if hasattr(value, "_tickets_list") or hasattr(value, "_deal_documents_list") or hasattr(value, "_revenue_list") or hasattr(value, "status_journey"):
+        if (
+            hasattr(value, "_tickets_list")
+            or hasattr(value, "_deal_documents_list")
+            or hasattr(value, "_revenue_list")
+            or hasattr(value, "status_journey")
+            or hasattr(value, "call_recording")
+            or hasattr(value, "telecrm_activities")
+        ):
             data = {}
             if hasattr(value, "__table__"):
                 for c in value.__table__.columns:
@@ -270,7 +281,8 @@ class AccountResponse(BaseModel):
                 "deals", "notes", "business_details", "business_premise_address",
                 "applicant_residence_address", "co_applicant_residence_address",
                 "customer_references", "customer_salary_details", "custom_fields",
-                "parent_account", "status_journey", "journey"
+                "parent_account", "status_journey", "journey",
+                "call_recording", "telecrm_activities"
             ):
                 if hasattr(value, attr):
                     data[attr] = getattr(value, attr)
@@ -278,6 +290,8 @@ class AccountResponse(BaseModel):
             data["tickets"] = getattr(value, "_tickets_list", [])
             data["deal_documents"] = getattr(value, "_deal_documents_list", [])
             data["revenue"] = getattr(value, "_revenue_list", [])
+            data["call_recording"] = getattr(value, "call_recording", None)
+            data["telecrm_activities"] = getattr(value, "telecrm_activities", [])
             return data
         return value
 

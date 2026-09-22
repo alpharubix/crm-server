@@ -85,6 +85,8 @@ class UserResponseAccount(BaseModel):
     full_name: str
     email: str
 
+    model_config = {"from_attributes": True}
+
     @field_validator("id", mode="before")
     @classmethod
     def parse_id(cls, value):

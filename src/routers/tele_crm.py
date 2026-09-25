@@ -1,6 +1,6 @@
 import logging
 import math
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -18,6 +18,34 @@ router = APIRouter(tags=["Tele CRM"])
 def clean_text(val: Any) -> str:
     s = str(val or "").strip()
     return "" if s.lower() in ("undefined", "null", "none") else s
+
+
+def parse_filter_datetime(dt_str: str | None, is_end_of_day: bool = False) -> datetime | None:
+    if not dt_str or not str(dt_str).strip():
+        return None
+    s = str(dt_str).strip()
+    try:
+        if "T" in s and ("+" in s or "-" in s[10:] or "Z" in s):
+            clean_s = s.replace("Z", "+00:00")
+            dt = datetime.fromisoformat(clean_s)
+            return dt.astimezone(UTC).replace(tzinfo=None)
+
+        s_clean = s.replace("T", " ")
+        if len(s_clean) == 10:  # YYYY-MM-DD
+            s_full = f"{s_clean} 23:59:59" if is_end_of_day else f"{s_clean} 00:00:00"
+        elif len(s_clean) == 16:  # YYYY-MM-DD HH:MM
+            s_full = f"{s_clean}:59" if is_end_of_day else f"{s_clean}:00"
+        elif len(s_clean) >= 19:  # YYYY-MM-DD HH:MM:SS
+            s_full = s_clean[:19]
+        else:
+            return None
+
+        dt_local = datetime.strptime(s_full, "%Y-%m-%d %H:%M:%S")
+        # Treat as IST (UTC+05:30), convert to naive UTC datetime
+        return dt_local - timedelta(hours=5, minutes=30)
+    except Exception as e:
+        logger.warning("Error parsing filter datetime %s: %s", dt_str, e)
+        return None
 
 
 def normalize_call_type_str(act_type: Any) -> str:
@@ -282,6 +310,18 @@ def get_call_recordings_list(
         default=None,
         description="Filter by call type: all, outgoing, incoming, missed",
     ),
+    user: str | None = Query(
+        default=None,
+        description="Filter by user email / caller",
+    ),
+    from_date: str | None = Query(
+        default=None,
+        description="Start date or datetime (YYYY-MM-DD or YYYY-MM-DD HH:MM:SS)",
+    ),
+    to_date: str | None = Query(
+        default=None,
+        description="End date or datetime (YYYY-MM-DD or YYYY-MM-DD HH:MM:SS)",
+    ),
     db: Session = Depends(get_db),
     mongo_db: Database = Depends(get_mongodb),
 ):
@@ -365,6 +405,31 @@ def get_call_recordings_list(
                 )
 
             filter_conditions.append({"$or": search_or})
+
+        # 3. User filter
+        if user and user.strip().lower() not in ("all", ""):
+            u_clean = user.strip()
+            prefix = u_clean.split("@")[0] if "@" in u_clean else u_clean
+            filter_conditions.append({
+                "$or": [
+                    {"actor_employee_email": {"$regex": f"^{prefix}", "$options": "i"}},
+                    {"my_name": {"$regex": f"^{prefix}", "$options": "i"}},
+                    {"actor_employee_email": {"$regex": u_clean, "$options": "i"}},
+                ]
+            })
+
+        # 4. Period / Date & Time range filter
+        created_at_filter: dict[str, Any] = {}
+        start_utc = parse_filter_datetime(from_date, is_end_of_day=False)
+        if start_utc:
+            created_at_filter["$gte"] = start_utc
+
+        end_utc = parse_filter_datetime(to_date, is_end_of_day=True)
+        if end_utc:
+            created_at_filter["$lte"] = end_utc
+
+        if created_at_filter:
+            filter_conditions.append({"created_at": created_at_filter})
 
         mongo_query = {"$and": filter_conditions} if filter_conditions else {}
 

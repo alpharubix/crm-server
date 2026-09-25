@@ -1,6 +1,7 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from typing import Optional
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func, or_
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from starlette.requests import Request
 
 from src.database import get_db
@@ -62,6 +63,11 @@ def create_support_ticket(
 @support_tickets_router.get("/history")
 def get_support_ticket_history(
     request: Request,
+    from_date: Optional[str] = Query(None, description="Start date (YYYY-MM-DD)"),
+    to_date: Optional[str] = Query(None, description="End date (YYYY-MM-DD)"),
+    status: Optional[str] = Query(None, description="Ticket status filter"),
+    priority: Optional[str] = Query(None, description="Ticket priority filter"),
+    search: Optional[str] = Query(None, description="Search ticket ID or title"),
     db: Session = Depends(get_db)
 ):
     try:
@@ -75,12 +81,48 @@ def get_support_ticket_history(
         user_role_str = str(getattr(request.state, "role", "user")).lower().replace(" ", "_")
 
         company_filter = or_(SupportTicket.company_id == 1, SupportTicket.company_id.is_(None))
-        # Managers, Admins, Super Admins can see all tickets, regular users see their own
-        if user_role_str in ["admin", "superadmin", "super_admin", "manager"]:
-            tickets = db.query(SupportTicket).filter(company_filter).order_by(SupportTicket.id.desc()).all()
-        else:
-            tickets = db.query(SupportTicket).filter(company_filter, SupportTicket.user_id == user_id).order_by(SupportTicket.id.desc()).all()
+        query = db.query(SupportTicket).options(joinedload(SupportTicket.user)).filter(company_filter)
 
+        # Managers, Admins, Super Admins can see all tickets, regular users see their own
+        if user_role_str not in ["admin", "superadmin", "super_admin", "manager"]:
+            query = query.filter(SupportTicket.user_id == user_id)
+
+        # Period / Date & Time filters
+        if from_date:
+            if len(from_date.strip()) > 10:
+                query = query.filter(SupportTicket.created_at >= from_date.strip().replace("T", " "))
+            else:
+                query = query.filter(func.date(SupportTicket.created_at) >= from_date.strip())
+        if to_date:
+            if len(to_date.strip()) > 10:
+                query = query.filter(SupportTicket.created_at <= to_date.strip().replace("T", " "))
+            else:
+                query = query.filter(func.date(SupportTicket.created_at) <= to_date.strip())
+
+        # Status filter
+        if status and status.upper() != "ALL":
+            status_clean = status.upper().replace(" ", "_")
+            if status_clean == "INPROGRESS":
+                status_clean = "IN_PROGRESS"
+            query = query.filter(func.upper(SupportTicket.status) == status_clean)
+
+        # Priority filter
+        if priority and priority.upper() != "ALL":
+            query = query.filter(func.lower(SupportTicket.priority) == priority.lower())
+
+        # Search filter
+        if search and search.strip():
+            term = f"%{search.strip()}%"
+            query = query.filter(
+                or_(
+                    SupportTicket.ticket_id.ilike(term),
+                    SupportTicket.title.ilike(term),
+                    SupportTicket.service.ilike(term),
+                    SupportTicket.description.ilike(term),
+                )
+            )
+
+        tickets = query.order_by(SupportTicket.id.desc()).all()
 
         formatted_tickets = []
         for t in tickets:
@@ -92,7 +134,9 @@ def get_support_ticket_history(
                 "description": t.description,
                 "status": t.status,
                 "created_at": t.created_at.strftime("%Y-%m-%d %H:%M:%S") if t.created_at else None,
-                "user_id": t.user_id
+                "user_id": str(t.user_id),
+                "user_name": t.user.full_name if t.user else None,
+                "user_email": t.user.email if t.user else None,
             })
 
         return {

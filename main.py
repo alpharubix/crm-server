@@ -1,7 +1,7 @@
 import logging
 import os
-from contextlib import asynccontextmanager
 
+# from contextlib import asynccontextmanager
 import uvicorn
 from dotenv import load_dotenv
 from fastapi import FastAPI
@@ -34,7 +34,8 @@ from src.routers.revenue import revenue_router
 from src.routers.support_tickets import support_tickets_router
 from src.routers.tickets import tickets_router
 from src.routers.webhook import webhook_api_router
-from src.scheduler import shutdown_scheduler, start_scheduler
+
+# from src.scheduler import shutdown_scheduler, start_scheduler
 
 # Ensure tables exist
 Base.metadata.create_all(bind=engine)
@@ -55,14 +56,15 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    start_scheduler()
-    yield
-    shutdown_scheduler()
+# @asynccontextmanager
+# async def lifespan(app: FastAPI):
+#     start_scheduler()
+#     yield
+#     shutdown_scheduler()
 
 
-app = FastAPI(lifespan=lifespan)
+# app = FastAPI(lifespan=lifespan)
+app = FastAPI()
 
 from src.middleware.auth import authorization
 from src.middleware.invoice_route_protector import authorize_invoice_route_user

@@ -6,6 +6,7 @@ from sqlalchemy import (
     ForeignKey,
     BIGINT,
     Integer,
+    JSON,
     func
 )
 from sqlalchemy.orm import relationship
@@ -24,7 +25,11 @@ class SupportTicket(Base):
     priority = Column(String(50), nullable=False)
     description = Column(Text, nullable=False)
     status = Column(String(50), nullable=False, default="OPEN")
+    attachment_links = Column(JSON, default=list, nullable=True)
+    attachments = Column(JSON, default=list, nullable=True)
+    updated_by = Column(BIGINT, ForeignKey("users.id"), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
     user = relationship("User", foreign_keys=[user_id])
+    updater = relationship("User", foreign_keys=[updated_by])

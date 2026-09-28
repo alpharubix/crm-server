@@ -20,7 +20,9 @@ def clean_text(val: Any) -> str:
     return "" if s.lower() in ("undefined", "null", "none") else s
 
 
-def parse_filter_datetime(dt_str: str | None, is_end_of_day: bool = False) -> datetime | None:
+def parse_filter_datetime(
+    dt_str: str | None, is_end_of_day: bool = False
+) -> datetime | None:
     if not dt_str or not str(dt_str).strip():
         return None
     s = str(dt_str).strip()
@@ -344,7 +346,12 @@ def get_call_recordings_list(
                 filter_conditions.append(
                     {
                         "$or": [
-                            {"call_type": {"$regex": "incom|received", "$options": "i"}},
+                            {
+                                "call_type": {
+                                    "$regex": "incom|received",
+                                    "$options": "i",
+                                }
+                            },
                             {"type": {"$regex": "incom|received", "$options": "i"}},
                         ]
                     }
@@ -410,13 +417,20 @@ def get_call_recordings_list(
         if user and user.strip().lower() not in ("all", ""):
             u_clean = user.strip()
             prefix = u_clean.split("@")[0] if "@" in u_clean else u_clean
-            filter_conditions.append({
-                "$or": [
-                    {"actor_employee_email": {"$regex": f"^{prefix}", "$options": "i"}},
-                    {"my_name": {"$regex": f"^{prefix}", "$options": "i"}},
-                    {"actor_employee_email": {"$regex": u_clean, "$options": "i"}},
-                ]
-            })
+            filter_conditions.append(
+                {
+                    "$or": [
+                        {
+                            "actor_employee_email": {
+                                "$regex": f"^{prefix}",
+                                "$options": "i",
+                            }
+                        },
+                        {"my_name": {"$regex": f"^{prefix}", "$options": "i"}},
+                        {"actor_employee_email": {"$regex": u_clean, "$options": "i"}},
+                    ]
+                }
+            )
 
         # 4. Period / Date & Time range filter
         created_at_filter: dict[str, Any] = {}
@@ -558,4 +572,30 @@ def get_call_recordings_list(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to fetch call recordings: {e!s}",
+        )
+
+
+@router.post("/whatsapp-details")
+def add_whatsapp_details(
+    payload: dict[str, Any],
+    mongo_db: Database = Depends(get_mongodb),
+):
+    try:
+        doc = payload.copy()
+        doc["created_at"] = datetime.now(UTC)
+
+        result = mongo_db["telecrm-whatsapp"].insert_one(doc)
+        doc["_id"] = str(result.inserted_id)
+        doc["created_at"] = doc["created_at"].isoformat()
+
+        return {
+            "status": "success",
+            "message": "Whatsapp details saved successfully",
+            "inserted_id": doc["_id"],
+            "data": doc,
+        }
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to save whatsapp details: {e!s}",
         )

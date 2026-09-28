@@ -1,6 +1,6 @@
-from typing import Any, Dict
+from typing import Any
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Query, File, UploadFile
+from fastapi import APIRouter, Body, Depends, File, HTTPException, Query, UploadFile
 from sqlalchemy.orm import Session
 from starlette.requests import Request
 
@@ -18,9 +18,7 @@ deals_router = APIRouter(prefix="/deals", tags=["deals"])
 
 
 @deals_router.get("", response_model=DealListResponse)
-@deals_router.get(
-    "/", response_model=DealListResponse
-)
+@deals_router.get("/", response_model=DealListResponse)
 def get_deals_list(
     request: Request,
     db: Session = Depends(get_db),
@@ -80,7 +78,7 @@ def create_deal_route_function(
 async def update_deal(
     request: Request,
     deal_id: int,
-    payload: Dict[str, Any] = Body(...),
+    payload: dict[str, Any] = Body(...),
     db: Session = Depends(get_db),
 ):
     return update_deal_based_on_id(
@@ -101,6 +99,7 @@ def deal_hot_lookup(request: Request, deal_name: str, db: Session = Depends(get_
     except HTTPException as e:
         raise e
 
+
 @deals_router.post("/deals-update-csv-upload")
 async def deals_update_csv(
     request: Request, file: UploadFile = File(...), db: Session = Depends(get_db)
@@ -117,5 +116,5 @@ async def deals_update_csv(
         raise
     except Exception as e:
         raise HTTPException(
-            status_code=500, detail=f"unable to process csv error: {str(e)}"
+            status_code=500, detail=f"unable to process csv error: {e!s}"
         )

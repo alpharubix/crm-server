@@ -1,10 +1,20 @@
-from sqlalchemy import Column, Integer, Numeric, String, Text, DateTime, Date, ForeignKey
+from sqlalchemy import (
+    Column,
+    Date,
+    DateTime,
+    ForeignKey,
+    Integer,
+    Numeric,
+    String,
+    Text,
+)
+from sqlalchemy.dialects.postgresql import BIGINT, JSONB
 from sqlalchemy.ext.hybrid import hybrid_property
-from sqlalchemy.dialects.postgresql import JSONB
-from sqlalchemy.dialects.postgresql import BIGINT
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
+
 from ..database import Base
+
 
 class Deal(Base):
     __tablename__ = "deals_merged"
@@ -20,18 +30,22 @@ class Deal(Base):
     # Relationships
     account = relationship("Account", back_populates="deals")
     owner = relationship("User", foreign_keys=[deal_owner_id], backref="deals")
-    tickets = relationship("Ticket", back_populates="deal", cascade="all, delete-orphan")
+    tickets = relationship(
+        "Ticket", back_populates="deal", cascade="all, delete-orphan"
+    )
     revenue = relationship(
         "Revenue",
         back_populates="deal",
         foreign_keys="Revenue.deal_id",
-        cascade="all, delete-orphan"
+        cascade="all, delete-orphan",
     )
     # Deal & Ticket Info
     ticket_id = Column(BIGINT, index=True)
     ticket_number = Column(BIGINT)
     account_name = Column(String, nullable=True, index=True)
-    deal_name = Column(String, nullable=True, index=True)  # Auto-generated: {account_name}/{account_id}/D{seq}
+    deal_name = Column(
+        String, nullable=True, index=True
+    )  # Auto-generated: {account_name}/{account_id}/D{seq}
     deal_type = Column(String(100), nullable=True)
     loan_type = Column(String(150), nullable=True, index=True)
     type_of_login = Column(String(100), nullable=True)
@@ -39,6 +53,12 @@ class Deal(Base):
     ticket_login = Column(String(100), nullable=True)
     deal_stage = Column(String(50), nullable=True, index=True)
     deal_status = Column(String(50), nullable=True, index=True)
+    deal_approval = Column(
+        String(50),
+        nullable=True,
+        index=True,
+    )
+    deal_description = Column(Text, nullable=True)
     crm_deal_id = Column(BIGINT, nullable=True, index=True)
     partner_name = Column(String(150), nullable=True)
 
@@ -86,12 +106,21 @@ class Deal(Base):
     assignee_id = Column(BIGINT, nullable=True)
     created_by = Column(BIGINT, nullable=True)
     modified_by = Column(BIGINT, nullable=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+    created_at = Column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
 
     @hybrid_property
     def modified_time(self):
         return self.updated_at
-    
+
     # Documentation
-    documents = relationship("DealDocument", back_populates="deal", cascade="all, delete-orphan")
+    documents = relationship(
+        "DealDocument", back_populates="deal", cascade="all, delete-orphan"
+    )

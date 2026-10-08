@@ -61,6 +61,15 @@ def normalize_call_type_str(act_type: Any) -> str:
     return "outgoing"
 
 
+def normalize_whatsapp_type_str(act_type: Any) -> str:
+    s = str(act_type or "").lower().strip()
+    if "incom" in s or "received" in s:
+        return "incoming"
+    if "out" in s or "sent" in s:
+        return "outgoing"
+    return "outgoing"
+
+
 def calculate_relative_time(raw_ts: Any) -> str:
     if not raw_ts:
         return ""
@@ -296,6 +305,127 @@ def get_telecrm_activities(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to fetch call details: {e!s}",
+        )
+
+
+@router.get("/whatsapp-details")
+@router.get("/whatsapp-activity")
+def get_telecrm_whatsapp_activities(
+    phone: str = Query(..., description="Account phone number to look up"),
+    mongo_db: Database = Depends(get_mongodb),
+):
+    try:
+        raw_phone = str(phone or "").strip()
+        clean_digits = "".join(filter(str.isdigit, raw_phone))
+        phone_10 = clean_digits[-10:] if len(clean_digits) >= 10 else clean_digits
+        if not phone_10:
+            return {
+                "status": "success",
+                "count": 0,
+                "data": [],
+            }
+
+        q_filters: list[dict[str, Any]] = [
+            {"lead_phone": {"$regex": f"{phone_10}$"}},
+            {"phone": {"$regex": f"{phone_10}$"}},
+        ]
+        if phone_10.isdigit():
+            q_filters.append({"lead_phone": int(phone_10)})
+            q_filters.append({"phone": int(phone_10)})
+
+        coll = mongo_db["telecrm-whatsapp"]
+        wa_docs = list(
+            coll.find({"$or": q_filters}).sort([("created_at", -1), ("_id", -1)])
+        )
+
+        activities = []
+        for doc in wa_docs:
+            doc_id = str(doc.get("_id", ""))
+            lead_id = clean_text(doc.get("lead_id"))
+            telecrm_url = (
+                f"https://next.telecrm.in/6a8c537f3aeed414e38866a5/views/all-leads-v2/overlay/l/{lead_id}"
+                if lead_id
+                else (
+                    f"https://next.telecrm.in/6a8c537f3aeed414e38866a5/views/all-leads-v2?search={doc.get('lead_phone') or ''}"
+                    if doc.get("lead_phone")
+                    else None
+                )
+            )
+
+            raw_type = clean_text(doc.get("type")) or "OUTGOING_WHATSAPP_MSG"
+            c_type = normalize_whatsapp_type_str(raw_type)
+
+            message_text = clean_text(doc.get("messageText")) or clean_text(
+                doc.get("wa_msg_txt")
+            )
+            msg_type_val = (
+                clean_text(doc.get("msgType"))
+                or clean_text(doc.get("wa_msg_type"))
+                or "TEXT"
+            )
+            wa_msg_type_val = clean_text(doc.get("wa_msg_type")) or msg_type_val
+            wa_msg_txt_val = clean_text(doc.get("wa_msg_txt")) or message_text
+
+            created_on_val = clean_text(doc.get("created_on"))
+            creation_timestamp = clean_text(doc.get("creation_timestamp"))
+            created_at_val = doc.get("created_at")
+            if isinstance(created_at_val, datetime):
+                created_at_str = created_at_val.isoformat()
+            else:
+                created_at_str = clean_text(created_at_val)
+
+            display_ts = creation_timestamp or created_on_val or created_at_str
+            rel_time = calculate_relative_time(
+                created_at_val or creation_timestamp or created_on_val
+            )
+
+            assignee_phone = clean_text(doc.get("assignee_phone_number"))
+            assignee_email = clean_text(doc.get("assignee_email")) or clean_text(
+                doc.get("actor_employee_email")
+            )
+            lead_assignee = clean_text(doc.get("lead_assignee")) or clean_text(
+                doc.get("my_name")
+            )
+
+            item = {
+                "id": doc_id,
+                "_id": doc_id,
+                "lead_id": lead_id,
+                "lead_name": clean_text(doc.get("lead_name")),
+                "lead_phone": clean_text(doc.get("lead_phone"))
+                or clean_text(doc.get("phone")),
+                "type": raw_type,
+                "normalized_type": c_type,
+                "messageText": message_text,
+                "msgType": msg_type_val,
+                "wa_msg_type": wa_msg_type_val,
+                "wa_msg_txt": wa_msg_txt_val,
+                "created_on": created_on_val,
+                "creation_timestamp": display_ts,
+                "created_at": created_at_str,
+                "relative_time": rel_time or "1d",
+                "assignee_phone_number": assignee_phone,
+                "assignee_email": assignee_email,
+                "lead_assignee": lead_assignee,
+                "actor_employee_email": clean_text(doc.get("actor_employee_email")),
+                "my_name": clean_text(doc.get("my_name")),
+                "status": clean_text(doc.get("status")),
+                "telecrm_url": telecrm_url,
+                "url": clean_text(doc.get("url"))
+                or clean_text(doc.get("wa_action_url")),
+            }
+            activities.append(item)
+
+        return {
+            "status": "success",
+            "count": len(activities),
+            "data": activities,
+        }
+    except Exception as e:
+        logger.exception("Failed to fetch whatsapp activities")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to fetch whatsapp activities: {e!s}",
         )
 
 
@@ -572,6 +702,309 @@ def get_call_recordings_list(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to fetch call recordings: {e!s}",
+        )
+
+
+@router.get("/whatsapp-records")
+@router.get("/whatsapp")
+@router.get("/telecrm-whatsapp")
+def get_whatsapp_records_list(
+    page: int = Query(default=1, ge=1, description="Page number"),
+    limit: int = Query(default=20, ge=1, le=100, description="Items per page"),
+    search: str | None = Query(
+        default=None,
+        description="Search account name, lead name, phone number, message text, or user",
+    ),
+    type: str | None = Query(
+        default=None,
+        description="Filter by message type / direction: all, outgoing, incoming",
+    ),
+    msg_type: str | None = Query(
+        default=None,
+        description="Filter by msgType / wa_msg_type: all, TEXT, IMAGE",
+    ),
+    user: str | None = Query(
+        default=None,
+        description="Filter by user email, phone or assignee",
+    ),
+    from_date: str | None = Query(
+        default=None,
+        description="Start date or datetime (YYYY-MM-DD or YYYY-MM-DD HH:MM:SS)",
+    ),
+    to_date: str | None = Query(
+        default=None,
+        description="End date or datetime (YYYY-MM-DD or YYYY-MM-DD HH:MM:SS)",
+    ),
+    db: Session = Depends(get_db),
+    mongo_db: Database = Depends(get_mongodb),
+):
+    try:
+        filter_conditions: list[dict[str, Any]] = []
+
+        # 1. Type / direction filter
+        if type and type.strip().lower() not in ("all", ""):
+            t_lower = type.strip().lower()
+            if "out" in t_lower or "sent" in t_lower:
+                filter_conditions.append(
+                    {
+                        "$or": [
+                            {"type": {"$regex": "out|sent", "$options": "i"}},
+                            {"direction": {"$regex": "out|sent", "$options": "i"}},
+                        ]
+                    }
+                )
+            elif "incom" in t_lower or "rec" in t_lower:
+                filter_conditions.append(
+                    {
+                        "$or": [
+                            {"type": {"$regex": "incom|rec", "$options": "i"}},
+                            {"direction": {"$regex": "incom|rec", "$options": "i"}},
+                        ]
+                    }
+                )
+            else:
+                filter_conditions.append(
+                    {
+                        "$or": [
+                            {"type": {"$regex": t_lower, "$options": "i"}},
+                            {"direction": {"$regex": t_lower, "$options": "i"}},
+                        ]
+                    }
+                )
+
+        # 2. Msg type filter (TEXT, IMAGE, etc.)
+        if msg_type and msg_type.strip().lower() not in ("all", ""):
+            mt_clean = msg_type.strip()
+            filter_conditions.append(
+                {
+                    "$or": [
+                        {"msgType": {"$regex": mt_clean, "$options": "i"}},
+                        {"wa_msg_type": {"$regex": mt_clean, "$options": "i"}},
+                    ]
+                }
+            )
+
+        # 3. Search query filter
+        if search and search.strip():
+            s = search.strip()
+            s_clean_digits = "".join(filter(str.isdigit, s))
+            search_or: list[dict[str, Any]] = [
+                {"lead_name": {"$regex": s, "$options": "i"}},
+                {"lead_phone": {"$regex": s, "$options": "i"}},
+                {"phone": {"$regex": s, "$options": "i"}},
+                {"messageText": {"$regex": s, "$options": "i"}},
+                {"wa_msg_txt": {"$regex": s, "$options": "i"}},
+                {"assignee_phone_number": {"$regex": s, "$options": "i"}},
+                {"assignee_email": {"$regex": s, "$options": "i"}},
+                {"lead_assignee": {"$regex": s, "$options": "i"}},
+                {"actor_employee_email": {"$regex": s, "$options": "i"}},
+                {"my_name": {"$regex": s, "$options": "i"}},
+                {"type": {"$regex": s, "$options": "i"}},
+            ]
+
+            if s_clean_digits:
+                search_or.append({"lead_phone": {"$regex": f"{s_clean_digits[-10:]}$"}})
+                search_or.append({"phone": {"$regex": f"{s_clean_digits[-10:]}$"}})
+                search_or.append(
+                    {"assignee_phone_number": {"$regex": f"{s_clean_digits[-10:]}$"}}
+                )
+
+            # Search accounts_merged for matching account_name
+            try:
+                acc_query = text("""
+                    SELECT RIGHT(REGEXP_REPLACE(phone, '[^0-9]', '', 'g'), 10) as phone_10
+                    FROM accounts_merged
+                    WHERE account_name ILIKE :search
+                    LIMIT 50
+                """)
+                matching_acc_rows = db.execute(
+                    acc_query, {"search": f"%{s}%"}
+                ).fetchall()
+                acc_phones = [r.phone_10 for r in matching_acc_rows if r.phone_10]
+                for p10 in acc_phones:
+                    search_or.append({"lead_phone": {"$regex": f"{p10}$"}})
+                    search_or.append({"phone": {"$regex": f"{p10}$"}})
+            except Exception as search_err:
+                logger.warning(
+                    "Error searching accounts in tele-crm whatsapp: %s", search_err
+                )
+
+            filter_conditions.append({"$or": search_or})
+
+        # 4. User filter
+        if user and user.strip().lower() not in ("all", ""):
+            u_clean = user.strip()
+            prefix = u_clean.split("@")[0] if "@" in u_clean else u_clean
+            u_digits = "".join(filter(str.isdigit, u_clean))
+            user_or: list[dict[str, Any]] = [
+                {"assignee_email": {"$regex": u_clean, "$options": "i"}},
+                {"assignee_email": {"$regex": f"^{prefix}", "$options": "i"}},
+                {"actor_employee_email": {"$regex": u_clean, "$options": "i"}},
+                {"actor_employee_email": {"$regex": f"^{prefix}", "$options": "i"}},
+                {"lead_assignee": {"$regex": prefix, "$options": "i"}},
+                {"my_name": {"$regex": prefix, "$options": "i"}},
+            ]
+            if u_digits and len(u_digits) >= 10:
+                user_or.append(
+                    {"assignee_phone_number": {"$regex": f"{u_digits[-10:]}$"}}
+                )
+            filter_conditions.append({"$or": user_or})
+
+        # 5. Period / Date & Time range filter
+        created_at_filter: dict[str, Any] = {}
+        start_utc = parse_filter_datetime(from_date, is_end_of_day=False)
+        if start_utc:
+            created_at_filter["$gte"] = start_utc
+
+        end_utc = parse_filter_datetime(to_date, is_end_of_day=True)
+        if end_utc:
+            created_at_filter["$lte"] = end_utc
+
+        if created_at_filter:
+            filter_conditions.append({"created_at": created_at_filter})
+
+        mongo_query = {"$and": filter_conditions} if filter_conditions else {}
+
+        coll = mongo_db["telecrm-whatsapp"]
+        total_count = coll.count_documents(mongo_query)
+        total_pages = math.ceil(total_count / limit) if total_count > 0 else 1
+
+        skip = (page - 1) * limit
+        cursor = (
+            coll.find(mongo_query)
+            .sort([("created_at", -1), ("_id", -1)])
+            .skip(skip)
+            .limit(limit)
+        )
+        wa_docs = list(cursor)
+
+        # 6. Extract 10-digit phones for the current batch
+        doc_phone_10_map: dict[str, str] = {}
+        for doc in wa_docs:
+            raw_p = str(doc.get("lead_phone") or doc.get("phone") or "").strip()
+            clean_digits = "".join(filter(str.isdigit, raw_p))
+            p10 = clean_digits[-10:] if len(clean_digits) >= 10 else clean_digits
+            if p10:
+                doc_phone_10_map[str(doc["_id"])] = p10
+
+        distinct_10 = list(set(doc_phone_10_map.values()))
+        account_map: dict[str, dict[str, Any]] = {}
+        if distinct_10:
+            acc_sql = text("""
+                SELECT id, account_name, RIGHT(REGEXP_REPLACE(phone, '[^0-9]', '', 'g'), 10) AS phone_10
+                FROM accounts_merged
+                WHERE RIGHT(REGEXP_REPLACE(phone, '[^0-9]', '', 'g'), 10) IN :phones
+            """)
+            rows = db.execute(acc_sql, {"phones": tuple(distinct_10)}).fetchall()
+            for r in rows:
+                if r.phone_10 not in account_map or (
+                    not account_map[r.phone_10]["account_name"] and r.account_name
+                ):
+                    account_map[r.phone_10] = {
+                        "id": r.id,
+                        "account_name": r.account_name or "",
+                    }
+
+        # 7. Build output list
+        records = []
+        for doc in wa_docs:
+            doc_id = str(doc.get("_id", ""))
+            p10 = doc_phone_10_map.get(doc_id)
+            acc_info = account_map.get(p10) if p10 else None
+
+            lead_id = clean_text(doc.get("lead_id"))
+            telecrm_url = (
+                f"https://next.telecrm.in/6a8c537f3aeed414e38866a5/views/all-leads-v2/overlay/l/{lead_id}"
+                if lead_id
+                else (
+                    f"https://next.telecrm.in/6a8c537f3aeed414e38866a5/views/all-leads-v2?search={doc.get('lead_phone') or ''}"
+                    if doc.get("lead_phone")
+                    else None
+                )
+            )
+
+            raw_type = clean_text(doc.get("type")) or "OUTGOING_WHATSAPP_MSG"
+            c_type = normalize_whatsapp_type_str(raw_type)
+
+            message_text = clean_text(doc.get("messageText")) or clean_text(
+                doc.get("wa_msg_txt")
+            )
+            msg_type_val = (
+                clean_text(doc.get("msgType"))
+                or clean_text(doc.get("wa_msg_type"))
+                or "TEXT"
+            )
+            wa_msg_type_val = clean_text(doc.get("wa_msg_type")) or msg_type_val
+            wa_msg_txt_val = clean_text(doc.get("wa_msg_txt")) or message_text
+
+            created_on_val = clean_text(doc.get("created_on"))
+            creation_timestamp = clean_text(doc.get("creation_timestamp"))
+            created_at_val = doc.get("created_at")
+            if isinstance(created_at_val, datetime):
+                created_at_str = created_at_val.isoformat()
+            else:
+                created_at_str = clean_text(created_at_val)
+
+            display_ts = creation_timestamp or created_on_val or created_at_str
+            rel_time = calculate_relative_time(
+                created_at_val or creation_timestamp or created_on_val
+            )
+
+            assignee_phone_number = clean_text(doc.get("assignee_phone_number"))
+            assignee_email = clean_text(doc.get("assignee_email")) or clean_text(
+                doc.get("actor_employee_email")
+            )
+            lead_assignee = clean_text(doc.get("lead_assignee")) or clean_text(
+                doc.get("my_name")
+            )
+
+            records.append(
+                {
+                    "id": doc_id,
+                    "account_id": str(acc_info["id"]) if acc_info else None,
+                    "account_name": acc_info["account_name"] if acc_info else None,
+                    "telecrm_name": clean_text(doc.get("lead_name")),
+                    "lead_name": clean_text(doc.get("lead_name")),
+                    "lead_id": lead_id,
+                    "telecrm_url": telecrm_url,
+                    "lead_phone": clean_text(doc.get("lead_phone"))
+                    or clean_text(doc.get("phone")),
+                    "type": raw_type,
+                    "normalized_type": c_type,
+                    "messageText": message_text,
+                    "msgType": msg_type_val,
+                    "wa_msg_type": wa_msg_type_val,
+                    "wa_msg_txt": wa_msg_txt_val,
+                    "created_on": created_on_val,
+                    "creation_timestamp": display_ts,
+                    "created_at": created_at_str,
+                    "relative_time": rel_time,
+                    "assignee_phone_number": assignee_phone_number,
+                    "assignee_email": assignee_email,
+                    "lead_assignee": lead_assignee,
+                    "actor_employee_email": clean_text(doc.get("actor_employee_email")),
+                    "my_name": clean_text(doc.get("my_name")),
+                    "status": clean_text(doc.get("status")),
+                    "url": clean_text(doc.get("url"))
+                    or clean_text(doc.get("wa_action_url")),
+                }
+            )
+
+        return {
+            "status": "success",
+            "data": records,
+            "pagination": {
+                "total": total_count,
+                "page": page,
+                "limit": limit,
+                "total_pages": total_pages,
+            },
+        }
+    except Exception as e:
+        logger.exception("Failed to fetch whatsapp records")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to fetch whatsapp records: {e!s}",
         )
 
 

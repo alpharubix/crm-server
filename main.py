@@ -4,7 +4,7 @@ import os
 # from contextlib import asynccontextmanager
 import uvicorn
 from dotenv import load_dotenv
-from fastapi import FastAPI
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
 # 1. Load env vars BEFORE importing modules that rely on them
@@ -140,12 +140,26 @@ def test():
     return {"message": "Hello World"}
 
 
+@app.websocket("/api/v1/whatsapp/ws")
+async def app_whatsapp_ws(websocket: WebSocket):
+    from src.whatsapp.router import ws_manager
+    await ws_manager.connect(websocket)
+    try:
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        ws_manager.disconnect(websocket)
+    except Exception:
+        ws_manager.disconnect(websocket)
+
+
 if __name__ == "__main__":
     uvicorn.run(
         app="main:app",
         host="0.0.0.0",
         port=int(os.getenv("PORT", "8080")),
         reload=os.getenv("DEV", "false").lower() == "true",
+        ws="websockets",
     )
 
 # Tes

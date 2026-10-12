@@ -303,6 +303,27 @@ class WhatsAppService:
             customer_name=resolved_name,
         )
 
+        # Look up saved template definition in DB to store rendered body text & buttons
+        tmpl_def = await self.repo.get_template(
+            waba_id=meta_client.phone_number_id or "",
+            name=template_name,
+            language=language_code,
+        )
+        if not tmpl_def:
+            # Try finding by name across WABA
+            matching_tmpls = await self.repo.list_templates()
+            tmpl_def = next((t for t in matching_tmpls if t.get("name") == template_name), None)
+
+        body_text = ""
+        buttons_rendered: list[dict[str, Any]] = []
+        if tmpl_def and tmpl_def.get("components"):
+            for comp in tmpl_def["components"]:
+                if comp.get("type") == "BODY":
+                    body_text = comp.get("text", "")
+                elif comp.get("type") == "BUTTONS":
+                    for b in comp.get("buttons", []):
+                        buttons_rendered.append({"id": b.get("text", ""), "title": b.get("text", "")})
+
         # 3. Persist outbound message document
         msg_doc = {
             "conversation_id": conversation["_id"],
@@ -316,6 +337,10 @@ class WhatsAppService:
                 "template_name": template_name,
                 "language": language_code,
                 "components": components or [],
+                "rendered": {
+                    "body": body_text or f"Template: {template_name}",
+                    "buttons": buttons_rendered,
+                },
             },
             "status": "sent_to_meta",
             "status_history": [

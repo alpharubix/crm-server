@@ -16,6 +16,8 @@ async def authorization(request: Request, call_next):
         or request.url.path.startswith("/webhook/update-account-name/")
         or request.url.path.startswith("/tele-crm")
         or request.url.path.startswith("/webhooks/whatsapp")
+        or request.url.path.startswith("/api/v1/whatsapp/ws")
+        or request.url.path.startswith("/api/v1/whatsapp/media")
     ):
         return await call_next(request)
 

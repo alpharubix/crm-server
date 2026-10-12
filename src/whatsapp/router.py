@@ -6,10 +6,14 @@ from fastapi import (
     HTTPException,
     Query,
     Request,
+    Response,
+    WebSocket,
+    WebSocketDisconnect,
     status,
 )
 from fastapi.responses import PlainTextResponse
 
+from src.whatsapp.cloud_api import meta_client
 from src.whatsapp.schemas import (
     SendTemplateMessageRequest,
     SendTextMessageRequest,
@@ -22,6 +26,30 @@ from src.whatsapp.webhook import (
 )
 
 logger = logging.getLogger("whatsapp.router")
+
+
+# Real-Time WebSocket Manager
+class ConnectionManager:
+    def __init__(self):
+        self.active_connections: list[WebSocket] = []
+
+    async def connect(self, websocket: WebSocket):
+        await websocket.accept()
+        self.active_connections.append(websocket)
+
+    def disconnect(self, websocket: WebSocket):
+        if websocket in self.active_connections:
+            self.active_connections.remove(websocket)
+
+    async def broadcast(self, data: dict):
+        for connection in list(self.active_connections):
+            try:
+                await connection.send_json(data)
+            except Exception:
+                self.disconnect(connection)
+
+
+ws_manager = ConnectionManager()
 
 # Router for Meta Webhook endpoints (at /webhooks/whatsapp)
 webhook_router = APIRouter(prefix="/webhooks/whatsapp", tags=["whatsapp-webhooks"])
@@ -105,6 +133,14 @@ async def webhook_receive_event(
             print(
                 f"    Saved:    PostgreSQL Contact ID: {saved.get('contact_id')} | MongoDB Message ID: {saved.get('_id')}"
             )
+            # Broadcast to frontend clients in real time
+            await ws_manager.broadcast(
+                {
+                    "type": "new_message",
+                    "message": saved,
+                    "conversation_id": str(saved.get("conversation_id")),
+                }
+            )
         except Exception as e:
             print(f"    Error:    Failed to process inbound message: {e}")
             logger.error(
@@ -120,7 +156,17 @@ async def webhook_receive_event(
         if st_event.get("error"):
             print(f"    Error:     {st_event.get('error')}")
         try:
-            await whatsapp_service.process_status_update(st_event)
+            updated_msg = await whatsapp_service.process_status_update(st_event)
+            if updated_msg:
+                # Broadcast updated status checkmark to frontend
+                await ws_manager.broadcast(
+                    {
+                        "type": "status_update",
+                        "wamid": st_event.get("wamid"),
+                        "status": st_event.get("status"),
+                        "conversation_id": str(updated_msg.get("conversation_id")),
+                    }
+                )
         except Exception as e:
             print(f"    Error:     Failed to update status: {e}")
             logger.error(
@@ -214,6 +260,14 @@ async def send_text_message(body: SendTextMessageRequest):
             text=body.text,
             business_phone_number_id=body.business_phone_number_id,
         )
+        # Broadcast immediately to frontend clients via WebSocket
+        await ws_manager.broadcast(
+            {
+                "type": "new_message",
+                "message": saved_msg,
+                "conversation_id": str(saved_msg.get("conversation_id")),
+            }
+        )
         return {"status": "success", "data": saved_msg}
     except Exception as e:
         logger.error(f"Failed to send text message: {e}")
@@ -233,6 +287,14 @@ async def send_template_message(body: SendTemplateMessageRequest):
             language_code=body.language_code,
             components=body.components,
             business_phone_number_id=body.business_phone_number_id,
+        )
+        # Broadcast immediately to frontend clients via WebSocket
+        await ws_manager.broadcast(
+            {
+                "type": "new_message",
+                "message": saved_msg,
+                "conversation_id": str(saved_msg.get("conversation_id")),
+            }
         )
         return {"status": "success", "data": saved_msg}
     except Exception as e:
@@ -262,3 +324,43 @@ async def sync_templates(waba_id: str | None = Query(default=None)):
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=str(e),
         )
+
+
+# =========================================================================
+# 3. REAL-TIME WEBSOCKET & MEDIA PROXY
+# =========================================================================
+
+
+@inbox_router.websocket("/ws")
+async def websocket_endpoint(websocket: WebSocket):
+    """
+    WebSocket endpoint for live WhatsApp updates (inbound messages, status ticks).
+    """
+    await ws_manager.connect(websocket)
+    try:
+        while True:
+            # Keep-alive loop
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        ws_manager.disconnect(websocket)
+    except Exception:
+        ws_manager.disconnect(websocket)
+
+
+@inbox_router.get("/media/{media_id}")
+async def get_media_proxy(media_id: str):
+    """
+    Secure media proxy to stream customer images, audio, video, documents
+    to the frontend without exposing Meta access tokens to the browser.
+    """
+    try:
+        meta_info = await meta_client.get_media_url(media_id)
+        download_url = meta_info.get("url")
+        if not download_url:
+            raise HTTPException(status_code=404, detail="Media URL not found")
+
+        content_bytes, content_type = await meta_client.download_media(download_url)
+        return Response(content=content_bytes, media_type=content_type)
+    except Exception as e:
+        logger.error(f"Failed to proxy media {media_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))

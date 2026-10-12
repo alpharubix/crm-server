@@ -144,4 +144,26 @@ class MetaWhatsAppClient:
         return templates
 
 
+    async def get_media_url(self, media_id: str) -> dict[str, Any]:
+        """Fetch the temporary download URL and mime_type from Meta for a media_id."""
+        url = f"{self.base_url}/{media_id}"
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.get(url, headers=self._headers())
+            if resp.status_code >= 400:
+                data = resp.json()
+                raise RuntimeError(
+                    f"Failed to fetch media metadata: {data.get('error', {}).get('message', 'Unknown error')}"
+                )
+            return resp.json()
+
+    async def download_media(self, download_url: str) -> tuple[bytes, str]:
+        """Download binary media bytes from Meta's download URL using Bearer auth."""
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.get(download_url, headers=self._headers())
+            if resp.status_code >= 400:
+                raise RuntimeError(f"Failed to download media bytes (HTTP {resp.status_code})")
+            content_type = resp.headers.get("content-type", "application/octet-stream")
+            return resp.content, content_type
+
+
 meta_client = MetaWhatsAppClient()

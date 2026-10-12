@@ -3,7 +3,6 @@ from datetime import date
 
 from sqlalchemy.orm import Session
 
-from src.controllers.mail import notify_project_overdue
 from src.models.project import Project, StatusEnum
 from src.models.user import User
 
@@ -67,7 +66,7 @@ def check_overdue_projects(db: Session):
                 )
             except Exception as e:
                 logger.error(
-                    f"Failed to send overdue mail for project {project.name}: {str(e)}"
+                    f"Failed to send overdue mail for project {project.name}: {e!s}"
                 )
 
     logger.info("Overdue project check completed")

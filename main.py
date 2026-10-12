@@ -34,6 +34,7 @@ from src.routers.revenue import revenue_router
 from src.routers.support_tickets import support_tickets_router
 from src.routers.tickets import tickets_router
 from src.routers.webhook import webhook_api_router
+from src.whatsapp.router import inbox_router, webhook_router
 
 # from src.scheduler import shutdown_scheduler, start_scheduler
 
@@ -120,6 +121,18 @@ app.include_router(webhook_api_router)
 app.include_router(support_tickets_router)
 app.include_router(invoice_router)
 app.include_router(tele_crm_router.router, prefix="/tele-crm")
+app.include_router(webhook_router)
+app.include_router(inbox_router)
+
+
+@app.on_event("startup")
+async def on_startup():
+    try:
+        from src.database import connect_whatsapp_db
+        await connect_whatsapp_db()
+        logger.info("Connected to WhatsApp MongoDB and verified indexes.")
+    except Exception as e:
+        logger.warning(f"WhatsApp MongoDB initialization deferred: {e}")
 
 
 @app.get("/")

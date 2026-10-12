@@ -15,6 +15,7 @@ from fastapi.responses import PlainTextResponse
 
 from src.whatsapp.cloud_api import meta_client
 from src.whatsapp.schemas import (
+    BroadcastCampaignRequest,
     SendTemplateMessageRequest,
     SendTextMessageRequest,
 )
@@ -326,9 +327,71 @@ async def sync_templates(waba_id: str | None = Query(default=None)):
         )
 
 
-# =========================================================================
-# 3. REAL-TIME WEBSOCKET & MEDIA PROXY
-# =========================================================================
+@inbox_router.post("/broadcasts/send")
+async def send_broadcast_campaign(body: BroadcastCampaignRequest):
+    """
+    Executes a bulk WhatsApp campaign to a list of recipients (from Excel/CSV).
+    Throttles sends to respect Meta rate limits and updates CRM contacts & chat history.
+    """
+    import asyncio
+
+    total = len(body.recipients)
+    sent_count = 0
+    failed_count = 0
+    results: list[dict] = []
+
+    for r in body.recipients:
+        phone = "".join(filter(str.isdigit, str(r.phone)))
+        if not phone or len(phone) < 10:
+            failed_count += 1
+            results.append({"phone": r.phone, "status": "failed", "error": "Invalid phone number"})
+            continue
+
+        try:
+            if body.send_mode == "text" and r.custom_text:
+                saved_msg = await whatsapp_service.send_text_message(
+                    recipient_phone=phone,
+                    text=r.custom_text,
+                    business_phone_number_id=body.business_phone_number_id,
+                )
+            else:
+                saved_msg = await whatsapp_service.send_template_message(
+                    recipient_phone=phone,
+                    template_name=body.template_name or "",
+                    language_code=body.language_code,
+                    components=r.components,
+                    business_phone_number_id=body.business_phone_number_id,
+                )
+
+            sent_count += 1
+            results.append({"phone": phone, "status": "sent", "wamid": saved_msg.get("wamid")})
+
+            # Broadcast new message to UI in real time
+            await ws_manager.broadcast(
+                {
+                    "type": "new_message",
+                    "message": saved_msg,
+                    "conversation_id": str(saved_msg.get("conversation_id")),
+                }
+            )
+        except Exception as e:
+            failed_count += 1
+            err_str = str(e)
+            print(f"[BROADCAST SEND ERROR] Phone: {phone} | Error: {err_str}", flush=True)
+            logger.error(f"[BROADCAST ERROR] Phone: {phone} | Error: {err_str}")
+            results.append({"phone": phone, "status": "failed", "error": err_str})
+
+        # Meta throttling: sleep 60ms between outbound sends to avoid 429
+        await asyncio.sleep(0.06)
+
+    return {
+        "status": "success",
+        "campaign_name": body.campaign_name,
+        "total": total,
+        "sent": sent_count,
+        "failed": failed_count,
+        "details": results,
+    }
 
 
 @inbox_router.websocket("/ws")

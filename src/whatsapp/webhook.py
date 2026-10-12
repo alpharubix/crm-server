@@ -115,35 +115,38 @@ def parse_meta_webhook(
                     itype = interactive.get("type")
                     if itype == "button_reply":
                         btn_reply = interactive.get("button_reply", {})
+                        reply_text = btn_reply.get("title", "")
                         content = {
+                            "text": reply_text,
                             "interaction_type": "button_reply",
                             "button_id": btn_reply.get("id"),
-                            "text": btn_reply.get("title"),
                         }
-                        preview_text = btn_reply.get("title", "Button response")
+                        preview_text = reply_text
                     elif itype == "list_reply":
                         list_reply = interactive.get("list_reply", {})
+                        reply_text = list_reply.get("title", "")
                         content = {
+                            "text": reply_text,
                             "interaction_type": "list_reply",
                             "item_id": list_reply.get("id"),
-                            "title": list_reply.get("title"),
                             "description": list_reply.get("description"),
                         }
-                        preview_text = list_reply.get("title", "List response")
+                        preview_text = reply_text
                     else:
                         content = interactive
                         preview_text = f"Interactive: {itype}"
-                    msg_type = "interactive_reply"
+                    msg_type = "text"
 
                 elif msg_type == "button":
                     btn = msg.get("button", {})
+                    reply_text = btn.get("text", "")
                     content = {
+                        "text": reply_text,
                         "interaction_type": "quick_reply",
                         "payload": btn.get("payload"),
-                        "text": btn.get("text"),
                     }
-                    preview_text = btn.get("text", "Button reply")
-                    msg_type = "interactive_reply"
+                    preview_text = reply_text
+                    msg_type = "text"
 
                 elif msg_type in ("image", "document", "audio", "video", "sticker"):
                     media_obj = msg.get(msg_type, {})
@@ -162,6 +165,17 @@ def parse_meta_webhook(
                     content = msg.get(msg_type, {})
                     preview_text = f"[{msg_type}]"
 
+                # Check if message is a reply to another message (context)
+                context_obj = msg.get("context", {})
+                reply_context = None
+                if context_obj:
+                    reply_context = {
+                        "message_id": context_obj.get("id"),
+                        "from": context_obj.get("from"),
+                        "forwarded": context_obj.get("forwarded", False),
+                        "frequently_forwarded": context_obj.get("frequently_forwarded", False),
+                    }
+
                 incoming_messages.append(
                     {
                         "wamid": wamid,
@@ -172,6 +186,7 @@ def parse_meta_webhook(
                         "type": msg_type,
                         "content": content,
                         "preview_text": preview_text,
+                        "reply_to": reply_context,
                         "status": "received",
                         "timestamp": dt,
                         "raw_payload": msg,

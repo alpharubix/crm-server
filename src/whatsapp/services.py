@@ -116,6 +116,21 @@ class WhatsAppService:
             customer_name=resolved_name,
         )
 
+        reply_to_info = event.get("reply_to")
+        if reply_to_info and reply_to_info.get("message_id"):
+            # Attempt to resolve the quoted message text for clean UI quote preview
+            quoted_msg = await self.repo.get_message_by_wamid(reply_to_info["message_id"])
+            if quoted_msg:
+                q_content = quoted_msg.get("content", {})
+                q_text = (
+                    q_content.get("rendered", {}).get("body")
+                    or q_content.get("text")
+                    or quoted_msg.get("preview_text")
+                    or f"Template: {q_content.get('template_name', '')}"
+                )
+                reply_to_info["quoted_text"] = q_text
+                reply_to_info["quoted_from"] = quoted_msg.get("customer_wa_id") or quoted_msg.get("business_phone_number_id")
+
         # 3. Save message document
         msg_doc = {
             "conversation_id": conversation["_id"],
@@ -126,6 +141,7 @@ class WhatsAppService:
             "direction": "inbound",
             "type": event["type"],
             "content": event["content"],
+            "reply_to": reply_to_info,
             "status": "received",
             "status_history": [
                 {
@@ -277,14 +293,21 @@ class WhatsAppService:
     ) -> dict:
         """Sends an approved template message and persists it."""
         clean_phone = "".join(filter(str.isdigit, str(recipient_phone)))
-        phone_id = business_phone_number_id or meta_client.phone_number_id
+        # Sanitize components: only include non-empty parameter lists
+        sanitized_components: list[dict[str, Any]] | None = None
+        if components:
+            valid_comps = [
+                c for c in components
+                if isinstance(c, dict) and c.get("parameters") and len(c.get("parameters")) > 0
+            ]
+            sanitized_components = valid_comps if valid_comps else None
 
         # 1. Send via Meta Cloud API
         meta_response = await meta_client.send_template_message(
             to_phone=clean_phone,
             template_name=template_name,
             language_code=language_code,
-            components=components,
+            components=sanitized_components,
         )
 
         wamid = None
@@ -324,6 +347,15 @@ class WhatsAppService:
                     for b in comp.get("buttons", []):
                         buttons_rendered.append({"id": b.get("text", ""), "title": b.get("text", "")})
 
+        # Replace dynamic parameters (e.g. {{1}}, {{2}}) in rendered preview text if provided
+        rendered_body = body_text or f"Template: {template_name}"
+        if components:
+            for c in components:
+                if c.get("type") == "body" and c.get("parameters"):
+                    for idx, param in enumerate(c.get("parameters", []), start=1):
+                        val = param.get("text") or param.get(param.get("type"), "")
+                        rendered_body = rendered_body.replace(f"{{{{{idx}}}}}", str(val))
+
         # 3. Persist outbound message document
         msg_doc = {
             "conversation_id": conversation["_id"],
@@ -338,7 +370,7 @@ class WhatsAppService:
                 "language": language_code,
                 "components": components or [],
                 "rendered": {
-                    "body": body_text or f"Template: {template_name}",
+                    "body": rendered_body,
                     "buttons": buttons_rendered,
                 },
             },

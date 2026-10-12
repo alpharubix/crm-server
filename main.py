@@ -67,15 +67,30 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-# @asynccontextmanager
-# async def lifespan(app: FastAPI):
-#     start_scheduler()
-#     yield
-#     shutdown_scheduler()
+from contextlib import asynccontextmanager
 
 
-# app = FastAPI(lifespan=lifespan)
-app = FastAPI()
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup actions
+    try:
+        from src.database import connect_whatsapp_db
+        await connect_whatsapp_db()
+        logger.info("Connected to WhatsApp MongoDB and verified indexes.")
+    except Exception as e:
+        logger.warning(f"WhatsApp MongoDB initialization deferred: {e}")
+
+    yield
+
+    # Shutdown actions
+    try:
+        from src.database import close_whatsapp_db
+        await close_whatsapp_db()
+    except Exception:
+        pass
+
+
+app = FastAPI(lifespan=lifespan)
 
 from src.middleware.auth import authorization
 from src.middleware.invoice_route_protector import authorize_invoice_route_user
@@ -123,16 +138,6 @@ app.include_router(invoice_router)
 app.include_router(tele_crm_router.router, prefix="/tele-crm")
 app.include_router(webhook_router)
 app.include_router(inbox_router)
-
-
-@app.on_event("startup")
-async def on_startup():
-    try:
-        from src.database import connect_whatsapp_db
-        await connect_whatsapp_db()
-        logger.info("Connected to WhatsApp MongoDB and verified indexes.")
-    except Exception as e:
-        logger.warning(f"WhatsApp MongoDB initialization deferred: {e}")
 
 
 @app.get("/")

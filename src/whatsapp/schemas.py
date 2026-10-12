@@ -142,3 +142,18 @@ class SendTemplateMessageRequest(BaseModel):
     language_code: str = "en"
     components: list[dict[str, Any]] = Field(default_factory=list)
     business_phone_number_id: str | None = None
+
+
+class BroadcastRecipient(BaseModel):
+    phone: str
+    custom_text: str | None = None
+    components: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class BroadcastCampaignRequest(BaseModel):
+    campaign_name: str
+    send_mode: Literal["template", "text"] = "template"
+    template_name: str | None = None
+    language_code: str = "en"
+    recipients: list[BroadcastRecipient]
+    business_phone_number_id: str | None = None

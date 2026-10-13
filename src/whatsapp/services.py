@@ -222,6 +222,7 @@ class WhatsAppService:
         meta_response = await meta_client.send_text_message(
             to_phone=clean_phone,
             text=text,
+            phone_number_id=phone_id,
         )
 
         wamid = None
@@ -302,12 +303,15 @@ class WhatsAppService:
             ]
             sanitized_components = valid_comps if valid_comps else None
 
+        phone_id = business_phone_number_id or meta_client.phone_number_id
+
         # 1. Send via Meta Cloud API
         meta_response = await meta_client.send_template_message(
             to_phone=clean_phone,
             template_name=template_name,
             language_code=language_code,
             components=sanitized_components,
+            phone_number_id=phone_id,
         )
 
         wamid = None

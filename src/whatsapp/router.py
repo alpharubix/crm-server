@@ -384,8 +384,10 @@ async def send_broadcast_campaign(body: BroadcastCampaignRequest):
         # Meta throttling: sleep 60ms between outbound sends to avoid 429
         await asyncio.sleep(0.06)
 
+    overall_status = "success" if failed_count == 0 else ("failed" if sent_count == 0 else "partial")
+
     return {
-        "status": "success",
+        "status": overall_status,
         "campaign_name": body.campaign_name,
         "total": total,
         "sent": sent_count,

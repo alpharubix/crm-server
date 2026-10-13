@@ -31,12 +31,14 @@ class MetaWhatsAppClient:
         to_phone: str,
         text: str,
         preview_url: bool = False,
+        phone_number_id: str | None = None,
     ) -> dict[str, Any]:
         """
         Send a plain text message via Meta Cloud API.
         to_phone must be in international format without '+' (e.g. 919364111650).
         """
-        url = f"{self.base_url}/{self.phone_number_id}/messages"
+        target_phone_id = phone_number_id or self.phone_number_id
+        url = f"{self.base_url}/{target_phone_id}/messages"
         payload = {
             "messaging_product": "whatsapp",
             "recipient_type": "individual",
@@ -68,11 +70,13 @@ class MetaWhatsAppClient:
         template_name: str,
         language_code: str = "en",
         components: list[dict[str, Any]] | None = None,
+        phone_number_id: str | None = None,
     ) -> dict[str, Any]:
         """
         Send an approved WhatsApp template.
         """
-        url = f"{self.base_url}/{self.phone_number_id}/messages"
+        target_phone_id = phone_number_id or self.phone_number_id
+        url = f"{self.base_url}/{target_phone_id}/messages"
         payload: dict[str, Any] = {
             "messaging_product": "whatsapp",
             "recipient_type": "individual",

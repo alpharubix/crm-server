@@ -322,6 +322,60 @@ class WhatsAppRepository:
         messages.reverse()
         return messages
 
+    async def get_messages_by_phone(
+        self,
+        phone: str,
+        limit: int = 6,
+        skip: int = 0,
+        direction: str | None = None,
+    ) -> tuple[list[dict], int]:
+        """
+        Fetch messages from MongoDB for an account phone number.
+        Matches customer_wa_id against clean digits and 10-digit suffix.
+        """
+        clean_digits = "".join(filter(str.isdigit, str(phone or "")))
+        if not clean_digits:
+            return [], 0
+
+        phone_10 = clean_digits[-10:] if len(clean_digits) >= 10 else clean_digits
+        query: dict[str, Any] = {
+            "$or": [
+                {"customer_wa_id": clean_digits},
+                {"customer_wa_id": f"91{phone_10}"},
+                {"customer_wa_id": phone_10},
+                {"customer_wa_id": {"$regex": f"{phone_10}$"}},
+            ]
+        }
+        if direction and direction in ("inbound", "outbound"):
+            query["direction"] = direction
+
+        total_count = await self.db.messages.count_documents(query)
+        cursor = (
+            self.db.messages.find(query)
+            .sort([("timestamp", DESCENDING), ("created_at", DESCENDING), ("_id", DESCENDING)])
+            .skip(skip)
+            .limit(limit)
+        )
+
+        messages = []
+        async for doc in cursor:
+            norm = normalize_doc(doc)
+            if norm:
+                # If template body text wasn't rendered inline, enrich from db.templates
+                if norm.get("type") == "template" and not norm.get("content", {}).get("rendered", {}).get("body"):
+                    tmpl_name = norm.get("content", {}).get("template_name")
+                    if tmpl_name:
+                        tmpl = await self.db.templates.find_one({"name": tmpl_name})
+                        if tmpl and tmpl.get("components"):
+                            body_comp = next((c for c in tmpl["components"] if c.get("type") == "BODY"), None)
+                            if body_comp:
+                                norm.setdefault("content", {})
+                                norm["content"].setdefault("rendered", {})
+                                norm["content"]["rendered"]["body"] = body_comp.get("text", "")
+                messages.append(norm)
+
+        return messages, total_count
+
     # -------------------------------------------------------------------------
     # TEMPLATES
     # -------------------------------------------------------------------------

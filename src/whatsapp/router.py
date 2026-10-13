@@ -245,6 +245,35 @@ async def get_conversation_messages(
     return {"status": "success", "data": messages}
 
 
+@inbox_router.get("/messages/by-phone")
+async def get_messages_by_phone(
+    phone: str = Query(..., description="Customer phone number"),
+    limit: int = Query(default=6, ge=1, le=100),
+    skip: int = Query(default=0, ge=0),
+    direction: str | None = Query(default=None),
+):
+    """
+    Fetch broadcast/chat messages from MongoDB messages collection matching customer_wa_id.
+    Supports incremental 'See More' pagination.
+    """
+    messages, total = await whatsapp_service.repo.get_messages_by_phone(
+        phone=phone,
+        limit=limit,
+        skip=skip,
+        direction=direction,
+    )
+    has_more = (skip + len(messages)) < total
+    return {
+        "status": "success",
+        "phone": phone,
+        "total": total,
+        "skip": skip,
+        "limit": limit,
+        "has_more": has_more,
+        "data": messages,
+    }
+
+
 @inbox_router.post("/conversations/{conversation_id}/read")
 async def mark_conversation_as_read(conversation_id: str):
     """Mark a conversation as read locally and reset unread count."""

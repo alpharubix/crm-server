@@ -4,7 +4,7 @@ import os
 # from contextlib import asynccontextmanager
 import uvicorn
 from dotenv import load_dotenv
-from fastapi import FastAPI
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
 # 1. Load env vars BEFORE importing modules that rely on them
@@ -34,6 +34,7 @@ from src.routers.revenue import revenue_router
 from src.routers.support_tickets import support_tickets_router
 from src.routers.tickets import tickets_router
 from src.routers.webhook import webhook_api_router
+from src.whatsapp.router import inbox_router, webhook_router
 
 # from src.scheduler import shutdown_scheduler, start_scheduler
 
@@ -66,15 +67,30 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-# @asynccontextmanager
-# async def lifespan(app: FastAPI):
-#     start_scheduler()
-#     yield
-#     shutdown_scheduler()
+from contextlib import asynccontextmanager
 
 
-# app = FastAPI(lifespan=lifespan)
-app = FastAPI()
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup actions
+    try:
+        from src.database import connect_whatsapp_db
+        await connect_whatsapp_db()
+        logger.info("Connected to WhatsApp MongoDB and verified indexes.")
+    except Exception as e:
+        logger.warning(f"WhatsApp MongoDB initialization deferred: {e}")
+
+    yield
+
+    # Shutdown actions
+    try:
+        from src.database import close_whatsapp_db
+        await close_whatsapp_db()
+    except Exception:
+        pass
+
+
+app = FastAPI(lifespan=lifespan)
 
 from src.middleware.auth import authorization
 from src.middleware.invoice_route_protector import authorize_invoice_route_user
@@ -120,11 +136,26 @@ app.include_router(webhook_api_router)
 app.include_router(support_tickets_router)
 app.include_router(invoice_router)
 app.include_router(tele_crm_router.router, prefix="/tele-crm")
+app.include_router(webhook_router)
+app.include_router(inbox_router)
 
 
 @app.get("/")
 def test():
     return {"message": "Hello World"}
+
+
+@app.websocket("/api/v1/whatsapp/ws")
+async def app_whatsapp_ws(websocket: WebSocket):
+    from src.whatsapp.router import ws_manager
+    await ws_manager.connect(websocket)
+    try:
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        ws_manager.disconnect(websocket)
+    except Exception:
+        ws_manager.disconnect(websocket)
 
 
 if __name__ == "__main__":
@@ -133,6 +164,7 @@ if __name__ == "__main__":
         host="0.0.0.0",
         port=int(os.getenv("PORT", "8080")),
         reload=os.getenv("DEV", "false").lower() == "true",
+        ws="websockets",
     )
 
 # Tes

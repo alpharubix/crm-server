@@ -8,9 +8,17 @@ from src.utility.utils import get_decoded_jwt_token
 
 async def authorization(request: Request, call_next):
     # Bypass OPTIONS and Public Routes
-    public_paths = ["/auth/login", "/", "/docs", "/openapi.json",""]
+    public_paths = ["/auth/login", "/", "/docs", "/openapi.json", ""]
 
-    if request.method == "OPTIONS" or request.url.path in public_paths or request.url.path.startswith("/webhook/update-account-name/") or request.url.path.startswith("/tele-crm"):
+    if (
+        request.method == "OPTIONS"
+        or request.url.path in public_paths
+        or request.url.path.startswith("/webhook/update-account-name/")
+        or request.url.path.startswith("/tele-crm")
+        or request.url.path.startswith("/webhooks/whatsapp")
+        or request.url.path.startswith("/api/v1/whatsapp/ws")
+        or request.url.path.startswith("/api/v1/whatsapp/media")
+    ):
         return await call_next(request)
 
     """
@@ -41,6 +49,11 @@ async def authorization(request: Request, call_next):
         pass
 
     token = request.cookies.get("token")
+    if not token:
+        auth_header = request.headers.get("Authorization")
+        if auth_header and auth_header.startswith("Bearer "):
+            token = auth_header.split(" ", 1)[1].strip()
+
     if not token:
         return JSONResponse(status_code=401, content={"message": "Unauthorized Access"})
 

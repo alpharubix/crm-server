@@ -13,10 +13,62 @@ from src.whatsapp.repositories import WhatsAppRepository
 
 logger = logging.getLogger("whatsapp.services")
 
+# Mapping of Quick Reply button payloads and titles to Meta WhatsApp template language codes
+LANGUAGE_PAYLOAD_MAP: dict[str, str] = {
+    # Standard technical payloads
+    "LANG_EN": "en",
+    "LANG_HI": "hi",
+    "LANG_KN": "kn",
+    "LANG_TE": "te",
+    "LANG_TA": "ta",
+    "LANG_BN": "bn",
+    "LANG_MR": "mr",
+    "LANG_GU": "gu",
+
+    # Exact button texts in English
+    "ENGLISH": "en",
+    "HINDI": "hi",
+    "KANNADA": "kn",
+    "TELUGU": "te",
+    "TAMIL": "ta",
+    "BENGALI": "bn",
+    "MARATHI": "mr",
+    "GUJARATI": "gu",
+
+    # Exact native scripts as sent in payload/text from Meta Quick Replies
+    "ಕನ್ನಡ": "kn",
+    "हिंदी": "hi",
+    "हिन्दी": "hi",
+    "తెలుగు": "te",
+    "தமிழ்": "ta",
+    "বাংলা": "bn",
+    "मराठी": "mr",
+    "ગુજરાતી": "gu",
+}
+DEFAULT_LANGUAGE: str = "en"
+
 
 class WhatsAppService:
     def __init__(self, repository: WhatsAppRepository | None = None):
         self.repo = repository or WhatsAppRepository()
+
+    def update_contact_language(self, contact_id: int | None, language_code: str) -> None:
+        """Persists customer's preferred language into PostgreSQL Contact custom_fields."""
+        if not contact_id:
+            return
+        try:
+            with SessionLocal() as db:
+                contact = db.query(Contact).filter(Contact.id == contact_id).first()
+                if contact:
+                    custom_fields = dict(contact.custom_fields or {})
+                    custom_fields["preferred_language"] = language_code
+                    contact.custom_fields = custom_fields
+                    db.commit()
+                    logger.info(
+                        f"Updated contact ID {contact_id} preferred_language to '{language_code}'"
+                    )
+        except Exception as e:
+            logger.error(f"Error updating language for contact {contact_id}: {e}")
 
     # -------------------------------------------------------------------------
     # Contact Resolution (PostgreSQL)
@@ -165,6 +217,57 @@ class WhatsAppService:
             increment_unread=True,
         )
 
+        # 5. Process Language Selection Flow (Quick Reply / Interactive Button Reply)
+        content = event.get("content", {})
+        button_payload = str(
+            content.get("payload")
+            or content.get("button_id")
+            or content.get("text")
+            or ""
+        ).strip()
+
+        # Check exact match or uppercase match
+        selected_lang = (
+            LANGUAGE_PAYLOAD_MAP.get(button_payload)
+            or LANGUAGE_PAYLOAD_MAP.get(button_payload.upper())
+        )
+
+        if selected_lang:
+            print("\n" + "#" * 60)
+            print(f" [LANGUAGE SELECTION DETECTED]")
+            print(f" Customer: {customer_wa_id}")
+            print(f" Payload:  {button_payload}")
+            print(f" Mapped:   {selected_lang}")
+            print(f" Action:   Persisting and sending 'welcome_message' ({selected_lang})...")
+            print("#" * 60 + "\n", flush=True)
+
+            logger.info(
+                f"Customer {customer_wa_id} selected language '{selected_lang}' via payload '{button_payload}'"
+            )
+            # A. Persist preferred language in MongoDB conversation
+            await self.repo.update_conversation_language(
+                conversation_id=conversation["_id"],
+                language_code=selected_lang,
+            )
+
+            # B. Persist preferred language in PostgreSQL contact custom_fields
+            self.update_contact_language(contact_id, selected_lang)
+
+            # C. Send localized welcome/acknowledgment template in selected language
+            try:
+                auto_reply = await self.send_template_message(
+                    recipient_phone=customer_wa_id,
+                    template_name="welcome_message",
+                    language_code=selected_lang,
+                    business_phone_number_id=business_phone_number_id,
+                )
+                saved_msg["auto_reply"] = auto_reply
+            except Exception as e:
+                logger.error(
+                    f"Failed to auto-send localized template 'welcome_message' to {customer_wa_id}: {e}"
+                )
+                print(f" [ERROR AUTO-SENDING TEMPLATE] {e}", flush=True)
+
         return saved_msg
 
     async def process_status_update(self, event: dict[str, Any]) -> dict | None:
@@ -288,12 +391,30 @@ class WhatsAppService:
         self,
         recipient_phone: str,
         template_name: str,
-        language_code: str = "en",
+        language_code: str | None = None,
         components: list[dict[str, Any]] | None = None,
         business_phone_number_id: str | None = None,
     ) -> dict:
-        """Sends an approved template message and persists it."""
+        """Sends an approved template message and persists it, falling back to customer's preferred language."""
         clean_phone = "".join(filter(str.isdigit, str(recipient_phone)))
+        phone_id = business_phone_number_id or meta_client.phone_number_id
+
+        # 1. Resolve contact & conversation first to check saved language preferences
+        contact_id, resolved_name = self.resolve_or_create_contact(clean_phone)
+        conversation = await self.repo.get_or_create_conversation(
+            customer_wa_id=clean_phone,
+            business_phone_number_id=phone_id,
+            contact_id=contact_id,
+            customer_name=resolved_name,
+        )
+
+        # 2. Determine effective language: explicitly provided > conversation saved preference > default "en"
+        effective_language = (
+            language_code
+            or conversation.get("preferred_language")
+            or DEFAULT_LANGUAGE
+        )
+
         # Sanitize components: only include non-empty parameter lists
         sanitized_components: list[dict[str, Any]] | None = None
         if components:
@@ -303,13 +424,11 @@ class WhatsAppService:
             ]
             sanitized_components = valid_comps if valid_comps else None
 
-        phone_id = business_phone_number_id or meta_client.phone_number_id
-
-        # 1. Send via Meta Cloud API
+        # 3. Send via Meta Cloud API
         meta_response = await meta_client.send_template_message(
             to_phone=clean_phone,
             template_name=template_name,
-            language_code=language_code,
+            language_code=effective_language,
             components=sanitized_components,
             phone_number_id=phone_id,
         )
@@ -321,20 +440,11 @@ class WhatsAppService:
 
         now = utcnow()
 
-        # 2. Resolve contact & conversation
-        contact_id, resolved_name = self.resolve_or_create_contact(clean_phone)
-        conversation = await self.repo.get_or_create_conversation(
-            customer_wa_id=clean_phone,
-            business_phone_number_id=phone_id,
-            contact_id=contact_id,
-            customer_name=resolved_name,
-        )
-
         # Look up saved template definition in DB to store rendered body text & buttons
         tmpl_def = await self.repo.get_template(
             waba_id=meta_client.phone_number_id or "",
             name=template_name,
-            language=language_code,
+            language=effective_language,
         )
         if not tmpl_def:
             # Try finding by name across WABA
@@ -371,7 +481,7 @@ class WhatsAppService:
             "type": "template",
             "content": {
                 "template_name": template_name,
-                "language": language_code,
+                "language": effective_language,
                 "components": components or [],
                 "rendered": {
                     "body": rendered_body,
@@ -405,7 +515,7 @@ class WhatsAppService:
         print("\n" + "=" * 60)
         print(" [WHATSAPP OUTBOUND TEMPLATE MESSAGE SENT]")
         print(f" To:        {clean_phone} (Contact ID: {contact_id})")
-        print(f" Template:  {template_name} (Language: {language_code})")
+        print(f" Template:  {template_name} (Language: {effective_language})")
         print(f" WAMID:     {wamid}")
         print(f" Status:    SENT_TO_META")
         print("=" * 60 + "\n", flush=True)

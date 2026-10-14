@@ -37,6 +37,10 @@ class ConversationDocument(BaseModel):
     last_message_direction: Literal["inbound", "outbound"] | None = None
     last_message_status: str | None = None
     last_message_at: datetime | None = None
+    preferred_language: str | None = Field(
+        default=None,
+        description="Customer's preferred WhatsApp template language code (e.g. 'en', 'hi', 'kn').",
+    )
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
 
@@ -139,7 +143,7 @@ class TemplateComponentPayload(BaseModel):
 class SendTemplateMessageRequest(BaseModel):
     recipient_phone: str
     template_name: str
-    language_code: str = "en"
+    language_code: str | None = None
     components: list[dict[str, Any]] = Field(default_factory=list)
     business_phone_number_id: str | None = None
 
@@ -147,6 +151,7 @@ class SendTemplateMessageRequest(BaseModel):
 class BroadcastRecipient(BaseModel):
     phone: str
     custom_text: str | None = None
+    language_code: str | None = None
     components: list[dict[str, Any]] = Field(default_factory=list)
 
 
@@ -154,6 +159,6 @@ class BroadcastCampaignRequest(BaseModel):
     campaign_name: str
     send_mode: Literal["template", "text"] = "template"
     template_name: str | None = None
-    language_code: str = "en"
+    language_code: str | None = None
     recipients: list[BroadcastRecipient]
     business_phone_number_id: str | None = None

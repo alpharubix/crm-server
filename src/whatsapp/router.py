@@ -142,6 +142,15 @@ async def webhook_receive_event(
                     "conversation_id": str(saved.get("conversation_id")),
                 }
             )
+            # If an automatic localized welcome message was dispatched, broadcast it too
+            if saved.get("auto_reply"):
+                await ws_manager.broadcast(
+                    {
+                        "type": "new_message",
+                        "message": saved["auto_reply"],
+                        "conversation_id": str(saved.get("conversation_id")),
+                    }
+                )
         except Exception as e:
             print(f"    Error:    Failed to process inbound message: {e}")
             logger.error(
@@ -384,10 +393,11 @@ async def send_broadcast_campaign(body: BroadcastCampaignRequest):
                     business_phone_number_id=body.business_phone_number_id,
                 )
             else:
+                target_lang = r.language_code or body.language_code
                 saved_msg = await whatsapp_service.send_template_message(
                     recipient_phone=phone,
                     template_name=body.template_name or "",
-                    language_code=body.language_code,
+                    language_code=target_lang,
                     components=r.components,
                     business_phone_number_id=body.business_phone_number_id,
                 )

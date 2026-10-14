@@ -85,6 +85,7 @@ class WhatsAppRepository:
             "last_message_direction": None,
             "last_message_status": None,
             "last_message_at": now,
+            "preferred_language": None,
             "created_at": now,
             "updated_at": now,
         }
@@ -157,6 +158,20 @@ class WhatsAppRepository:
         await self.db.conversations.update_one(
             {"_id": oid},
             {"$set": {"unread_count": 0, "updated_at": utcnow()}},
+        )
+
+    async def update_conversation_language(
+        self, conversation_id: str | ObjectId, language_code: str
+    ) -> None:
+        """Persists customer's preferred template language code in the conversation document."""
+        oid = (
+            ObjectId(conversation_id)
+            if isinstance(conversation_id, str)
+            else conversation_id
+        )
+        await self.db.conversations.update_one(
+            {"_id": oid},
+            {"$set": {"preferred_language": language_code, "updated_at": utcnow()}},
         )
 
     async def list_conversations(

@@ -116,10 +116,12 @@ def parse_meta_webhook(
                     if itype == "button_reply":
                         btn_reply = interactive.get("button_reply", {})
                         reply_text = btn_reply.get("title", "")
+                        btn_id = btn_reply.get("id")
                         content = {
                             "text": reply_text,
                             "interaction_type": "button_reply",
-                            "button_id": btn_reply.get("id"),
+                            "button_id": btn_id,
+                            "payload": btn_id,
                         }
                         preview_text = reply_text
                     elif itype == "list_reply":

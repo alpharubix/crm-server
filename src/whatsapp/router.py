@@ -463,6 +463,80 @@ async def send_broadcast_campaign(body: BroadcastCampaignRequest):
     }
 
 
+@inbox_router.get("/accounts/{account_id}/responses")
+async def get_account_template_responses(account_id: int):
+    """
+    Fetch all WhatsApp template responses (Interested / Not Interested) for an Account in PostgreSQL.
+    Displays responses per template and per contact linked to this account.
+    """
+    from src.database import SessionLocal
+    from src.models.account import Account
+    from src.models.contact import Contact
+    from src.models.whatsapp_response import WhatsAppTemplateResponse
+
+    with SessionLocal() as db:
+        account = db.query(Account).filter(Account.id == account_id).first()
+        if not account:
+            raise HTTPException(status_code=404, detail="Account not found")
+
+        responses = (
+            db.query(WhatsAppTemplateResponse)
+            .filter(WhatsAppTemplateResponse.account_id == account_id)
+            .order_by(WhatsAppTemplateResponse.responded_at.desc())
+            .all()
+        )
+
+        # Build template-wise summary
+        templates_summary: dict[str, dict] = {}
+        items = []
+
+        for r in responses:
+            item = {
+                "id": r.id,
+                "template_name": r.template_name,
+                "template_language": r.template_language,
+                "response_status": r.response_status,
+                "button_text": r.button_text,
+                "customer_phone": r.customer_phone,
+                "contact_id": r.contact_id,
+                "responded_at": r.responded_at.isoformat() if r.responded_at else None,
+            }
+            items.append(item)
+
+            # Aggregate per template name (takes the latest status for each template)
+            if r.template_name not in templates_summary:
+                templates_summary[r.template_name] = {
+                    "template_name": r.template_name,
+                    "latest_status": r.response_status,
+                    "button_text": r.button_text,
+                    "customer_phone": r.customer_phone,
+                    "responded_at": r.responded_at.isoformat() if r.responded_at else None,
+                    "response_count": 1,
+                }
+            else:
+                templates_summary[r.template_name]["response_count"] += 1
+
+        total_interested = sum(
+            1 for t in templates_summary.values() if t["latest_status"] == "interested"
+        )
+        total_not_interested = sum(
+            1 for t in templates_summary.values() if t["latest_status"] == "not_interested"
+        )
+
+        return {
+            "status": "success",
+            "account_id": account_id,
+            "account_name": account.account_name or f"{account.first_name or ''} {account.last_name or ''}".strip(),
+            "summary": {
+                "total_unique_templates_responded": len(templates_summary),
+                "total_interested": total_interested,
+                "total_not_interested": total_not_interested,
+                "templates": list(templates_summary.values()),
+            },
+            "history": items,
+        }
+
+
 @inbox_router.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     """

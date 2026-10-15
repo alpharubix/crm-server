@@ -8,6 +8,7 @@ from src.database import SessionLocal, utcnow
 from src.models.account import Account  # noqa: F401
 from src.models.contact import Contact
 from src.models.user import User  # noqa: F401
+from src.models.whatsapp_response import WhatsAppTemplateResponse
 from src.whatsapp.cloud_api import meta_client
 from src.whatsapp.repositories import WhatsAppRepository
 
@@ -47,6 +48,30 @@ LANGUAGE_PAYLOAD_MAP: dict[str, str] = {
 }
 DEFAULT_LANGUAGE: str = "en"
 
+# Mapping of button responses (English, Hindi, Kannada, etc.) to canonical response status
+RESPONSE_INTENT_MAP: dict[str, str] = {
+    # Interested payloads and variations
+    "INTERESTED": "interested",
+    "RESP_INTERESTED": "interested",
+    "YES": "interested",
+    "YES_INTERESTED": "interested",
+    "ಆಸಕ್ತಿ ಇದೆ": "interested",  # Kannada: Interested
+    "ಹೌದು": "interested",        # Kannada: Yes
+    "रुचि है": "interested",    # Hindi: Interested
+    "हाँ": "interested",        # Hindi: Yes
+    "हाँ, रुचि है": "interested",
+
+    # Not Interested payloads and variations
+    "NOT_INTERESTED": "not_interested",
+    "RESP_NOT_INTERESTED": "not_interested",
+    "NO": "not_interested",
+    "NO_NOT_INTERESTED": "not_interested",
+    "ಆಸಕ್ತಿ ಇಲ್ಲ": "not_interested", # Kannada: Not Interested
+    "ಇಲ್ಲ": "not_interested",        # Kannada: No
+    "रुचि नहीं है": "not_interested", # Hindi: Not Interested
+    "नहीं": "not_interested",        # Hindi: No
+}
+
 
 class WhatsAppService:
     def __init__(self, repository: WhatsAppRepository | None = None):
@@ -69,6 +94,80 @@ class WhatsAppService:
                     )
         except Exception as e:
             logger.error(f"Error updating language for contact {contact_id}: {e}")
+
+    def record_template_response(
+        self,
+        contact_id: int | None,
+        customer_phone: str,
+        template_name: str,
+        response_status: str,
+        button_text: str | None = None,
+        button_payload: str | None = None,
+        outbound_wamid: str | None = None,
+        inbound_wamid: str | None = None,
+        template_language: str | None = None,
+    ) -> None:
+        """
+        Records customer response (interested/not_interested) in PostgreSQL:
+        1. Inserts a row in whatsapp_template_responses linked to Contact & Account.
+        2. Updates Contact.custom_fields['template_responses'] with latest response per template.
+        """
+        try:
+            with SessionLocal() as db:
+                account_id = None
+                company_id = 1
+
+                if contact_id:
+                    contact = db.query(Contact).filter(Contact.id == contact_id).first()
+                    if contact:
+                        account_id = contact.account_id
+                        company_id = contact.company_id or 1
+
+                        # Update Contact.custom_fields with this template's status
+                        custom_fields = dict(contact.custom_fields or {})
+                        tmpl_responses = dict(custom_fields.get("template_responses") or {})
+                        tmpl_responses[template_name] = {
+                            "status": response_status,
+                            "button_text": button_text,
+                            "responded_at": datetime.now().isoformat(),
+                        }
+                        custom_fields["template_responses"] = tmpl_responses
+                        contact.custom_fields = custom_fields
+
+                # Insert granular record in whatsapp_template_responses
+                new_resp = WhatsAppTemplateResponse(
+                    company_id=company_id,
+                    account_id=account_id,
+                    contact_id=contact_id,
+                    customer_phone=customer_phone,
+                    template_name=template_name,
+                    template_language=template_language,
+                    response_status=response_status,
+                    button_text=button_text,
+                    button_payload=button_payload,
+                    outbound_wamid=outbound_wamid,
+                    inbound_wamid=inbound_wamid,
+                    extra_data={
+                        "raw_button_payload": button_payload,
+                        "raw_button_text": button_text,
+                    },
+                )
+                db.add(new_resp)
+                db.commit()
+
+                print("\n" + "=" * 60)
+                print(f" [POSTGRESQL TEMPLATE RESPONSE SAVED]")
+                print(f" Account ID:    {account_id}")
+                print(f" Contact ID:    {contact_id}")
+                print(f" Template:      {template_name}")
+                print(f" Response:      {response_status.upper()} ('{button_text}')")
+                print("=" * 60 + "\n", flush=True)
+
+                logger.info(
+                    f"Saved WhatsApp template response in PostgreSQL: account={account_id}, contact={contact_id}, template={template_name}, status={response_status}"
+                )
+        except Exception as e:
+            logger.error(f"Failed to record template response in PostgreSQL: {e}")
 
     # -------------------------------------------------------------------------
     # Contact Resolution (PostgreSQL)
@@ -267,6 +366,58 @@ class WhatsAppService:
                     f"Failed to auto-send localized template 'welcome_message' to {customer_wa_id}: {e}"
                 )
                 print(f" [ERROR AUTO-SENDING TEMPLATE] {e}", flush=True)
+
+        # 6. Process Template Response Flow (Interested / Not Interested on any sent template)
+        response_intent = (
+            RESPONSE_INTENT_MAP.get(button_payload)
+            or RESPONSE_INTENT_MAP.get(button_payload.upper())
+        )
+
+        if response_intent:
+            # Determine which template this button click is replying to
+            target_template_name = None
+            target_outbound_wamid = None
+            target_template_lang = None
+
+            # Check reply_to context (Meta's context.id links directly to the quoted template message)
+            if reply_to_info and reply_to_info.get("message_id"):
+                quoted_wamid = reply_to_info.get("message_id")
+                quoted_doc = await self.repo.get_message_by_wamid(quoted_wamid)
+                if quoted_doc and quoted_doc.get("type") == "template":
+                    target_template_name = quoted_doc.get("content", {}).get("template_name")
+                    target_template_lang = quoted_doc.get("content", {}).get("language")
+                    target_outbound_wamid = quoted_wamid
+
+            # If customer clicked a Quick Reply button without quoting context, look up the last template sent
+            if not target_template_name:
+                last_tmpl = await self.repo.db.messages.find_one(
+                    {
+                        "customer_wa_id": customer_wa_id,
+                        "direction": "outbound",
+                        "type": "template",
+                    },
+                    sort=[("timestamp", -1)],
+                )
+                if last_tmpl:
+                    target_template_name = last_tmpl.get("content", {}).get("template_name")
+                    target_template_lang = last_tmpl.get("content", {}).get("language")
+                    target_outbound_wamid = last_tmpl.get("wamid")
+
+            # Fallback if unknown
+            target_template_name = target_template_name or "unknown_template"
+
+            # Persist response in PostgreSQL whatsapp_template_responses & Contact.custom_fields
+            self.record_template_response(
+                contact_id=contact_id,
+                customer_phone=customer_wa_id,
+                template_name=target_template_name,
+                response_status=response_intent,
+                button_text=content.get("text"),
+                button_payload=button_payload,
+                outbound_wamid=target_outbound_wamid,
+                inbound_wamid=event.get("wamid"),
+                template_language=target_template_lang,
+            )
 
         return saved_msg
 

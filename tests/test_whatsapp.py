@@ -209,3 +209,19 @@ async def test_repository_out_of_order_status_protection():
 
     # Clean up test message
     await repo.db.messages.delete_one({"wamid": test_wamid})
+
+
+def test_response_intent_mappings():
+    from src.whatsapp.services import RESPONSE_INTENT_MAP
+    assert RESPONSE_INTENT_MAP.get("INTERESTED") == "interested"
+    assert RESPONSE_INTENT_MAP.get("RESP_INTERESTED") == "interested"
+    assert RESPONSE_INTENT_MAP.get("YES") == "interested"
+    assert RESPONSE_INTENT_MAP.get("ಆಸಕ್ತಿ ಇದೆ") == "interested"
+    assert RESPONSE_INTENT_MAP.get("रुचि है") == "interested"
+
+    assert RESPONSE_INTENT_MAP.get("NOT_INTERESTED") == "not_interested"
+    assert RESPONSE_INTENT_MAP.get("RESP_NOT_INTERESTED") == "not_interested"
+    assert RESPONSE_INTENT_MAP.get("NO") == "not_interested"
+    assert RESPONSE_INTENT_MAP.get("ಆಸಕ್ತಿ ಇಲ್ಲ") == "not_interested"
+    assert RESPONSE_INTENT_MAP.get("रुचि नहीं है") == "not_interested"
+

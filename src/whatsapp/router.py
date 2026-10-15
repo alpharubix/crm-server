@@ -540,13 +540,27 @@ async def get_account_template_responses(account_id: int):
 @inbox_router.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     """
-    WebSocket endpoint for live WhatsApp updates (inbound messages, status ticks).
+    WebSocket endpoint for live WhatsApp updates (inbound messages, status ticks, mark read).
     """
     await ws_manager.connect(websocket)
     try:
         while True:
-            # Keep-alive loop
-            await websocket.receive_text()
+            # Listen for client frames (keep-alive, mark_read, etc.)
+            raw_text = await websocket.receive_text()
+            if raw_text:
+                try:
+                    payload = json.loads(raw_text)
+                    # Handle mark_read over WebSocket
+                    if payload.get("action") == "mark_read" and payload.get("conversation_id"):
+                        conv_id = str(payload["conversation_id"])
+                        await whatsapp_service.repo.mark_conversation_read(conv_id)
+                        # Broadcast confirmation to other tabs/clients
+                        await ws_manager.broadcast({
+                            "type": "conversation_read",
+                            "conversation_id": conv_id,
+                        })
+                except Exception as parse_err:
+                    logger.debug(f"Non-JSON or ignored WS message from client: {parse_err}")
     except WebSocketDisconnect:
         ws_manager.disconnect(websocket)
     except Exception:

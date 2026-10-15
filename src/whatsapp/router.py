@@ -29,6 +29,20 @@ from src.whatsapp.webhook import (
 logger = logging.getLogger("whatsapp.router")
 
 
+import json
+from datetime import datetime
+
+from bson import ObjectId
+
+
+def json_default_serializer(obj):
+    if isinstance(obj, datetime):
+        return obj.isoformat()
+    if isinstance(obj, ObjectId):
+        return str(obj)
+    raise TypeError(f"Type {type(obj)} not serializable")
+
+
 # Real-Time WebSocket Manager
 class ConnectionManager:
     def __init__(self):
@@ -43,10 +57,17 @@ class ConnectionManager:
             self.active_connections.remove(websocket)
 
     async def broadcast(self, data: dict):
+        try:
+            payload_str = json.dumps(data, default=json_default_serializer)
+        except Exception as e:
+            logger.error(f"Failed to serialize WebSocket broadcast payload: {e}")
+            return
+
         for connection in list(self.active_connections):
             try:
-                await connection.send_json(data)
-            except Exception:
+                await connection.send_text(payload_str)
+            except Exception as e:
+                logger.warning(f"Error sending to WS client, disconnecting: {e}")
                 self.disconnect(connection)
 
 
@@ -287,6 +308,13 @@ async def get_messages_by_phone(
 async def mark_conversation_as_read(conversation_id: str):
     """Mark a conversation as read locally and reset unread count."""
     await whatsapp_service.repo.mark_conversation_read(conversation_id)
+    # Broadcast read event to all connected UI clients in real time
+    await ws_manager.broadcast(
+        {
+            "type": "conversation_read",
+            "conversation_id": str(conversation_id),
+        }
+    )
     return {"status": "success", "message": "Conversation marked as read"}
 
 

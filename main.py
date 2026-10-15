@@ -145,17 +145,17 @@ def test():
     return {"message": "Hello World"}
 
 
-@app.websocket("/api/v1/whatsapp/ws")
-async def app_whatsapp_ws(websocket: WebSocket):
-    from src.whatsapp.router import ws_manager
-    await ws_manager.connect(websocket)
-    try:
-        while True:
-            await websocket.receive_text()
-    except WebSocketDisconnect:
-        ws_manager.disconnect(websocket)
-    except Exception:
-        ws_manager.disconnect(websocket)
+# @app.websocket("/api/v1/whatsapp/ws")
+# async def app_whatsapp_ws(websocket: WebSocket):
+#     from src.whatsapp.router import ws_manager
+#     await ws_manager.connect(websocket)
+#     try:
+#         while True:
+#             await websocket.receive_text()
+#     except WebSocketDisconnect:
+#         ws_manager.disconnect(websocket)
+#     except Exception:
+#         ws_manager.disconnect(websocket)
 
 
 if __name__ == "__main__":

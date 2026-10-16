@@ -1032,3 +1032,315 @@ def add_whatsapp_details(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to save whatsapp details: {e!s}",
         )
+
+
+@router.get("/broadcast-messages")
+@router.get("/broadcast-whatsapp")
+def get_broadcast_messages_list(
+    page: int = Query(default=1, ge=1, description="Page number"),
+    limit: int = Query(default=20, ge=1, le=100, description="Items per page"),
+    search: str | None = Query(
+        default=None,
+        description="Search account name, customer name, phone number, template name, or message text",
+    ),
+    type: str | None = Query(
+        default=None,
+        description="Filter by message direction: all, outgoing/outbound, incoming/inbound",
+    ),
+    msg_type: str | None = Query(
+        default=None,
+        description="Filter by msg format/type: all, template, text, image, audio, interactive_reply",
+    ),
+    status_filter: str | None = Query(
+        default=None,
+        alias="status",
+        description="Filter by message delivery status: all, sent, delivered, read, failed, received, sent_to_meta",
+    ),
+    from_date: str | None = Query(
+        default=None,
+        description="Start date or datetime (YYYY-MM-DD or YYYY-MM-DD HH:MM:SS)",
+    ),
+    to_date: str | None = Query(
+        default=None,
+        description="End date or datetime (YYYY-MM-DD or YYYY-MM-DD HH:MM:SS)",
+    ),
+    db: Session = Depends(get_db),
+    mongo_db: Database = Depends(get_mongodb),
+):
+    """
+    Fetch broadcast and WhatsApp messages from the MongoDB 'messages' collection.
+    Enriches with customer names from 'conversations', template content from 'templates',
+    and matching CRM accounts from postgres 'accounts_merged'.
+    """
+    try:
+        filter_conditions: list[dict[str, Any]] = []
+
+        # 1. Direction / Type Filter
+        if type and type.strip().lower() not in ("all", ""):
+            t_lower = type.strip().lower()
+            if "out" in t_lower or "sent" in t_lower:
+                filter_conditions.append({"direction": "outbound"})
+            elif "in" in t_lower or "rec" in t_lower:
+                filter_conditions.append({"direction": "inbound"})
+            else:
+                filter_conditions.append({"direction": t_lower})
+
+        # 2. Message Format / Type Filter (template, text, image, audio, etc.)
+        if msg_type and msg_type.strip().lower() not in ("all", ""):
+            mt_clean = msg_type.strip().lower()
+            filter_conditions.append({"type": {"$regex": f"^{mt_clean}$", "$options": "i"}})
+
+        # 3. Status Filter
+        if status_filter and status_filter.strip().lower() not in ("all", ""):
+            st_clean = status_filter.strip().lower()
+            filter_conditions.append({"status": {"$regex": f"^{st_clean}$", "$options": "i"}})
+
+        # 4. Search Filter
+        if search and search.strip():
+            s = search.strip()
+            s_clean_digits = "".join(filter(str.isdigit, s))
+            s_escaped = s.replace("+", "\\+").replace("*", "\\*").replace("?", "\\?")
+
+            search_or: list[dict[str, Any]] = [
+                {"customer_wa_id": {"$regex": s_escaped, "$options": "i"}},
+                {"content.text": {"$regex": s_escaped, "$options": "i"}},
+                {"content.caption": {"$regex": s_escaped, "$options": "i"}},
+                {"content.template_name": {"$regex": s_escaped, "$options": "i"}},
+                {"content.rendered.body": {"$regex": s_escaped, "$options": "i"}},
+                {"wamid": {"$regex": s_escaped, "$options": "i"}},
+            ]
+
+            if s_clean_digits and len(s_clean_digits) >= 4:
+                search_or.append({"customer_wa_id": {"$regex": f"{s_clean_digits}$"}})
+
+            # Search in conversation customer_names
+            try:
+                matched_convs = list(
+                    mongo_db["conversations"].find(
+                        {"customer_name": {"$regex": s_escaped, "$options": "i"}},
+                        {"customer_wa_id": 1},
+                    ).limit(50)
+                )
+                conv_wa_ids = [c["customer_wa_id"] for c in matched_convs if c.get("customer_wa_id")]
+                if conv_wa_ids:
+                    search_or.append({"customer_wa_id": {"$in": conv_wa_ids}})
+            except Exception as conv_err:
+                logger.warning("Error searching conversations in broadcast: %s", conv_err)
+
+            # Search in Postgres accounts_merged
+            try:
+                acc_search_sql = text("""
+                    SELECT RIGHT(REGEXP_REPLACE(phone, '[^0-9]', '', 'g'), 10) AS phone_10
+                    FROM accounts_merged
+                    WHERE account_name ILIKE :search
+                    LIMIT 50
+                """)
+                acc_rows = db.execute(acc_search_sql, {"search": f"%{s}%"}).fetchall()
+                acc_p10s = [r.phone_10 for r in acc_rows if r.phone_10]
+                if acc_p10s:
+                    for p10 in acc_p10s:
+                        search_or.append({"customer_wa_id": {"$regex": f"{p10}$"}})
+            except Exception as search_err:
+                logger.warning("Error searching accounts in broadcast messages: %s", search_err)
+
+            filter_conditions.append({"$or": search_or})
+
+        # 5. Period / Date & Time range filter
+        created_at_filter: dict[str, Any] = {}
+        start_utc = parse_filter_datetime(from_date, is_end_of_day=False)
+        if start_utc:
+            created_at_filter["$gte"] = start_utc
+
+        end_utc = parse_filter_datetime(to_date, is_end_of_day=True)
+        if end_utc:
+            created_at_filter["$lte"] = end_utc
+
+        if created_at_filter:
+            # Check either timestamp or created_at
+            filter_conditions.append(
+                {
+                    "$or": [
+                        {"timestamp": created_at_filter},
+                        {"created_at": created_at_filter},
+                    ]
+                }
+            )
+
+        mongo_query = {"$and": filter_conditions} if filter_conditions else {}
+
+        coll = mongo_db["messages"]
+        total_count = coll.count_documents(mongo_query)
+        total_pages = math.ceil(total_count / limit) if total_count > 0 else 1
+
+        skip = (page - 1) * limit
+        cursor = (
+            coll.find(mongo_query)
+            .sort([("timestamp", -1), ("created_at", -1), ("_id", -1)])
+            .skip(skip)
+            .limit(limit)
+        )
+        msg_docs = list(cursor)
+
+        # 6. Extract customer_wa_ids and phone_10
+        wa_ids = list(set(str(d.get("customer_wa_id") or "").strip() for d in msg_docs if d.get("customer_wa_id")))
+        doc_phone_10_map: dict[str, str] = {}
+        for doc in msg_docs:
+            raw_p = str(doc.get("customer_wa_id") or "").strip()
+            clean_digits = "".join(filter(str.isdigit, raw_p))
+            p10 = clean_digits[-10:] if len(clean_digits) >= 10 else clean_digits
+            if p10:
+                doc_phone_10_map[str(doc["_id"])] = p10
+
+        # Query conversations to get customer_name
+        conv_name_map: dict[str, str] = {}
+        if wa_ids:
+            conv_docs = list(mongo_db["conversations"].find({"customer_wa_id": {"$in": wa_ids}}))
+            for c in conv_docs:
+                cid = c.get("customer_wa_id")
+                cname = c.get("customer_name")
+                if cid and cname:
+                    conv_name_map[cid] = cname
+
+        # Query templates cache for templates whose rendered body isn't saved inline
+        template_cache: dict[str, str] = {}
+        needed_templates = set()
+        for doc in msg_docs:
+            if doc.get("type") == "template":
+                content = doc.get("content") or {}
+                if not content.get("rendered", {}).get("body"):
+                    tname = content.get("template_name")
+                    if tname:
+                        needed_templates.add(tname)
+        if needed_templates:
+            tmpl_docs = list(mongo_db["templates"].find({"name": {"$in": list(needed_templates)}}))
+            for t in tmpl_docs:
+                tname = t.get("name")
+                comps = t.get("components") or []
+                body_comp = next((c for c in comps if c.get("type") == "BODY"), None)
+                if body_comp and body_comp.get("text"):
+                    template_cache[tname] = body_comp.get("text")
+
+        # Query postgres accounts_merged for matching phone_10
+        distinct_10 = list(set(doc_phone_10_map.values()))
+        account_map: dict[str, dict[str, Any]] = {}
+        if distinct_10:
+            acc_sql = text("""
+                SELECT id, account_name, RIGHT(REGEXP_REPLACE(phone, '[^0-9]', '', 'g'), 10) AS phone_10
+                FROM accounts_merged
+                WHERE RIGHT(REGEXP_REPLACE(phone, '[^0-9]', '', 'g'), 10) IN :phones
+            """)
+            rows = db.execute(acc_sql, {"phones": tuple(distinct_10)}).fetchall()
+            for r in rows:
+                if r.phone_10 not in account_map or (
+                    not account_map[r.phone_10]["account_name"] and r.account_name
+                ):
+                    account_map[r.phone_10] = {
+                        "id": r.id,
+                        "account_name": r.account_name or "",
+                    }
+
+        # 7. Build records response
+        records = []
+        for doc in msg_docs:
+            doc_id = str(doc.get("_id", ""))
+            p10 = doc_phone_10_map.get(doc_id)
+            customer_wa_id = str(doc.get("customer_wa_id") or "").strip()
+            acc_info = account_map.get(p10) if p10 else None
+            customer_name = conv_name_map.get(customer_wa_id) or ""
+
+            msg_type_val = clean_text(doc.get("type")) or "text"
+            direction_val = clean_text(doc.get("direction")) or "outbound"
+            normalized_type = "incoming" if direction_val == "inbound" else "outgoing"
+
+            content = doc.get("content") or {}
+            message_text = ""
+            template_name = ""
+            buttons = []
+
+            if msg_type_val == "template":
+                template_name = content.get("template_name") or ""
+                rendered = content.get("rendered") or {}
+                if rendered.get("body"):
+                    message_text = rendered.get("body")
+                elif template_name in template_cache:
+                    message_text = template_cache[template_name]
+                else:
+                    message_text = f"Template: {template_name}" if template_name else "Broadcast Template Message"
+                buttons = rendered.get("buttons") or []
+            elif msg_type_val == "text":
+                message_text = clean_text(content.get("text"))
+            elif msg_type_val == "image":
+                message_text = clean_text(content.get("caption")) or "Image attachment"
+            elif msg_type_val == "audio":
+                message_text = "Audio recording message"
+            elif msg_type_val == "interactive_reply":
+                message_text = clean_text(content.get("text")) or clean_text(content.get("payload")) or "Interactive reply"
+            else:
+                message_text = clean_text(content.get("text")) or f"{msg_type_val} message"
+
+            created_at_val = doc.get("created_at") or doc.get("timestamp")
+            if isinstance(created_at_val, datetime):
+                created_at_str = created_at_val.isoformat()
+            else:
+                created_at_str = clean_text(created_at_val)
+
+            timestamp_val = doc.get("timestamp") or doc.get("created_at")
+            if isinstance(timestamp_val, datetime):
+                timestamp_str = timestamp_val.isoformat()
+            else:
+                timestamp_str = clean_text(timestamp_val)
+
+            rel_time = calculate_relative_time(timestamp_val or created_at_val)
+
+            # Error details if failed
+            error_details = doc.get("error")
+
+            # Media details
+            media_id = content.get("media_id")
+            media_mime = content.get("mime_type")
+
+            records.append(
+                {
+                    "id": doc_id,
+                    "wamid": clean_text(doc.get("wamid")),
+                    "account_id": str(acc_info["id"]) if acc_info else None,
+                    "account_name": acc_info["account_name"] if acc_info else None,
+                    "customer_name": customer_name,
+                    "customer_wa_id": customer_wa_id,
+                    "lead_phone": customer_wa_id,
+                    "direction": direction_val,
+                    "type": direction_val,
+                    "normalized_type": normalized_type,
+                    "msg_type": msg_type_val,
+                    "message_text": message_text,
+                    "template_name": template_name,
+                    "buttons": buttons,
+                    "status": clean_text(doc.get("status")) or "sent",
+                    "status_history": doc.get("status_history") or [],
+                    "error": error_details,
+                    "media_id": media_id,
+                    "mime_type": media_mime,
+                    "created_at": created_at_str,
+                    "timestamp": timestamp_str,
+                    "relative_time": rel_time,
+                    "conversation_id": str(doc.get("conversation_id") or ""),
+                }
+            )
+
+        return {
+            "status": "success",
+            "data": records,
+            "pagination": {
+                "total": total_count,
+                "page": page,
+                "limit": limit,
+                "total_pages": total_pages,
+            },
+        }
+    except Exception as e:
+        logger.exception("Failed to fetch broadcast messages")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to fetch broadcast messages: {e!s}",
+        )
+

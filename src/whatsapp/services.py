@@ -5,9 +5,8 @@ from typing import Any
 from sqlalchemy import or_
 
 from src.database import SessionLocal, utcnow
-from src.models.account import Account  # noqa: F401
+from src.models.account import Account
 from src.models.contact import Contact
-from src.models.user import User  # noqa: F401
 from src.models.whatsapp_response import WhatsAppTemplateResponse
 from src.whatsapp.cloud_api import meta_client
 from src.whatsapp.repositories import WhatsAppRepository
@@ -25,7 +24,6 @@ LANGUAGE_PAYLOAD_MAP: dict[str, str] = {
     "LANG_BN": "bn",
     "LANG_MR": "mr",
     "LANG_GU": "gu",
-
     # Exact button texts in English
     "ENGLISH": "en",
     "HINDI": "hi",
@@ -35,7 +33,6 @@ LANGUAGE_PAYLOAD_MAP: dict[str, str] = {
     "BENGALI": "bn",
     "MARATHI": "mr",
     "GUJARATI": "gu",
-
     # Exact native scripts as sent in payload/text from Meta Quick Replies
     "ಕನ್ನಡ": "kn",
     "हिंदी": "hi",
@@ -48,36 +45,130 @@ LANGUAGE_PAYLOAD_MAP: dict[str, str] = {
 }
 DEFAULT_LANGUAGE: str = "en"
 
-# Mapping of button responses (English, Hindi, Kannada, etc.) to canonical response status
+# Mapping of exact button payloads and phrases
 RESPONSE_INTENT_MAP: dict[str, str] = {
     # Interested payloads and variations
     "INTERESTED": "interested",
     "RESP_INTERESTED": "interested",
     "YES": "interested",
     "YES_INTERESTED": "interested",
+    "I AM INTERESTED": "interested",
+    "I'M INTERESTED": "interested",
+    "IM INTERESTED": "interested",
+    "I INTERESTED": "interested",
+    "Need 1 on 1 discussion": "interested",
+    "AM INTERESTED": "interested",
+    "YES I AM INTERESTED": "interested",
+    "YES I'M INTERESTED": "interested",
+    "PLEASE SHARE DETAILS": "interested",
+    "SHARE DETAILS": "interested",
+    "NEED DETAILS": "interested",
+    "TELL ME MORE": "interested",
+    "CALL ME": "interested",
     "ಆಸಕ್ತಿ ಇದೆ": "interested",  # Kannada: Interested
-    "ಹೌದು": "interested",        # Kannada: Yes
-    "रुचि है": "interested",    # Hindi: Interested
-    "हाँ": "interested",        # Hindi: Yes
+    "ಹೌದು": "interested",  # Kannada: Yes
+    "ನನಗೆ ಆಸಕ್ತಿ ಇದೆ": "interested",  # Kannada: I am interested
+    "ಮಾಹಿತಿ ನೀಡಿ": "interested",  # Kannada: Share info
+    "रुचि है": "interested",  # Hindi: Interested
+    "हाँ": "interested",  # Hindi: Yes
     "हाँ, रुचि है": "interested",
-
+    "मुझे रुचि है": "interested",  # Hindi: I am interested
+    "जानकारी चाहिए": "interested",  # Hindi: Need info
     # Not Interested payloads and variations
     "NOT_INTERESTED": "not_interested",
     "RESP_NOT_INTERESTED": "not_interested",
     "NO": "not_interested",
     "NO_NOT_INTERESTED": "not_interested",
-    "ಆಸಕ್ತಿ ಇಲ್ಲ": "not_interested", # Kannada: Not Interested
-    "ಇಲ್ಲ": "not_interested",        # Kannada: No
-    "रुचि नहीं है": "not_interested", # Hindi: Not Interested
-    "नहीं": "not_interested",        # Hindi: No
+    "NOT INTERESTED": "not_interested",
+    "I AM NOT INTERESTED": "not_interested",
+    "I'M NOT INTERESTED": "not_interested",
+    "IM NOT INTERESTED": "not_interested",
+    "DONT WANT": "not_interested",
+    "DON'T WANT": "not_interested",
+    "DO NOT WANT": "not_interested",
+    "NO THANKS": "not_interested",
+    "NO THANK YOU": "not_interested",
+    "STOP": "not_interested",
+    "UNSUBSCRIBE": "not_interested",
+    "ಆಸಕ್ತಿ ಇಲ್ಲ": "not_interested",  # Kannada: Not Interested
+    "ಇಲ್ಲ": "not_interested",  # Kannada: No
+    "ನನಗೆ ಆಸಕ್ತಿ ಇಲ್ಲ": "not_interested",  # Kannada: I am not interested
+    "ಬೇಡ": "not_interested",  # Kannada: Don't want
+    "रुचि नहीं है": "not_interested",  # Hindi: Not Interested
+    "नहीं": "not_interested",  # Hindi: No
+    "मुझे रुचि नहीं है": "not_interested",  # Hindi: I am not interested
+    "नहीं चाहिए": "not_interested",  # Hindi: Don't want
 }
+
+
+def classify_response_intent(raw_text: str | None) -> str | None:
+    """
+    Classifies a customer's button click or typed text into 'interested' or 'not_interested'.
+    Supports:
+    1. Exact button payloads (e.g. 'INTERESTED', 'RESP_INTERESTED')
+    2. Case-insensitive variations ('I am interested', 'i interested', 'yes I am interested')
+    3. Substring matching for common positive/negative intent phrases.
+    """
+    if not raw_text:
+        return None
+
+    cleaned = str(raw_text).strip()
+    upper = cleaned.upper()
+
+    # 1. Exact match in predefined map
+    if cleaned in RESPONSE_INTENT_MAP:
+        return RESPONSE_INTENT_MAP[cleaned]
+    if upper in RESPONSE_INTENT_MAP:
+        return RESPONSE_INTENT_MAP[upper]
+
+    # 2. Check for negative intent first (to prevent 'not interested' matching 'interested')
+    not_interested_keywords = [
+        "NOT INTEREST",
+        "NO INTEREST",
+        "DONT WANT",
+        "DON'T WANT",
+        "DO NOT WANT",
+        "NO THANKS",
+        "NO THANK",
+        "NOT NOW",
+        "ಆಸಕ್ತಿ ಇಲ್ಲ",
+        "ಬೇಡ",
+        "रुचि नहीं",
+        "नहीं चाहिए",
+    ]
+    for kw in not_interested_keywords:
+        if kw in upper or kw in cleaned:
+            return "not_interested"
+
+    # 3. Check for positive intent keywords ('interested', 'share details', etc.)
+    interested_keywords = [
+        "INTEREST",  # Matches "I am interested", "I interested", "interested", "interesting"
+        "SHARE DETAILS",
+        "SEND DETAILS",
+        "Need 1 on 1 discussion",
+        "NEED DETAILS",
+        "MORE INFO",
+        "CALL ME",
+        "TELL ME",
+        "ಆಸಕ್ತಿ ಇದೆ",
+        "ಮಾಹಿತಿ",
+        "रुचि है",
+        "जानकारी",
+    ]
+    for kw in interested_keywords:
+        if kw in upper or kw in cleaned:
+            return "interested"
+
+    return None
 
 
 class WhatsAppService:
     def __init__(self, repository: WhatsAppRepository | None = None):
         self.repo = repository or WhatsAppRepository()
 
-    def update_contact_language(self, contact_id: int | None, language_code: str) -> None:
+    def update_contact_language(
+        self, contact_id: int | None, language_code: str
+    ) -> None:
         """Persists customer's preferred language into PostgreSQL Contact custom_fields."""
         if not contact_id:
             return
@@ -109,10 +200,15 @@ class WhatsAppService:
     ) -> None:
         """
         Records customer response (interested/not_interested) in PostgreSQL:
-        1. Inserts a row in whatsapp_template_responses linked to Contact & Account.
-        2. Updates Contact.custom_fields['template_responses'] with latest response per template.
+        1. Normalizes phone to last 10 digits (stripping country code 91) to guarantee matching.
+        2. Inserts a row in whatsapp_template_responses linked to Contact & Account.
+        3. Updates Contact.custom_fields['template_responses'] with latest response per template.
         """
         try:
+            # Normalize to 10 digits (remove leading 91 or +)
+            raw_digits = "".join(filter(str.isdigit, str(customer_phone or "")))
+            phone_10 = raw_digits[-10:] if len(raw_digits) >= 10 else raw_digits
+
             with SessionLocal() as db:
                 account_id = None
                 company_id = 1
@@ -125,7 +221,9 @@ class WhatsAppService:
 
                         # Update Contact.custom_fields with this template's status
                         custom_fields = dict(contact.custom_fields or {})
-                        tmpl_responses = dict(custom_fields.get("template_responses") or {})
+                        tmpl_responses = dict(
+                            custom_fields.get("template_responses") or {}
+                        )
                         tmpl_responses[template_name] = {
                             "status": response_status,
                             "button_text": button_text,
@@ -134,12 +232,32 @@ class WhatsAppService:
                         custom_fields["template_responses"] = tmpl_responses
                         contact.custom_fields = custom_fields
 
-                # Insert granular record in whatsapp_template_responses
+                # If account_id was not on contact, look up directly in accounts_merged by last 10 digits
+                if not account_id and phone_10:
+                    matched_acc = (
+                        db.query(Account)
+                        .filter(Account.phone.like(f"%{phone_10}"))
+                        .first()
+                    )
+                    if matched_acc:
+                        account_id = matched_acc.id
+                        company_id = matched_acc.company_id or 1
+                        # If contact exists, also link this contact to the account
+                        if contact_id:
+                            contact = (
+                                db.query(Contact)
+                                .filter(Contact.id == contact_id)
+                                .first()
+                            )
+                            if contact and not contact.account_id:
+                                contact.account_id = matched_acc.id
+
+                # Insert granular record in whatsapp_template_responses using clean 10-digit phone
                 new_resp = WhatsAppTemplateResponse(
                     company_id=company_id,
                     account_id=account_id,
                     contact_id=contact_id,
-                    customer_phone=customer_phone,
+                    customer_phone=phone_10,
                     template_name=template_name,
                     template_language=template_language,
                     response_status=response_status,
@@ -156,7 +274,7 @@ class WhatsAppService:
                 db.commit()
 
                 print("\n" + "=" * 60)
-                print(f" [POSTGRESQL TEMPLATE RESPONSE SAVED]")
+                print(" [POSTGRESQL TEMPLATE RESPONSE SAVED]")
                 print(f" Account ID:    {account_id}")
                 print(f" Contact ID:    {contact_id}")
                 print(f" Template:      {template_name}")
@@ -215,17 +333,24 @@ class WhatsAppService:
                 first_name = name_parts[0]
                 last_name = name_parts[1] if len(name_parts) > 1 else None
 
+                # Look up if an Account exists with this 10-digit phone number
+                linked_account = (
+                    db.query(Account).filter(Account.phone.like(f"%{phone_10}")).first()
+                )
+                account_id_to_link = linked_account.id if linked_account else None
+
                 # Generate unique placeholder email because contacts_merged.email is NOT NULL
-                placeholder_email = f"wa_{clean_digits}@whatsapp.crm"
+                placeholder_email = f"wa_{phone_10}@whatsapp.crm"
 
                 new_contact = Contact(
+                    account_id=account_id_to_link,
                     first_name=first_name,
                     last_name=last_name,
                     email=placeholder_email,
-                    mobile=clean_digits,
-                    phone=clean_digits,
+                    mobile=phone_10,
+                    phone=phone_10,
                     lead_source="WhatsApp",
-                    company_id=1,
+                    company_id=linked_account.company_id if linked_account else 1,
                     created_time=datetime.now(),
                     custom_fields={"created_via": "whatsapp_webhook"},
                 )
@@ -234,7 +359,7 @@ class WhatsAppService:
                 db.refresh(new_contact)
 
                 logger.info(
-                    f"Auto-created new Contact ID {new_contact.id} for phone {clean_digits}"
+                    f"Auto-created new Contact ID {new_contact.id} (Account ID: {account_id_to_link}) for 10-digit phone {phone_10}"
                 )
                 return new_contact.id, contact_name
 
@@ -270,7 +395,9 @@ class WhatsAppService:
         reply_to_info = event.get("reply_to")
         if reply_to_info and reply_to_info.get("message_id"):
             # Attempt to resolve the quoted message text for clean UI quote preview
-            quoted_msg = await self.repo.get_message_by_wamid(reply_to_info["message_id"])
+            quoted_msg = await self.repo.get_message_by_wamid(
+                reply_to_info["message_id"]
+            )
             if quoted_msg:
                 q_content = quoted_msg.get("content", {})
                 q_text = (
@@ -280,7 +407,9 @@ class WhatsAppService:
                     or f"Template: {q_content.get('template_name', '')}"
                 )
                 reply_to_info["quoted_text"] = q_text
-                reply_to_info["quoted_from"] = quoted_msg.get("customer_wa_id") or quoted_msg.get("business_phone_number_id")
+                reply_to_info["quoted_from"] = quoted_msg.get(
+                    "customer_wa_id"
+                ) or quoted_msg.get("business_phone_number_id")
 
         # 3. Save message document
         msg_doc = {
@@ -326,18 +455,19 @@ class WhatsAppService:
         ).strip()
 
         # Check exact match or uppercase match
-        selected_lang = (
-            LANGUAGE_PAYLOAD_MAP.get(button_payload)
-            or LANGUAGE_PAYLOAD_MAP.get(button_payload.upper())
-        )
+        selected_lang = LANGUAGE_PAYLOAD_MAP.get(
+            button_payload
+        ) or LANGUAGE_PAYLOAD_MAP.get(button_payload.upper())
 
         if selected_lang:
             print("\n" + "#" * 60)
-            print(f" [LANGUAGE SELECTION DETECTED]")
+            print(" [LANGUAGE SELECTION DETECTED]")
             print(f" Customer: {customer_wa_id}")
             print(f" Payload:  {button_payload}")
             print(f" Mapped:   {selected_lang}")
-            print(f" Action:   Persisting and sending 'welcome_message' ({selected_lang})...")
+            print(
+                f" Action:   Persisting and sending 'welcome_message' ({selected_lang})..."
+            )
             print("#" * 60 + "\n", flush=True)
 
             logger.info(
@@ -368,10 +498,11 @@ class WhatsAppService:
                 print(f" [ERROR AUTO-SENDING TEMPLATE] {e}", flush=True)
 
         # 6. Process Template Response Flow (Interested / Not Interested on any sent template)
-        response_intent = (
-            RESPONSE_INTENT_MAP.get(button_payload)
-            or RESPONSE_INTENT_MAP.get(button_payload.upper())
+        # Check payload, button text, or direct typed text
+        raw_reply_text = (
+            button_payload or content.get("text") or event.get("preview_text") or ""
         )
+        response_intent = classify_response_intent(raw_reply_text)
 
         if response_intent:
             # Determine which template this button click is replying to
@@ -384,7 +515,9 @@ class WhatsAppService:
                 quoted_wamid = reply_to_info.get("message_id")
                 quoted_doc = await self.repo.get_message_by_wamid(quoted_wamid)
                 if quoted_doc and quoted_doc.get("type") == "template":
-                    target_template_name = quoted_doc.get("content", {}).get("template_name")
+                    target_template_name = quoted_doc.get("content", {}).get(
+                        "template_name"
+                    )
                     target_template_lang = quoted_doc.get("content", {}).get("language")
                     target_outbound_wamid = quoted_wamid
 
@@ -399,7 +532,9 @@ class WhatsAppService:
                     sort=[("timestamp", -1)],
                 )
                 if last_tmpl:
-                    target_template_name = last_tmpl.get("content", {}).get("template_name")
+                    target_template_name = last_tmpl.get("content", {}).get(
+                        "template_name"
+                    )
                     target_template_lang = last_tmpl.get("content", {}).get("language")
                     target_outbound_wamid = last_tmpl.get("wamid")
 
@@ -533,7 +668,7 @@ class WhatsAppService:
         print(f" To:        {clean_phone} (Contact ID: {contact_id})")
         print(f" WAMID:     {wamid}")
         print(f" Content:   {text}")
-        print(f" Status:    SENT_TO_META")
+        print(" Status:    SENT_TO_META")
         print("=" * 60 + "\n", flush=True)
 
         return saved_msg
@@ -561,17 +696,18 @@ class WhatsAppService:
 
         # 2. Determine effective language: explicitly provided > conversation saved preference > default "en"
         effective_language = (
-            language_code
-            or conversation.get("preferred_language")
-            or DEFAULT_LANGUAGE
+            language_code or conversation.get("preferred_language") or DEFAULT_LANGUAGE
         )
 
         # Sanitize components: only include non-empty parameter lists
         sanitized_components: list[dict[str, Any]] | None = None
         if components:
             valid_comps = [
-                c for c in components
-                if isinstance(c, dict) and c.get("parameters") and len(c.get("parameters")) > 0
+                c
+                for c in components
+                if isinstance(c, dict)
+                and c.get("parameters")
+                and len(c.get("parameters")) > 0
             ]
             sanitized_components = valid_comps if valid_comps else None
 
@@ -600,7 +736,9 @@ class WhatsAppService:
         if not tmpl_def:
             # Try finding by name across WABA
             matching_tmpls = await self.repo.list_templates()
-            tmpl_def = next((t for t in matching_tmpls if t.get("name") == template_name), None)
+            tmpl_def = next(
+                (t for t in matching_tmpls if t.get("name") == template_name), None
+            )
 
         body_text = ""
         buttons_rendered: list[dict[str, Any]] = []
@@ -610,7 +748,9 @@ class WhatsAppService:
                     body_text = comp.get("text", "")
                 elif comp.get("type") == "BUTTONS":
                     for b in comp.get("buttons", []):
-                        buttons_rendered.append({"id": b.get("text", ""), "title": b.get("text", "")})
+                        buttons_rendered.append(
+                            {"id": b.get("text", ""), "title": b.get("text", "")}
+                        )
 
         # Replace dynamic parameters (e.g. {{1}}, {{2}}) in rendered preview text if provided
         rendered_body = body_text or f"Template: {template_name}"
@@ -619,7 +759,9 @@ class WhatsAppService:
                 if c.get("type") == "body" and c.get("parameters"):
                     for idx, param in enumerate(c.get("parameters", []), start=1):
                         val = param.get("text") or param.get(param.get("type"), "")
-                        rendered_body = rendered_body.replace(f"{{{{{idx}}}}}", str(val))
+                        rendered_body = rendered_body.replace(
+                            f"{{{{{idx}}}}}", str(val)
+                        )
 
         # 3. Persist outbound message document
         msg_doc = {
@@ -668,7 +810,7 @@ class WhatsAppService:
         print(f" To:        {clean_phone} (Contact ID: {contact_id})")
         print(f" Template:  {template_name} (Language: {effective_language})")
         print(f" WAMID:     {wamid}")
-        print(f" Status:    SENT_TO_META")
+        print(" Status:    SENT_TO_META")
         print("=" * 60 + "\n", flush=True)
 
         return saved_msg

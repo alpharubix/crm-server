@@ -479,12 +479,25 @@ async def get_account_template_responses(account_id: int):
         if not account:
             raise HTTPException(status_code=404, detail="Account not found")
 
-        responses = (
-            db.query(WhatsAppTemplateResponse)
-            .filter(WhatsAppTemplateResponse.account_id == account_id)
-            .order_by(WhatsAppTemplateResponse.responded_at.desc())
-            .all()
-        )
+        # Normalize account phone to last 10 digits
+        acc_digits = "".join(filter(str.isdigit, str(account.phone or "")))
+        acc_phone_10 = acc_digits[-10:] if len(acc_digits) >= 10 else acc_digits
+
+        # Find responses linked by account_id OR by the account's 10-digit phone
+        query = db.query(WhatsAppTemplateResponse)
+        if acc_phone_10:
+            from sqlalchemy import or_
+            query = query.filter(
+                or_(
+                    WhatsAppTemplateResponse.account_id == account_id,
+                    WhatsAppTemplateResponse.customer_phone == acc_phone_10,
+                    WhatsAppTemplateResponse.customer_phone.like(f"%{acc_phone_10}"),
+                )
+            )
+        else:
+            query = query.filter(WhatsAppTemplateResponse.account_id == account_id)
+
+        responses = query.order_by(WhatsAppTemplateResponse.responded_at.desc()).all()
 
         # Build template-wise summary
         templates_summary: dict[str, dict] = {}

@@ -212,16 +212,27 @@ async def test_repository_out_of_order_status_protection():
 
 
 def test_response_intent_mappings():
-    from src.whatsapp.services import RESPONSE_INTENT_MAP
-    assert RESPONSE_INTENT_MAP.get("INTERESTED") == "interested"
-    assert RESPONSE_INTENT_MAP.get("RESP_INTERESTED") == "interested"
-    assert RESPONSE_INTENT_MAP.get("YES") == "interested"
-    assert RESPONSE_INTENT_MAP.get("ಆಸಕ್ತಿ ಇದೆ") == "interested"
-    assert RESPONSE_INTENT_MAP.get("रुचि है") == "interested"
+    from src.whatsapp.services import classify_response_intent
 
-    assert RESPONSE_INTENT_MAP.get("NOT_INTERESTED") == "not_interested"
-    assert RESPONSE_INTENT_MAP.get("RESP_NOT_INTERESTED") == "not_interested"
-    assert RESPONSE_INTENT_MAP.get("NO") == "not_interested"
-    assert RESPONSE_INTENT_MAP.get("ಆಸಕ್ತಿ ಇಲ್ಲ") == "not_interested"
-    assert RESPONSE_INTENT_MAP.get("रुचि नहीं है") == "not_interested"
+    # Positive variations
+    assert classify_response_intent("Interested") == "interested"
+    assert classify_response_intent("I am interested") == "interested"
+    assert classify_response_intent("I Interested") == "interested"
+    assert classify_response_intent("yes, I'm interested") == "interested"
+    assert classify_response_intent("please share details") == "interested"
+    assert classify_response_intent("ಆಸಕ್ತಿ ಇದೆ") == "interested"
+    assert classify_response_intent("ನನಗೆ ಆಸಕ್ತಿ ಇದೆ") == "interested"
+    assert classify_response_intent("रुचि है") == "interested"
+    assert classify_response_intent("मुझे रुचि है") == "interested"
+
+    # Negative variations
+    assert classify_response_intent("Not Interested") == "not_interested"
+    assert classify_response_intent("I am not interested") == "not_interested"
+    assert classify_response_intent("dont want") == "not_interested"
+    assert classify_response_intent("No thanks") == "not_interested"
+    assert classify_response_intent("ಆಸಕ್ತಿ ಇಲ್ಲ") == "not_interested"
+    assert classify_response_intent("ಬೇಡ") == "not_interested"
+    assert classify_response_intent("रुचि नहीं है") == "not_interested"
+    assert classify_response_intent("नहीं चाहिए") == "not_interested"
+
 

@@ -1034,6 +1034,64 @@ def add_whatsapp_details(
         )
 
 
+@router.get("/broadcast-templates")
+def get_broadcast_templates_list(
+    db: Session = Depends(get_db),
+    mongo_db: Database = Depends(get_mongodb),
+):
+    """
+    Fetch all distinct template names available across:
+    1. PostgreSQL whatsapp_template_responses
+    2. MongoDB messages content.template_name
+    3. MongoDB templates collection
+    """
+    try:
+        template_set = set()
+
+        # 1. Postgres responses
+        try:
+            resp_sql = text("SELECT DISTINCT template_name FROM whatsapp_template_responses WHERE template_name IS NOT NULL")
+            resp_rows = db.execute(resp_sql).fetchall()
+            for r in resp_rows:
+                t = clean_text(r[0])
+                if t and t != "unknown_template":
+                    template_set.add(t)
+        except Exception as e:
+            logger.warning("Error getting templates from whatsapp_template_responses: %s", e)
+
+        # 2. MongoDB messages
+        try:
+            msg_templates = mongo_db["messages"].distinct("content.template_name")
+            for mt in msg_templates:
+                t = clean_text(mt)
+                if t:
+                    template_set.add(t)
+        except Exception as e:
+            logger.warning("Error getting templates from messages: %s", e)
+
+        # 3. MongoDB templates collection
+        try:
+            tmpl_docs = mongo_db["templates"].find({}, {"name": 1})
+            for td in tmpl_docs:
+                t = clean_text(td.get("name"))
+                if t:
+                    template_set.add(t)
+        except Exception as e:
+            logger.warning("Error getting templates from templates collection: %s", e)
+
+        sorted_templates = sorted(list(template_set), key=lambda x: x.lower())
+        return {
+            "status": "success",
+            "data": sorted_templates,
+        }
+    except Exception as e:
+        logger.exception("Failed to fetch broadcast templates")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to fetch broadcast templates: {e!s}",
+        )
+
+
 @router.get("/broadcast-messages")
 @router.get("/broadcast-whatsapp")
 def get_broadcast_messages_list(
@@ -1056,6 +1114,15 @@ def get_broadcast_messages_list(
         alias="status",
         description="Filter by message delivery status: all, sent, delivered, read, failed, received, sent_to_meta",
     ),
+    template_filter: str | None = Query(
+        default=None,
+        alias="template_name",
+        description="Filter messages for customers who responded to this specific template",
+    ),
+    response_scope: str | None = Query(
+        default="all",
+        description="When template_name is selected: 'all' (all messages of responded customers) or 'replies_only' (only inbound replies to that template)",
+    ),
     from_date: str | None = Query(
         default=None,
         description="Start date or datetime (YYYY-MM-DD or YYYY-MM-DD HH:MM:SS)",
@@ -1071,6 +1138,7 @@ def get_broadcast_messages_list(
     Fetch broadcast and WhatsApp messages from the MongoDB 'messages' collection.
     Enriches with customer names from 'conversations', template content from 'templates',
     and matching CRM accounts from postgres 'accounts_merged'.
+    Supports filtering by responded template name and response scope ('all' vs 'replies_only').
     """
     try:
         filter_conditions: list[dict[str, Any]] = []
@@ -1095,7 +1163,55 @@ def get_broadcast_messages_list(
             st_clean = status_filter.strip().lower()
             filter_conditions.append({"status": {"$regex": f"^{st_clean}$", "$options": "i"}})
 
-        # 4. Search Filter
+        # 4. Template & Responded Customers Filter
+        active_template = template_filter.strip() if template_filter and template_filter.strip() not in ("all", "") else None
+        active_scope = (response_scope or "all").strip().lower()
+
+        if active_template:
+            # Query PostgreSQL whatsapp_template_responses for customers who responded to this template
+            try:
+                t_sql = text("""
+                    SELECT customer_phone, inbound_wamid, response_status, button_text
+                    FROM whatsapp_template_responses
+                    WHERE template_name = :tmpl
+                """)
+                t_rows = db.execute(t_sql, {"tmpl": active_template}).fetchall()
+            except Exception as t_err:
+                logger.warning("Error fetching template responses for filter: %s", t_err)
+                t_rows = []
+
+            resp_phones = set()
+            resp_wamids = set()
+            for r in t_rows:
+                raw_ph = clean_text(r.customer_phone)
+                clean_digits = "".join(filter(str.isdigit, raw_ph))
+                p10 = clean_digits[-10:] if len(clean_digits) >= 10 else clean_digits
+                if p10:
+                    resp_phones.add(p10)
+                if r.inbound_wamid:
+                    resp_wamids.add(clean_text(r.inbound_wamid))
+
+            if not resp_phones and not resp_wamids:
+                # No customers responded to this template yet; return empty results
+                filter_conditions.append({"_id": {"$exists": False}})
+            else:
+                if active_scope == "replies_only":
+                    # Only show the exact inbound messages that are customer replies to this template
+                    if resp_wamids:
+                        filter_conditions.append({"wamid": {"$in": list(resp_wamids)}})
+                    else:
+                        filter_conditions.append({"_id": {"$exists": False}})
+                else:
+                    # 'all': Show all messages (inbound & outbound) for customers who responded to this template
+                    phone_ors = []
+                    for p in resp_phones:
+                        phone_ors.append({"customer_wa_id": {"$regex": f"{p}$"}})
+                    if phone_ors:
+                        filter_conditions.append({"$or": phone_ors})
+                    elif resp_wamids:
+                        filter_conditions.append({"wamid": {"$in": list(resp_wamids)}})
+
+        # 5. Search Filter
         if search and search.strip():
             s = search.strip()
             s_clean_digits = "".join(filter(str.isdigit, s))
@@ -1145,7 +1261,7 @@ def get_broadcast_messages_list(
 
             filter_conditions.append({"$or": search_or})
 
-        # 5. Period / Date & Time range filter
+        # 6. Period / Date & Time range filter
         created_at_filter: dict[str, Any] = {}
         start_utc = parse_filter_datetime(from_date, is_end_of_day=False)
         if start_utc:
@@ -1181,15 +1297,19 @@ def get_broadcast_messages_list(
         )
         msg_docs = list(cursor)
 
-        # 6. Extract customer_wa_ids and phone_10
+        # 7. Extract customer_wa_ids and phone_10
         wa_ids = list(set(str(d.get("customer_wa_id") or "").strip() for d in msg_docs if d.get("customer_wa_id")))
         doc_phone_10_map: dict[str, str] = {}
+        msg_wamids = set()
         for doc in msg_docs:
             raw_p = str(doc.get("customer_wa_id") or "").strip()
             clean_digits = "".join(filter(str.isdigit, raw_p))
             p10 = clean_digits[-10:] if len(clean_digits) >= 10 else clean_digits
             if p10:
                 doc_phone_10_map[str(doc["_id"])] = p10
+            w = clean_text(doc.get("wamid"))
+            if w:
+                msg_wamids.add(w)
 
         # Query conversations to get customer_name
         conv_name_map: dict[str, str] = {}
@@ -1239,7 +1359,44 @@ def get_broadcast_messages_list(
                         "account_name": r.account_name or "",
                     }
 
-        # 7. Build records response
+        # Query whatsapp_template_responses in PostgreSQL to map template names onto customer responses
+        # Match by inbound_wamid (exact) and customer_phone (clean 10-digit)
+        wamid_response_map: dict[str, dict[str, Any]] = {}
+        phone_response_map: dict[str, dict[str, Any]] = {}
+        try:
+            resp_query_clauses = []
+            resp_params = {}
+            if msg_wamids:
+                resp_query_clauses.append("inbound_wamid IN :wamids")
+                resp_params["wamids"] = tuple(msg_wamids)
+            if distinct_10:
+                resp_query_clauses.append("RIGHT(REGEXP_REPLACE(customer_phone, '[^0-9]', '', 'g'), 10) IN :phones")
+                resp_params["phones"] = tuple(distinct_10)
+
+            if resp_query_clauses:
+                r_sql = text(f"""
+                    SELECT id, inbound_wamid, template_name, response_status, button_text, responded_at,
+                           RIGHT(REGEXP_REPLACE(customer_phone, '[^0-9]', '', 'g'), 10) AS phone_10
+                    FROM whatsapp_template_responses
+                    WHERE {" OR ".join(resp_query_clauses)}
+                    ORDER BY responded_at DESC
+                """)
+                res_rows = db.execute(r_sql, resp_params).fetchall()
+                for row in res_rows:
+                    info = {
+                        "template_name": clean_text(row.template_name),
+                        "response_status": clean_text(row.response_status),
+                        "button_text": clean_text(row.button_text),
+                        "responded_at": row.responded_at.isoformat() if row.responded_at else None,
+                    }
+                    if row.inbound_wamid:
+                        wamid_response_map[clean_text(row.inbound_wamid)] = info
+                    if row.phone_10 and row.phone_10 not in phone_response_map:
+                        phone_response_map[row.phone_10] = info
+        except Exception as w_err:
+            logger.warning("Error mapping template responses: %s", w_err)
+
+        # 8. Build records response
         records = []
         for doc in msg_docs:
             doc_id = str(doc.get("_id", ""))
@@ -1256,6 +1413,8 @@ def get_broadcast_messages_list(
             message_text = ""
             template_name = ""
             buttons = []
+            response_intent = None
+            response_button = None
 
             if msg_type_val == "template":
                 template_name = content.get("template_name") or ""
@@ -1275,8 +1434,17 @@ def get_broadcast_messages_list(
                 message_text = "Audio recording message"
             elif msg_type_val == "interactive_reply":
                 message_text = clean_text(content.get("text")) or clean_text(content.get("payload")) or "Interactive reply"
-            else:
-                message_text = clean_text(content.get("text")) or f"{msg_type_val} message"
+            # Check if this inbound message is a customer response to a template
+            # Match strictly by exact inbound_wamid recorded in whatsapp_template_responses
+            wamid_val = clean_text(doc.get("wamid"))
+            matched_resp = wamid_response_map.get(wamid_val) if wamid_val else None
+
+            if matched_resp:
+                response_intent = matched_resp.get("response_status")
+                response_button = matched_resp.get("button_text")
+                # If this message was the customer's response to a template, enrich with the template name!
+                if not template_name and matched_resp.get("template_name"):
+                    template_name = matched_resp.get("template_name")
 
             created_at_val = doc.get("created_at") or doc.get("timestamp")
             if isinstance(created_at_val, datetime):
@@ -1302,7 +1470,7 @@ def get_broadcast_messages_list(
             records.append(
                 {
                     "id": doc_id,
-                    "wamid": clean_text(doc.get("wamid")),
+                    "wamid": wamid_val,
                     "account_id": str(acc_info["id"]) if acc_info else None,
                     "account_name": acc_info["account_name"] if acc_info else None,
                     "customer_name": customer_name,
@@ -1314,6 +1482,8 @@ def get_broadcast_messages_list(
                     "msg_type": msg_type_val,
                     "message_text": message_text,
                     "template_name": template_name,
+                    "response_intent": response_intent,
+                    "response_button": response_button,
                     "buttons": buttons,
                     "status": clean_text(doc.get("status")) or "sent",
                     "status_history": doc.get("status_history") or [],

@@ -124,3 +124,25 @@ class Deal(Base):
     documents = relationship(
         "DealDocument", back_populates="deal", cascade="all, delete-orphan"
     )
+
+
+class DealStatusHistory(Base):
+    __tablename__ = "deal_status_history"
+
+    id = Column(BIGINT, primary_key=True, autoincrement=True)
+    deal_id = Column(
+        BIGINT, ForeignKey("deals_merged.id"), nullable=False, index=True
+    )
+    company_id = Column(Integer, default=1, nullable=True, index=True)
+    status = Column(String, nullable=False, index=True)
+    start_time = Column(DateTime(timezone=True), nullable=False)
+    end_time = Column(DateTime(timezone=True), nullable=True)
+    total_time_stayed = Column(String, nullable=True)
+    duration_seconds = Column(Integer, nullable=True)
+    moved_by_id = Column(BIGINT, ForeignKey("users.id"), nullable=True, index=True)
+    created_at = Column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    deal = relationship("Deal", backref="status_histories")
+    moved_by_user = relationship("User")

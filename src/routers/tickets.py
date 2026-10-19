@@ -13,7 +13,196 @@ from src.database import get_db, get_mongodb
 
 # Ensure Deal is imported
 from src.models.deal import Deal
-from src.models.ticket import Ticket
+from src.models.ticket import Ticket, TicketStatusHistory
+
+
+def format_ticket_duration_short(seconds: int) -> str:
+    if not seconds or seconds < 0:
+        return "0m"
+    days = seconds // 86400
+    hours = (seconds % 86400) // 3600
+    minutes = (seconds % 3600) // 60
+
+    if days > 0:
+        return f"{days}d"
+    elif hours > 0:
+        return f"{hours}h"
+    else:
+        return f"{minutes}m"
+
+
+def get_ticket_status_color(status: str) -> str:
+    s = (status or "").lower()
+    if "approved" in s or "disbursed" in s or "success" in s:
+        return "emerald"
+    if "review" in s or "credit" in s or "assessment" in s:
+        return "blue"
+    if "login" in s or "fresh" in s or "spillover" in s:
+        return "amber"
+    if "rejected" in s or "not interested" in s or "disapproved" in s:
+        return "rose"
+    return "blue"
+
+
+def build_batch_ticket_status_journeys(db: Session, ticket_ids: list[int]):
+    if not ticket_ids:
+        return {}
+    now_dt = datetime.now(timezone.utc)
+
+    # 1. Fetch ticket basic info
+    tickets_info = (
+        db.query(Ticket.id, Ticket.created_at, Ticket.ticket_status)
+        .filter(Ticket.id.in_(ticket_ids))
+        .all()
+    )
+    ticket_info_map = {t.id: t for t in tickets_info}
+
+    # 2. Auto-repair/backfill any ticket that has history records but missed the initial record from created_at
+    try:
+        from src.models.audit_log import AuditLog
+
+        existing_histories = (
+            db.query(TicketStatusHistory)
+            .filter(TicketStatusHistory.ticket_id.in_(ticket_ids))
+            .order_by(TicketStatusHistory.ticket_id, TicketStatusHistory.start_time.asc())
+            .all()
+        )
+
+        histories_by_ticket: dict[int, list[TicketStatusHistory]] = {tid: [] for tid in ticket_ids}
+        for h in existing_histories:
+            histories_by_ticket[h.ticket_id].append(h)
+
+        repaired = False
+        for tid, h_list in histories_by_ticket.items():
+            if not h_list:
+                continue
+            t_obj = ticket_info_map.get(tid)
+            if not t_obj or not t_obj.created_at:
+                continue
+
+            first_h = h_list[0]
+            c_time = t_obj.created_at
+            if c_time.tzinfo is None:
+                c_time = c_time.replace(tzinfo=timezone.utc)
+            f_start = first_h.start_time
+            if f_start and f_start.tzinfo is None:
+                f_start = f_start.replace(tzinfo=timezone.utc)
+
+            if f_start and (f_start - c_time).total_seconds() > 60:
+                initial_st = "Yet to Lender Login"
+                audit = (
+                    db.query(AuditLog)
+                    .filter(
+                        AuditLog.entity == "Ticket",
+                        AuditLog.entity_id == tid,
+                        AuditLog.action == "CREATED",
+                    )
+                    .first()
+                )
+                if audit and isinstance(audit.payload, dict) and audit.payload.get("ticket_status"):
+                    initial_st = audit.payload["ticket_status"]
+                elif first_h.status == "Yet to Lender Login":
+                    initial_st = "Yet to Lender Login"
+
+                gap_secs = max(int((f_start - c_time).total_seconds()), 0)
+                backfilled_rec = TicketStatusHistory(
+                    ticket_id=tid,
+                    company_id=1,
+                    status=initial_st,
+                    start_time=c_time,
+                    end_time=f_start,
+                    duration_seconds=gap_secs,
+                    total_time_stayed=format_ticket_duration_short(gap_secs),
+                    moved_by_id=first_h.moved_by_id,
+                )
+                db.add(backfilled_rec)
+                repaired = True
+
+        if repaired:
+            db.commit()
+    except Exception as rep_err:
+        db.rollback()
+        import logging
+        logging.getLogger(__name__).warning(f"Error repairing ticket status history: {rep_err}")
+
+    history_records = (
+        db.query(TicketStatusHistory)
+        .filter(TicketStatusHistory.ticket_id.in_(ticket_ids))
+        .options(selectinload(TicketStatusHistory.moved_by_user))
+        .order_by(TicketStatusHistory.ticket_id, TicketStatusHistory.start_time.asc())
+        .all()
+    )
+
+    journeys_by_ticket = {tid: [] for tid in ticket_ids}
+    for rec in history_records:
+        user_name = "System"
+        if rec.moved_by_user:
+            user_name = (
+                rec.moved_by_user.full_name or rec.moved_by_user.email or "System"
+            )
+
+        st_name = rec.status or "Yet to Lender Login"
+        start_dt = rec.start_time
+        if start_dt and start_dt.tzinfo is None:
+            start_dt = start_dt.replace(tzinfo=timezone.utc)
+
+        start_str = start_dt.strftime("%Y-%m-%d") if start_dt else ""
+
+        if rec.end_time:
+            end_dt = rec.end_time
+            if end_dt and end_dt.tzinfo is None:
+                end_dt = end_dt.replace(tzinfo=timezone.utc)
+            end_str = end_dt.strftime("%Y-%m-%d") if end_dt else ""
+            dur_secs = rec.duration_seconds or (
+                max(int((end_dt - start_dt).total_seconds()), 0)
+                if (end_dt and start_dt)
+                else 0
+            )
+        else:
+            end_str = "Present"
+            dur_secs = (
+                max(int((now_dt - start_dt).total_seconds()), 0) if start_dt else 0
+            )
+
+        item = {
+            "name": st_name,
+            "duration": format_ticket_duration_short(dur_secs),
+            "color": get_ticket_status_color(st_name),
+            "startDate": start_str,
+            "endDate": end_str,
+            "updatedBy": user_name,
+        }
+        if rec.ticket_id in journeys_by_ticket:
+            journeys_by_ticket[rec.ticket_id].append(item)
+
+    # Fallback for tickets with no history entries yet
+    missing_ids = [tid for tid, items in journeys_by_ticket.items() if not items]
+    if missing_ids:
+        missing_tickets = (
+            db.query(Ticket.id, Ticket.ticket_status, Ticket.created_at)
+            .filter(Ticket.id.in_(missing_ids))
+            .all()
+        )
+        for m_ticket in missing_tickets:
+            st_name = m_ticket.ticket_status or "Yet to Lender Login"
+            c_time = m_ticket.created_at
+            if c_time and c_time.tzinfo is None:
+                c_time = c_time.replace(tzinfo=timezone.utc)
+            dur_secs = max(int((now_dt - c_time).total_seconds()), 0) if c_time else 0
+            start_str = c_time.strftime("%Y-%m-%d") if c_time else ""
+            journeys_by_ticket[m_ticket.id] = [
+                {
+                    "name": st_name,
+                    "duration": format_ticket_duration_short(dur_secs),
+                    "color": get_ticket_status_color(st_name),
+                    "startDate": start_str,
+                    "endDate": "Present",
+                    "updatedBy": "System",
+                }
+            ]
+
+    return journeys_by_ticket
+
 
 tickets_router = APIRouter(prefix="/tickets", tags=["tickets"])
 
@@ -209,9 +398,19 @@ def get_tickets_list(
     )
 
     total_pages = math.ceil(total / limit) if limit > 0 else 1
+    t_ids = [t.id for t in tickets]
+    journeys_map = build_batch_ticket_status_journeys(db, t_ids)
+
+    result_data = []
+    for t in tickets:
+        item = format_ticket(t)
+        j_list = journeys_map.get(t.id, [])
+        item["status_journey"] = j_list
+        item["journey"] = j_list
+        result_data.append(item)
 
     return {
-        "data": [format_ticket(t) for t in tickets],
+        "data": result_data,
         "page_info": {
             "page": page, 
             "total_pages": total_pages, 
@@ -303,6 +502,18 @@ async def create_ticket(request: Request, db: Session = Depends(get_db)):
 
     ticket = Ticket(**filtered_body, created_by=user_id)
     db.add(ticket)
+    db.flush()
+
+    now_time = datetime.now(timezone.utc)
+    st_val = ticket.ticket_status or "Yet to Lender Login"
+    t_history = TicketStatusHistory(
+        ticket_id=ticket.id,
+        company_id=1,
+        status=st_val,
+        start_time=now_time,
+        moved_by_id=user_id,
+    )
+    db.add(t_history)
     db.commit()
     db.refresh(ticket)
 
@@ -401,6 +612,8 @@ async def update_ticket(
                 ),
             )
 
+    old_ticket_status = ticket.ticket_status
+
     for key, value in body.items():
         if hasattr(ticket, key):
             setattr(ticket, key, value)
@@ -408,6 +621,65 @@ async def update_ticket(
     user_id = request.state.user_id
     user_role = request.state.role
     ticket.modified_by = user_id
+
+    new_ticket_status = ticket.ticket_status
+    if new_ticket_status and new_ticket_status != old_ticket_status:
+        now_time = datetime.now(timezone.utc)
+        active_rec = (
+            db.query(TicketStatusHistory)
+            .filter(
+                TicketStatusHistory.ticket_id == ticket.id,
+                TicketStatusHistory.end_time.is_(None),
+            )
+            .order_by(TicketStatusHistory.start_time.desc())
+            .first()
+        )
+        if active_rec:
+            active_rec.end_time = now_time
+            start_dt = active_rec.start_time
+            if start_dt and start_dt.tzinfo is None:
+                start_dt = start_dt.replace(tzinfo=timezone.utc)
+            dur_secs = (
+                max(int((now_time - start_dt).total_seconds()), 0) if start_dt else 0
+            )
+            active_rec.duration_seconds = dur_secs
+            active_rec.total_time_stayed = format_ticket_duration_short(dur_secs)
+        else:
+            last_rec = (
+                db.query(TicketStatusHistory)
+                .filter(TicketStatusHistory.ticket_id == ticket.id)
+                .order_by(TicketStatusHistory.end_time.desc())
+                .first()
+            )
+            start_dt = (
+                last_rec.end_time
+                if (last_rec and last_rec.end_time)
+                else ticket.created_at
+            ) or now_time
+            if start_dt and start_dt.tzinfo is None:
+                start_dt = start_dt.replace(tzinfo=timezone.utc)
+            dur_secs = max(int((now_time - start_dt).total_seconds()), 0) if start_dt else 0
+            prev_status = old_ticket_status or "Yet to Lender Login"
+            prev_rec = TicketStatusHistory(
+                ticket_id=ticket.id,
+                company_id=1,
+                status=prev_status,
+                start_time=start_dt,
+                end_time=now_time,
+                duration_seconds=dur_secs,
+                total_time_stayed=format_ticket_duration_short(dur_secs),
+                moved_by_id=user_id,
+            )
+            db.add(prev_rec)
+
+        new_history = TicketStatusHistory(
+            ticket_id=ticket.id,
+            company_id=1,
+            status=new_ticket_status,
+            start_time=now_time,
+            moved_by_id=user_id,
+        )
+        db.add(new_history)
 
     db.commit()
     db.refresh(ticket)
@@ -502,6 +774,9 @@ def get_ticket(
         raise HTTPException(status_code=404, detail="Ticket not found")
 
     result = format_ticket(ticket)
+    j_list = build_batch_ticket_status_journeys(db, [ticket_id]).get(ticket_id, [])
+    result["status_journey"] = j_list
+    result["journey"] = j_list
     result["notes"] = get_notes(
         id_list=[str(ticket_id)],
         notes_collection=mongodb_conn["Notes"],

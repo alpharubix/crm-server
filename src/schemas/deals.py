@@ -102,6 +102,8 @@ class DealSchema(BaseModel):
 
     tickets: list[dict] | None = None
     revenue: list[dict] | None = None
+    status_journey: list[dict] | None = None
+    journey: list[dict] | None = None
 
     @model_validator(mode="before")
     @classmethod
@@ -120,7 +122,7 @@ class DealSchema(BaseModel):
             data["type_of_loan"] = getattr(value, "loan_type", None)
             data["deal_approval"] = getattr(value, "deal_approval", None)
             data["deal_description"] = getattr(value, "deal_description", None)
-            for attr in ("owner", "notes"):
+            for attr in ("owner", "notes", "status_journey", "journey"):
                 if hasattr(value, attr):
                     data[attr] = getattr(value, attr)
             return data

@@ -27,6 +27,7 @@ def export_accounts_csv(
     city: Optional[str] = None,
     state: Optional[str] = None,
     phone_number: Optional[str] = None,
+    email: Optional[str] = None,
     account_owner_id: Optional[list[int]] = None,
     call_back_date_time: Optional[str] = None,
 ):
@@ -59,6 +60,7 @@ def export_accounts_csv(
             city,
             state,
             phone_number,
+            email,
             account_owner_id,
             call_back_date_time,
         ]
@@ -100,6 +102,8 @@ def export_accounts_csv(
                 Account.phone.like(f"%+91{phone_number}%"),
             )
         )
+    if email and email.strip():
+        filters.append(Account.email.ilike(f"%{email.strip()}%"))
     if account_owner_id:
         owner_ids = [int(oid) for oid in (account_owner_id if isinstance(account_owner_id, list) else [account_owner_id]) if oid is not None]
         if owner_ids:

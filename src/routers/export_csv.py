@@ -20,6 +20,7 @@ def export_accounts_csv(
     city: Optional[str] = None,
     state: Optional[str] = None,
     phone: Optional[str] = None,
+    email: Optional[str] = None,
     account_owner_id: list[int] | None = Query(default=None),
     call_back_date_time: Optional[str] = None,
 ):
@@ -34,6 +35,7 @@ def export_accounts_csv(
         city=city,
         state=state,
         phone_number=phone,
+        email=email,
         account_owner_id=account_owner_id,
         call_back_date_time=call_back_date_time,
     )

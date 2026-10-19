@@ -1119,9 +1119,14 @@ def get_broadcast_messages_list(
         alias="template_name",
         description="Filter messages for customers who responded to this specific template",
     ),
+    interested_status: str | None = Query(
+        default=None,
+        alias="interested_status",
+        description="Filter by response intent: 'interested', 'not_interested', 'responded'",
+    ),
     response_scope: str | None = Query(
         default="all",
-        description="When template_name is selected: 'all' (all messages of responded customers) or 'replies_only' (only inbound replies to that template)",
+        description="When template_name or interested_status is selected: 'all' (all messages of responded customers) or 'replies_only' (only inbound replies)",
     ),
     from_date: str | None = Query(
         default=None,
@@ -1138,7 +1143,8 @@ def get_broadcast_messages_list(
     Fetch broadcast and WhatsApp messages from the MongoDB 'messages' collection.
     Enriches with customer names from 'conversations', template content from 'templates',
     and matching CRM accounts from postgres 'accounts_merged'.
-    Supports filtering by responded template name and response scope ('all' vs 'replies_only').
+    Supports filtering by responded template name, interested accounts ('interested' vs 'not_interested'),
+    and response scope ('all' vs 'replies_only').
     """
     try:
         filter_conditions: list[dict[str, Any]] = []
@@ -1163,53 +1169,191 @@ def get_broadcast_messages_list(
             st_clean = status_filter.strip().lower()
             filter_conditions.append({"status": {"$regex": f"^{st_clean}$", "$options": "i"}})
 
-        # 4. Template & Responded Customers Filter
+        # 4. Template & Interested Accounts / Responded Customers Filter
         active_template = template_filter.strip() if template_filter and template_filter.strip() not in ("all", "") else None
+        active_interested = (interested_status or "").strip().lower()
+        if active_interested in ("all", ""):
+            active_interested = None
         active_scope = (response_scope or "all").strip().lower()
 
-        if active_template:
-            # Query PostgreSQL whatsapp_template_responses for customers who responded to this template
+        if active_template or active_interested:
             try:
-                t_sql = text("""
-                    SELECT customer_phone, inbound_wamid, response_status, button_text
+                all_resp_sql = text("""
+                    SELECT id, customer_phone, inbound_wamid, outbound_wamid, template_name, response_status, button_text, responded_at,
+                           RIGHT(REGEXP_REPLACE(customer_phone, '[^0-9]', '', 'g'), 10) AS phone_10
                     FROM whatsapp_template_responses
-                    WHERE template_name = :tmpl
+                    ORDER BY responded_at DESC, id DESC
                 """)
-                t_rows = db.execute(t_sql, {"tmpl": active_template}).fetchall()
+                all_responses = db.execute(all_resp_sql).fetchall()
             except Exception as t_err:
-                logger.warning("Error fetching template responses for filter: %s", t_err)
-                t_rows = []
+                logger.warning("Error fetching template/interested responses for filter: %s", t_err)
+                all_responses = []
 
-            resp_phones = set()
-            resp_wamids = set()
-            for r in t_rows:
-                raw_ph = clean_text(r.customer_phone)
-                clean_digits = "".join(filter(str.isdigit, raw_ph))
-                p10 = clean_digits[-10:] if len(clean_digits) >= 10 else clean_digits
-                if p10:
-                    resp_phones.add(p10)
-                if r.inbound_wamid:
-                    resp_wamids.add(clean_text(r.inbound_wamid))
+            try:
+                acc_rows = db.execute(text("SELECT RIGHT(REGEXP_REPLACE(phone, '[^0-9]', '', 'g'), 10) AS phone_10 FROM accounts_merged WHERE waba_interested = true")).fetchall()
+                waba_interested_phones = set(r.phone_10 for r in acc_rows if r.phone_10)
+            except Exception as acc_err:
+                logger.warning("Error querying waba_interested accounts: %s", acc_err)
+                waba_interested_phones = set()
 
-            if not resp_phones and not resp_wamids:
-                # No customers responded to this template yet; return empty results
-                filter_conditions.append({"_id": {"$exists": False}})
-            else:
+            phone_latest_resp: dict[str, dict[str, Any]] = {}
+            phone_template_resp: dict[tuple[str, str], dict[str, Any]] = {}
+            for r in all_responses:
+                st = (r.response_status or "").strip().lower()
+                is_int = (st == "interested" or ("interest" in st and "not" not in st))
+                is_not_int = (st == "not_interested" or ("not" in st and "interest" in st))
+                norm_st = "interested" if is_int else ("not_interested" if is_not_int else st)
+                info = {
+                    "template_name": clean_text(r.template_name),
+                    "response_status": norm_st,
+                    "inbound_wamid": clean_text(r.inbound_wamid),
+                    "phone_10": r.phone_10,
+                }
+                if r.phone_10:
+                    if r.phone_10 not in phone_latest_resp:
+                        phone_latest_resp[r.phone_10] = info
+                    t_k = (r.phone_10, clean_text(r.template_name))
+                    if t_k not in phone_template_resp:
+                        phone_template_resp[t_k] = info
+
+            if active_template and active_interested:
+                matching_wamids = set()
+                matching_phones = set()
+                for r in all_responses:
+                    if clean_text(r.template_name) == active_template:
+                        st = (r.response_status or "").strip().lower()
+                        matches = False
+                        if active_interested == "interested":
+                            matches = (st == "interested" or ("interest" in st and "not" not in st))
+                        elif active_interested in ("not_interested", "not-interested", "notinterested", "not interested"):
+                            matches = (st == "not_interested" or ("not" in st and "interest" in st))
+                        elif active_interested in ("responded", "all_responded"):
+                            matches = bool(st)
+
+                        if matches:
+                            if r.inbound_wamid:
+                                matching_wamids.add(clean_text(r.inbound_wamid))
+                            if r.phone_10:
+                                matching_phones.add(r.phone_10)
+
+                if not matching_wamids and not matching_phones:
+                    filter_conditions.append({"_id": {"$exists": False}})
+                else:
+                    if active_scope == "replies_only":
+                        if matching_wamids:
+                            filter_conditions.append({"wamid": {"$in": list(matching_wamids)}})
+                        else:
+                            filter_conditions.append({"_id": {"$exists": False}})
+                    else:
+                        ors = []
+                        if matching_wamids:
+                            ors.append({"wamid": {"$in": list(matching_wamids)}})
+                        if matching_phones:
+                            p_regex = f"({'|'.join(sorted(matching_phones))})$"
+                            ors.append({
+                                "content.template_name": active_template,
+                                "customer_wa_id": {"$regex": p_regex}
+                            })
+                        if ors:
+                            filter_conditions.append({"$or": ors})
+                        else:
+                            filter_conditions.append({"_id": {"$exists": False}})
+
+            elif active_template:
+                # User wants messages specifically for this template
+                tmpl_wamids = set()
+                for r in all_responses:
+                    if clean_text(r.template_name) == active_template and r.inbound_wamid:
+                        tmpl_wamids.add(clean_text(r.inbound_wamid))
+
                 if active_scope == "replies_only":
-                    # Only show the exact inbound messages that are customer replies to this template
-                    if resp_wamids:
-                        filter_conditions.append({"wamid": {"$in": list(resp_wamids)}})
+                    if tmpl_wamids:
+                        filter_conditions.append({"wamid": {"$in": list(tmpl_wamids)}})
                     else:
                         filter_conditions.append({"_id": {"$exists": False}})
                 else:
-                    # 'all': Show all messages (inbound & outbound) for customers who responded to this template
-                    phone_ors = []
-                    for p in resp_phones:
-                        phone_ors.append({"customer_wa_id": {"$regex": f"{p}$"}})
-                    if phone_ors:
-                        filter_conditions.append({"$or": phone_ors})
-                    elif resp_wamids:
-                        filter_conditions.append({"wamid": {"$in": list(resp_wamids)}})
+                    ors = [{"content.template_name": active_template}]
+                    if tmpl_wamids:
+                        ors.append({"wamid": {"$in": list(tmpl_wamids)}})
+                    filter_conditions.append({"$or": ors})
+
+            elif active_interested:
+                target_wamids = set()
+                excluded_wamids = set()
+                target_phone_templates = set()
+                excluded_phone_templates = set()
+                target_phones_general = set()
+
+                for (p10, tname), info in phone_template_resp.items():
+                    if info["response_status"] == active_interested:
+                        target_phone_templates.add((p10, tname))
+                    else:
+                        excluded_phone_templates.add((p10, tname))
+
+                for r in all_responses:
+                    st = (r.response_status or "").strip().lower()
+                    is_int = (st == "interested" or ("interest" in st and "not" not in st))
+                    is_not_int = (st == "not_interested" or ("not" in st and "interest" in st))
+                    w = clean_text(r.inbound_wamid)
+                    if w:
+                        if active_interested == "interested":
+                            if is_int:
+                                target_wamids.add(w)
+                            elif is_not_int:
+                                excluded_wamids.add(w)
+                        elif active_interested in ("not_interested", "not-interested", "notinterested", "not interested"):
+                            if is_not_int:
+                                target_wamids.add(w)
+                            elif is_int:
+                                excluded_wamids.add(w)
+
+                for p10, info in phone_latest_resp.items():
+                    if info["response_status"] == active_interested:
+                        target_phones_general.add(p10)
+
+                if active_interested == "interested":
+                    for p in waba_interested_phones:
+                        latest = phone_latest_resp.get(p)
+                        if not latest or latest["response_status"] != "not_interested":
+                            target_phones_general.add(p)
+
+                if not target_wamids and not target_phone_templates and not target_phones_general:
+                    filter_conditions.append({"_id": {"$exists": False}})
+                else:
+                    if active_scope == "replies_only":
+                        if target_wamids:
+                            filter_conditions.append({"wamid": {"$in": list(target_wamids)}})
+                        else:
+                            filter_conditions.append({"_id": {"$exists": False}})
+                    else:
+                        ors = []
+                        if target_wamids:
+                            ors.append({"wamid": {"$in": list(target_wamids)}})
+
+                        for (p10, tname) in target_phone_templates:
+                            ors.append({
+                                "content.template_name": tname,
+                                "customer_wa_id": {"$regex": f"{p10}$"}
+                            })
+
+                        if target_phones_general:
+                            p_regex = f"({'|'.join(sorted(target_phones_general))})$"
+                            general_and: list[dict[str, Any]] = [{"customer_wa_id": {"$regex": p_regex}}]
+                            if excluded_wamids:
+                                general_and.append({"wamid": {"$nin": list(excluded_wamids)}})
+                            if excluded_phone_templates:
+                                general_and.append({
+                                    "$nor": [
+                                        {"customer_wa_id": {"$regex": f"{ep10}$"}, "content.template_name": etname}
+                                        for (ep10, etname) in excluded_phone_templates
+                                    ]
+                                })
+                            ors.append({"$and": general_and})
+
+                        if ors:
+                            filter_conditions.append({"$or": ors})
+                        else:
+                            filter_conditions.append({"_id": {"$exists": False}})
 
         # 5. Search Filter
         if search and search.strip():
@@ -1345,7 +1489,7 @@ def get_broadcast_messages_list(
         account_map: dict[str, dict[str, Any]] = {}
         if distinct_10:
             acc_sql = text("""
-                SELECT id, account_name, RIGHT(REGEXP_REPLACE(phone, '[^0-9]', '', 'g'), 10) AS phone_10
+                SELECT id, account_name, waba_interested, RIGHT(REGEXP_REPLACE(phone, '[^0-9]', '', 'g'), 10) AS phone_10
                 FROM accounts_merged
                 WHERE RIGHT(REGEXP_REPLACE(phone, '[^0-9]', '', 'g'), 10) IN :phones
             """)
@@ -1357,12 +1501,14 @@ def get_broadcast_messages_list(
                     account_map[r.phone_10] = {
                         "id": r.id,
                         "account_name": r.account_name or "",
+                        "waba_interested": bool(getattr(r, "waba_interested", False)),
                     }
 
         # Query whatsapp_template_responses in PostgreSQL to map template names onto customer responses
         # Match by inbound_wamid (exact) and customer_phone (clean 10-digit)
         wamid_response_map: dict[str, dict[str, Any]] = {}
         phone_response_map: dict[str, dict[str, Any]] = {}
+        phone_template_response_map: dict[tuple[str, str], dict[str, Any]] = {}
         try:
             resp_query_clauses = []
             resp_params = {}
@@ -1383,16 +1529,28 @@ def get_broadcast_messages_list(
                 """)
                 res_rows = db.execute(r_sql, resp_params).fetchall()
                 for row in res_rows:
+                    raw_st = clean_text(row.response_status).lower()
+                    if raw_st == "interested" or ("interest" in raw_st and "not" not in raw_st):
+                        norm_status = "interested"
+                    elif raw_st == "not_interested" or ("not" in raw_st and "interest" in raw_st):
+                        norm_status = "not_interested"
+                    else:
+                        norm_status = clean_text(row.response_status)
+
                     info = {
                         "template_name": clean_text(row.template_name),
-                        "response_status": clean_text(row.response_status),
+                        "response_status": norm_status,
                         "button_text": clean_text(row.button_text),
                         "responded_at": row.responded_at.isoformat() if row.responded_at else None,
                     }
                     if row.inbound_wamid:
                         wamid_response_map[clean_text(row.inbound_wamid)] = info
-                    if row.phone_10 and row.phone_10 not in phone_response_map:
-                        phone_response_map[row.phone_10] = info
+                    if row.phone_10:
+                        if row.phone_10 not in phone_response_map:
+                            phone_response_map[row.phone_10] = info
+                        t_k = (row.phone_10, clean_text(row.template_name))
+                        if t_k not in phone_template_response_map:
+                            phone_template_response_map[t_k] = info
         except Exception as w_err:
             logger.warning("Error mapping template responses: %s", w_err)
 
@@ -1434,17 +1592,28 @@ def get_broadcast_messages_list(
                 message_text = "Audio recording message"
             elif msg_type_val == "interactive_reply":
                 message_text = clean_text(content.get("text")) or clean_text(content.get("payload")) or "Interactive reply"
-            # Check if this inbound message is a customer response to a template
-            # Match strictly by exact inbound_wamid recorded in whatsapp_template_responses
+            # Only inbound messages received from the customer represent customer responses
             wamid_val = clean_text(doc.get("wamid"))
             matched_resp = wamid_response_map.get(wamid_val) if wamid_val else None
 
-            if matched_resp:
-                response_intent = matched_resp.get("response_status")
-                response_button = matched_resp.get("button_text")
-                # If this message was the customer's response to a template, enrich with the template name!
-                if not template_name and matched_resp.get("template_name"):
-                    template_name = matched_resp.get("template_name")
+            if direction_val == "inbound":
+                if matched_resp:
+                    response_intent = matched_resp.get("response_status")
+                    response_button = matched_resp.get("button_text")
+                    # If this message was the customer's response to a template, enrich with the template name!
+                    if not template_name and matched_resp.get("template_name"):
+                        template_name = matched_resp.get("template_name")
+                elif p10 and p10 in phone_response_map:
+                    response_intent = phone_response_map[p10].get("response_status")
+                    response_button = phone_response_map[p10].get("button_text")
+                    if not template_name and phone_response_map[p10].get("template_name"):
+                        template_name = phone_response_map[p10].get("template_name")
+                elif acc_info and acc_info.get("waba_interested"):
+                    response_intent = "interested"
+            else:
+                # Outbound messages are sent by us; they do not carry customer response status
+                response_intent = None
+                response_button = None
 
             created_at_val = doc.get("created_at") or doc.get("timestamp")
             if isinstance(created_at_val, datetime):
@@ -1484,6 +1653,7 @@ def get_broadcast_messages_list(
                     "template_name": template_name,
                     "response_intent": response_intent,
                     "response_button": response_button,
+                    "is_exact_reply": bool(matched_resp),
                     "buttons": buttons,
                     "status": clean_text(doc.get("status")) or "sent",
                     "status_history": doc.get("status_history") or [],

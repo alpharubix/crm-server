@@ -281,13 +281,26 @@ def get_notes(
             "notesParentId": 1,
         }
 
-        notes_cursor = notes_collection.find(filter_query, projection)
+        notes_cursor = notes_collection.find(filter_query, projection).sort(
+            [("Created_Time", -1), ("_id", -1)]
+        )
         notes = []
         for note in notes_cursor:
             if "_id" in note:
                 note["_id"] = str(note["_id"])
             if "notesParentId" not in note:
                 note["notesParentId"] = None
+
+            raw_created_dt = None
+            if note.get("Created_Time"):
+                val = note["Created_Time"]
+                try:
+                    dt = datetime.fromisoformat(val) if isinstance(val, str) else val
+                    if dt.tzinfo is None:
+                        dt = dt.replace(tzinfo=UTC)
+                    raw_created_dt = dt
+                except Exception:
+                    pass
 
             # Time formatting
             for time_key in ["Created_Time", "Modified_Time"]:
@@ -305,9 +318,16 @@ def get_notes(
                         dt = dt.astimezone(IST)
 
                         note[time_key] = dt.strftime("%d %b %Y, %I:%M %p")
-                    except:
+                    except Exception:
                         pass
+
+            note["_sort_time"] = raw_created_dt.timestamp() if raw_created_dt else 0
             notes.append(note)
+
+        notes.sort(key=lambda x: x.get("_sort_time", 0), reverse=True)
+        for n in notes:
+            n.pop("_sort_time", None)
+
         return notes
 
     except Exception as e:

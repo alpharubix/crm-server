@@ -62,3 +62,25 @@ class Ticket(Base):
     @hybrid_property
     def modified_at(self):
         return self.updated_at
+
+
+class TicketStatusHistory(Base):
+    __tablename__ = "ticket_status_history"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    ticket_id = Column(
+        BigInteger, ForeignKey("tickets_merged.id"), nullable=False, index=True
+    )
+    company_id = Column(Integer, default=1, nullable=True, index=True)
+    status = Column(String(100), nullable=False, index=True)
+    start_time = Column(DateTime(timezone=True), nullable=False)
+    end_time = Column(DateTime(timezone=True), nullable=True)
+    total_time_stayed = Column(String, nullable=True)
+    duration_seconds = Column(Integer, nullable=True)
+    moved_by_id = Column(BigInteger, ForeignKey("users.id"), nullable=True, index=True)
+    created_at = Column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    ticket = relationship("Ticket", backref="status_histories")
+    moved_by_user = relationship("User")

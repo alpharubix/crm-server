@@ -463,16 +463,117 @@ async def send_broadcast_campaign(body: BroadcastCampaignRequest):
     }
 
 
+@inbox_router.get("/accounts/{account_id}/responses")
+async def get_account_template_responses(account_id: int):
+    """
+    Fetch all WhatsApp template responses (Interested / Not Interested) for an Account in PostgreSQL.
+    Displays responses per template and per contact linked to this account.
+    """
+    from src.database import SessionLocal
+    from src.models.account import Account
+    from src.models.contact import Contact
+    from src.models.whatsapp_response import WhatsAppTemplateResponse
+
+    with SessionLocal() as db:
+        account = db.query(Account).filter(Account.id == account_id).first()
+        if not account:
+            raise HTTPException(status_code=404, detail="Account not found")
+
+        # Normalize account phone to last 10 digits
+        acc_digits = "".join(filter(str.isdigit, str(account.phone or "")))
+        acc_phone_10 = acc_digits[-10:] if len(acc_digits) >= 10 else acc_digits
+
+        # Find responses linked by account_id OR by the account's 10-digit phone
+        query = db.query(WhatsAppTemplateResponse)
+        if acc_phone_10:
+            from sqlalchemy import or_
+            query = query.filter(
+                or_(
+                    WhatsAppTemplateResponse.account_id == account_id,
+                    WhatsAppTemplateResponse.customer_phone == acc_phone_10,
+                    WhatsAppTemplateResponse.customer_phone.like(f"%{acc_phone_10}"),
+                )
+            )
+        else:
+            query = query.filter(WhatsAppTemplateResponse.account_id == account_id)
+
+        responses = query.order_by(WhatsAppTemplateResponse.responded_at.desc()).all()
+
+        # Build template-wise summary
+        templates_summary: dict[str, dict] = {}
+        items = []
+
+        for r in responses:
+            item = {
+                "id": r.id,
+                "template_name": r.template_name,
+                "template_language": r.template_language,
+                "response_status": r.response_status,
+                "button_text": r.button_text,
+                "customer_phone": r.customer_phone,
+                "contact_id": r.contact_id,
+                "responded_at": r.responded_at.isoformat() if r.responded_at else None,
+            }
+            items.append(item)
+
+            # Aggregate per template name (takes the latest status for each template)
+            if r.template_name not in templates_summary:
+                templates_summary[r.template_name] = {
+                    "template_name": r.template_name,
+                    "latest_status": r.response_status,
+                    "button_text": r.button_text,
+                    "customer_phone": r.customer_phone,
+                    "responded_at": r.responded_at.isoformat() if r.responded_at else None,
+                    "response_count": 1,
+                }
+            else:
+                templates_summary[r.template_name]["response_count"] += 1
+
+        total_interested = sum(
+            1 for t in templates_summary.values() if t["latest_status"] == "interested"
+        )
+        total_not_interested = sum(
+            1 for t in templates_summary.values() if t["latest_status"] == "not_interested"
+        )
+
+        return {
+            "status": "success",
+            "account_id": account_id,
+            "account_name": account.account_name or f"{account.first_name or ''} {account.last_name or ''}".strip(),
+            "summary": {
+                "total_unique_templates_responded": len(templates_summary),
+                "total_interested": total_interested,
+                "total_not_interested": total_not_interested,
+                "templates": list(templates_summary.values()),
+            },
+            "history": items,
+        }
+
+
 @inbox_router.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     """
-    WebSocket endpoint for live WhatsApp updates (inbound messages, status ticks).
+    WebSocket endpoint for live WhatsApp updates (inbound messages, status ticks, mark read).
     """
     await ws_manager.connect(websocket)
     try:
         while True:
-            # Keep-alive loop
-            await websocket.receive_text()
+            # Listen for client frames (keep-alive, mark_read, etc.)
+            raw_text = await websocket.receive_text()
+            if raw_text:
+                try:
+                    payload = json.loads(raw_text)
+                    # Handle mark_read over WebSocket
+                    if payload.get("action") == "mark_read" and payload.get("conversation_id"):
+                        conv_id = str(payload["conversation_id"])
+                        await whatsapp_service.repo.mark_conversation_read(conv_id)
+                        # Broadcast confirmation to other tabs/clients
+                        await ws_manager.broadcast({
+                            "type": "conversation_read",
+                            "conversation_id": conv_id,
+                        })
+                except Exception as parse_err:
+                    logger.debug(f"Non-JSON or ignored WS message from client: {parse_err}")
     except WebSocketDisconnect:
         ws_manager.disconnect(websocket)
     except Exception:

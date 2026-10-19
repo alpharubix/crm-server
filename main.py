@@ -36,6 +36,8 @@ from src.routers.tickets import tickets_router
 from src.routers.webhook import webhook_api_router
 from src.whatsapp.router import inbox_router, webhook_router
 
+from src.models.whatsapp_response import WhatsAppTemplateResponse  # noqa: F401
+
 # from src.scheduler import shutdown_scheduler, start_scheduler
 
 # Ensure tables exist

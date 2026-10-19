@@ -9,7 +9,197 @@ from sqlalchemy.orm import Session, selectinload
 from src.controllers.audit_log import log_action
 from src.controllers.auth import MANAGERID
 from src.controllers.notes import get_notes
-from src.models.deal import Deal
+from src.models.deal import Deal, DealStatusHistory
+
+
+def format_duration_short(seconds: int) -> str:
+    if not seconds or seconds < 0:
+        return "0m"
+    days = seconds // 86400
+    hours = (seconds % 86400) // 3600
+    minutes = (seconds % 3600) // 60
+
+    if days > 0:
+        return f"{days}d"
+    elif hours > 0:
+        return f"{hours}h"
+    else:
+        return f"{minutes}m"
+
+
+def get_deal_status_color(status: str) -> str:
+    s = (status or "").lower()
+    if "approved" in s or "disbursed" in s or "success" in s:
+        return "emerald"
+    if "review" in s or "credit" in s or "assessment" in s:
+        return "blue"
+    if "login" in s or "fresh" in s or "spillover" in s:
+        return "amber"
+    if "rejected" in s or "not interested" in s or "disapproved" in s:
+        return "rose"
+    return "blue"
+
+
+def build_batch_deal_status_journeys(db: Session, deal_ids: list[int]):
+    if not deal_ids:
+        return {}
+    now_dt = datetime.now(UTC)
+
+    # 1. Fetch deal basic info (created_at, deal_status)
+    deals_info = (
+        db.query(Deal.id, Deal.created_at, Deal.deal_status)
+        .filter(Deal.id.in_(deal_ids))
+        .all()
+    )
+    deal_info_map = {d.id: d for d in deals_info}
+
+    # 2. Auto-repair/backfill any deal that has history records but missed the initial record from created_at
+    try:
+        from src.models.audit_log import AuditLog
+
+        existing_histories = (
+            db.query(DealStatusHistory)
+            .filter(DealStatusHistory.deal_id.in_(deal_ids))
+            .order_by(DealStatusHistory.deal_id, DealStatusHistory.start_time.asc())
+            .all()
+        )
+
+        histories_by_deal: dict[int, list[DealStatusHistory]] = {did: [] for did in deal_ids}
+        for h in existing_histories:
+            histories_by_deal[h.deal_id].append(h)
+
+        repaired = False
+        for did, h_list in histories_by_deal.items():
+            if not h_list:
+                continue
+            d_obj = deal_info_map.get(did)
+            if not d_obj or not d_obj.created_at:
+                continue
+
+            first_h = h_list[0]
+            c_time = d_obj.created_at
+            if c_time.tzinfo is None:
+                c_time = c_time.replace(tzinfo=UTC)
+            f_start = first_h.start_time
+            if f_start and f_start.tzinfo is None:
+                f_start = f_start.replace(tzinfo=UTC)
+
+            # If the earliest record started > 60s after deal creation, the initial stage was missed
+            if f_start and (f_start - c_time).total_seconds() > 60:
+                initial_st = "Yet to Lender Login"
+                # Check audit log for creation status or early update
+                audit = (
+                    db.query(AuditLog)
+                    .filter(
+                        AuditLog.entity == "Deal",
+                        AuditLog.entity_id == did,
+                        AuditLog.action == "CREATED",
+                    )
+                    .first()
+                )
+                if audit and isinstance(audit.payload, dict) and audit.payload.get("deal_status"):
+                    initial_st = audit.payload["deal_status"]
+                elif first_h.status == "Yet to Lender Login":
+                    initial_st = "Yet to Lender Login"
+
+                gap_secs = max(int((f_start - c_time).total_seconds()), 0)
+                backfilled_rec = DealStatusHistory(
+                    deal_id=did,
+                    company_id=1,
+                    status=initial_st,
+                    start_time=c_time,
+                    end_time=f_start,
+                    duration_seconds=gap_secs,
+                    total_time_stayed=format_duration_short(gap_secs),
+                    moved_by_id=first_h.moved_by_id,
+                )
+                db.add(backfilled_rec)
+                repaired = True
+
+        if repaired:
+            db.commit()
+    except Exception as rep_err:
+        db.rollback()
+        import logging
+        logging.getLogger(__name__).warning(f"Error repairing deal status history: {rep_err}")
+
+    history_records = (
+        db.query(DealStatusHistory)
+        .filter(DealStatusHistory.deal_id.in_(deal_ids))
+        .options(selectinload(DealStatusHistory.moved_by_user))
+        .order_by(DealStatusHistory.deal_id, DealStatusHistory.start_time.asc())
+        .all()
+    )
+
+    journeys_by_deal = {did: [] for did in deal_ids}
+    for rec in history_records:
+        user_name = "System"
+        if rec.moved_by_user:
+            user_name = (
+                rec.moved_by_user.full_name or rec.moved_by_user.email or "System"
+            )
+
+        st_name = rec.status or "Yet to Lender Login"
+        start_dt = rec.start_time
+        if start_dt and start_dt.tzinfo is None:
+            start_dt = start_dt.replace(tzinfo=UTC)
+
+        start_str = start_dt.strftime("%Y-%m-%d") if start_dt else ""
+
+        if rec.end_time:
+            end_dt = rec.end_time
+            if end_dt and end_dt.tzinfo is None:
+                end_dt = end_dt.replace(tzinfo=UTC)
+            end_str = end_dt.strftime("%Y-%m-%d") if end_dt else ""
+            dur_secs = rec.duration_seconds or (
+                max(int((end_dt - start_dt).total_seconds()), 0)
+                if (end_dt and start_dt)
+                else 0
+            )
+        else:
+            end_str = "Present"
+            dur_secs = (
+                max(int((now_dt - start_dt).total_seconds()), 0) if start_dt else 0
+            )
+
+        item = {
+            "name": st_name,
+            "duration": format_duration_short(dur_secs),
+            "color": get_deal_status_color(st_name),
+            "startDate": start_str,
+            "endDate": end_str,
+            "updatedBy": user_name,
+        }
+        if rec.deal_id in journeys_by_deal:
+            journeys_by_deal[rec.deal_id].append(item)
+
+    # Fallback for deals with no history entries yet
+    missing_ids = [did for did, items in journeys_by_deal.items() if not items]
+    if missing_ids:
+        missing_deals = (
+            db.query(Deal.id, Deal.deal_status, Deal.created_at)
+            .filter(Deal.id.in_(missing_ids))
+            .all()
+        )
+        for m_deal in missing_deals:
+            st_name = m_deal.deal_status or "Yet to Lender Login"
+            c_time = m_deal.created_at
+            if c_time and c_time.tzinfo is None:
+                c_time = c_time.replace(tzinfo=UTC)
+            dur_secs = max(int((now_dt - c_time).total_seconds()), 0) if c_time else 0
+            start_str = c_time.strftime("%Y-%m-%d") if c_time else ""
+            journeys_by_deal[m_deal.id] = [
+                {
+                    "name": st_name,
+                    "duration": format_duration_short(dur_secs),
+                    "color": get_deal_status_color(st_name),
+                    "startDate": start_str,
+                    "endDate": "Present",
+                    "updatedBy": "System",
+                }
+            ]
+
+    return journeys_by_deal
 
 
 def get_deals(
@@ -331,6 +521,9 @@ def get_deals(
                 deal_dict["notes"] = notes
                 deal_dict["tickets"] = serialized_tickets
                 deal_dict["revenue"] = serialized_revenue
+                j_list = build_batch_deal_status_journeys(db, [deal.id]).get(deal.id, [])
+                deal_dict["status_journey"] = j_list
+                deal_dict["journey"] = j_list
 
                 if getattr(deal, "owner", None):
                     deal_dict["owner"] = {
@@ -380,6 +573,8 @@ def get_deals(
             .all()
         )
         total_pages = math.ceil(total_records / limit)
+        deal_ids = [d.id for d in deals]
+        journeys_map = build_batch_deal_status_journeys(db, deal_ids)
 
         return {
             "data": [
@@ -391,6 +586,8 @@ def get_deals(
                     "type_of_loan": d.loan_type,
                     "loan_type": d.loan_type,
                     "deal_owner_id": str(d.deal_owner_id) if d.deal_owner_id else None,
+                    "status_journey": journeys_map.get(d.id, []),
+                    "journey": journeys_map.get(d.id, []),
                 }
                 for d in deals
             ],
@@ -467,6 +664,18 @@ def create_deal(deal, db: Session, user_id, user_role):
             partner_name=deal.partner_name,
         )
         db.add(created_deal)
+        db.flush()
+
+        now_time = datetime.now(UTC)
+        st_val = created_deal.deal_status or "Yet to Lender Login"
+        deal_history = DealStatusHistory(
+            deal_id=created_deal.id,
+            company_id=1,
+            status=st_val,
+            start_time=now_time,
+            moved_by_id=user_id,
+        )
+        db.add(deal_history)
         db.commit()
         db.refresh(created_deal)
 
@@ -562,6 +771,8 @@ def update_deal_based_on_id(user_id, user_role, db: Session, deal_id: int, paylo
             "deal_status_closing",
         }
 
+        old_status = db_deal.deal_status
+
         for key, value in payload.items():
             if hasattr(db_deal, key):
                 if value == "" or value is None:
@@ -601,6 +812,63 @@ def update_deal_based_on_id(user_id, user_role, db: Session, deal_id: int, paylo
 
         db_deal.modified_by = user_id
         db_deal.updated_at = datetime.now(UTC)
+
+        new_status = db_deal.deal_status
+        if new_status and new_status != old_status:
+            now_time = datetime.now(UTC)
+            active_rec = (
+                db.query(DealStatusHistory)
+                .filter(
+                    DealStatusHistory.deal_id == deal_id,
+                    DealStatusHistory.end_time.is_(None),
+                )
+                .order_by(DealStatusHistory.start_time.desc())
+                .first()
+            )
+            if active_rec:
+                active_rec.end_time = now_time
+                start_dt = active_rec.start_time
+                if start_dt and start_dt.tzinfo is None:
+                    start_dt = start_dt.replace(tzinfo=UTC)
+                dur_secs = max(int((now_time - start_dt).total_seconds()), 0) if start_dt else 0
+                active_rec.duration_seconds = dur_secs
+                active_rec.total_time_stayed = format_duration_short(dur_secs)
+            else:
+                last_rec = (
+                    db.query(DealStatusHistory)
+                    .filter(DealStatusHistory.deal_id == deal_id)
+                    .order_by(DealStatusHistory.end_time.desc())
+                    .first()
+                )
+                start_dt = (
+                    last_rec.end_time
+                    if (last_rec and last_rec.end_time)
+                    else db_deal.created_at
+                ) or now_time
+                if start_dt and start_dt.tzinfo is None:
+                    start_dt = start_dt.replace(tzinfo=UTC)
+                dur_secs = max(int((now_time - start_dt).total_seconds()), 0) if start_dt else 0
+                prev_status_name = old_status or "Yet to Lender Login"
+                prev_history = DealStatusHistory(
+                    deal_id=deal_id,
+                    company_id=1,
+                    status=prev_status_name,
+                    start_time=start_dt,
+                    end_time=now_time,
+                    duration_seconds=dur_secs,
+                    total_time_stayed=format_duration_short(dur_secs),
+                    moved_by_id=user_id,
+                )
+                db.add(prev_history)
+
+            new_history = DealStatusHistory(
+                deal_id=deal_id,
+                company_id=1,
+                status=new_status,
+                start_time=now_time,
+                moved_by_id=user_id,
+            )
+            db.add(new_history)
 
         db.commit()
         db.refresh(db_deal)
@@ -709,6 +977,17 @@ def update_and_insert_deals(insertion_deals, updation_deals, db: Session):
             db.add(new_deal)
             db.commit()
             db.refresh(new_deal)
+            now_time = datetime.now(UTC)
+            st_val = new_deal.deal_status or "Yet to Lender Login"
+            deal_history = DealStatusHistory(
+                deal_id=new_deal.id,
+                company_id=1,
+                status=st_val,
+                start_time=now_time,
+                moved_by_id=1,
+            )
+            db.add(deal_history)
+            db.commit()
             inserted += 1
         except SQLAlchemyError as e:
             db.rollback()
@@ -742,10 +1021,68 @@ def update_and_insert_deals(insertion_deals, updation_deals, db: Session):
                         'A similar deal with same "Deal Type" and "Type of Loan" already exist'
                     )
 
+            old_deal_status = deal.deal_status
             for key, value in deal_data.items():
                 if key == "id":
                     continue
                 setattr(deal, key, value)
+
+            new_deal_status = deal.deal_status
+            if new_deal_status and new_deal_status != old_deal_status:
+                now_time = datetime.now(UTC)
+                active_rec = (
+                    db.query(DealStatusHistory)
+                    .filter(
+                        DealStatusHistory.deal_id == deal.id,
+                        DealStatusHistory.end_time.is_(None),
+                    )
+                    .order_by(DealStatusHistory.start_time.desc())
+                    .first()
+                )
+                if active_rec:
+                    active_rec.end_time = now_time
+                    start_dt = active_rec.start_time
+                    if start_dt and start_dt.tzinfo is None:
+                        start_dt = start_dt.replace(tzinfo=UTC)
+                    dur_secs = max(int((now_time - start_dt).total_seconds()), 0) if start_dt else 0
+                    active_rec.duration_seconds = dur_secs
+                    active_rec.total_time_stayed = format_duration_short(dur_secs)
+                else:
+                    last_rec = (
+                        db.query(DealStatusHistory)
+                        .filter(DealStatusHistory.deal_id == deal.id)
+                        .order_by(DealStatusHistory.end_time.desc())
+                        .first()
+                    )
+                    start_dt = (
+                        last_rec.end_time
+                        if (last_rec and last_rec.end_time)
+                        else deal.created_at
+                    ) or now_time
+                    if start_dt and start_dt.tzinfo is None:
+                        start_dt = start_dt.replace(tzinfo=UTC)
+                    dur_secs = max(int((now_time - start_dt).total_seconds()), 0) if start_dt else 0
+                    prev_status_name = old_deal_status or "Yet to Lender Login"
+                    prev_history = DealStatusHistory(
+                        deal_id=deal.id,
+                        company_id=1,
+                        status=prev_status_name,
+                        start_time=start_dt,
+                        end_time=now_time,
+                        duration_seconds=dur_secs,
+                        total_time_stayed=format_duration_short(dur_secs),
+                        moved_by_id=1,
+                    )
+                    db.add(prev_history)
+
+                new_history = DealStatusHistory(
+                    deal_id=deal.id,
+                    company_id=1,
+                    status=new_deal_status,
+                    start_time=now_time,
+                    moved_by_id=1,
+                )
+                db.add(new_history)
 
             try:
                 db.commit()

@@ -209,3 +209,30 @@ async def test_repository_out_of_order_status_protection():
 
     # Clean up test message
     await repo.db.messages.delete_one({"wamid": test_wamid})
+
+
+def test_response_intent_mappings():
+    from src.whatsapp.services import classify_response_intent
+
+    # Positive variations
+    assert classify_response_intent("Interested") == "interested"
+    assert classify_response_intent("I am interested") == "interested"
+    assert classify_response_intent("I Interested") == "interested"
+    assert classify_response_intent("yes, I'm interested") == "interested"
+    assert classify_response_intent("please share details") == "interested"
+    assert classify_response_intent("ಆಸಕ್ತಿ ಇದೆ") == "interested"
+    assert classify_response_intent("ನನಗೆ ಆಸಕ್ತಿ ಇದೆ") == "interested"
+    assert classify_response_intent("रुचि है") == "interested"
+    assert classify_response_intent("मुझे रुचि है") == "interested"
+
+    # Negative variations
+    assert classify_response_intent("Not Interested") == "not_interested"
+    assert classify_response_intent("I am not interested") == "not_interested"
+    assert classify_response_intent("dont want") == "not_interested"
+    assert classify_response_intent("No thanks") == "not_interested"
+    assert classify_response_intent("ಆಸಕ್ತಿ ಇಲ್ಲ") == "not_interested"
+    assert classify_response_intent("ಬೇಡ") == "not_interested"
+    assert classify_response_intent("रुचि नहीं है") == "not_interested"
+    assert classify_response_intent("नहीं चाहिए") == "not_interested"
+
+

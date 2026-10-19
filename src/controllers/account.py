@@ -831,6 +831,7 @@ async def get_all_accounts(
     call_back_date_time: datetime | None = None,
     account_owner_id: list[int] | None = None,
     phone_number: str | None = None,
+    email: str | None = None,
     module: str | None = None,
     from_date: str | None = None,
     to_date: str | None = None,
@@ -1296,6 +1297,8 @@ async def get_all_accounts(
                 Account.phone.like(f"%+91{phone_number}%"),
             )
         )
+    if email and email.strip():
+        filters.append(Account.email.ilike(f"%{email.strip()}%"))
     if account_owner_id:
         owner_ids = [
             int(oid)
@@ -1490,6 +1493,7 @@ async def get_all_accounts(
                 Account.city,
                 Account.call_back_date_time,
                 Account.phone,
+                Account.email,
                 Account.account_stage,
                 Account.business_status,
                 Account.is_priority_account,
@@ -1521,6 +1525,7 @@ async def get_all_accounts(
                     "city",
                     "call_back_date_time",
                     "phone",
+                    "email",
                     "account_stage",
                     "business_status",
                     "is_priority_account",

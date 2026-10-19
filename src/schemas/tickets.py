@@ -44,6 +44,8 @@ class TicketSchema(TicketCreationBody):
     updated_at: datetime
     modified_at: Optional[datetime] = None
     modified_time: Optional[datetime] = None
+    status_journey: Optional[List[Any]] = None
+    journey: Optional[List[Any]] = None
 
     class Config:
         from_attributes = True

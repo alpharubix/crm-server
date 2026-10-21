@@ -465,20 +465,22 @@ async def create_ticket(request: Request, db: Session = Depends(get_db)):
     user_id = request.state.user_id
     user_role = request.state.role
 
-    # --- Auto-generate ticket_name: {deal_name}/T{seq} ---
+    # --- Auto-generate ticket_name: {deal_name}/TK{ticket_id} ---
     deal_id_val = body.get("deal_id")
+    if not deal_id_val:
+        raise HTTPException(status_code=400, detail="deal_id is required")
     parent_deal = db.query(Deal).filter(Deal.id == int(deal_id_val)).first()
     if not parent_deal:
         raise HTTPException(status_code=404, detail="Parent deal not found")
 
-    existing_ticket_count = (
-        db.query(Ticket).filter(Ticket.deal_id == int(deal_id_val)).count()
-    )
-    existing_ticket_count += 1
-    ticket_sequence = str(existing_ticket_count).zfill(4)
-    parent_deal_name = parent_deal.deal_name or parent_deal.account_name or str(deal_id_val)
-    generated_ticket_name = f"{parent_deal_name}/TK{ticket_sequence}"
-    filtered_body["ticket_name"] = generated_ticket_name
+    # existing_ticket_count = (
+    #     db.query(Ticket).filter(Ticket.deal_id == int(deal_id_val)).count()
+    # )
+    # existing_ticket_count += 1
+    # ticket_sequence = str(existing_ticket_count).zfill(4)
+    # parent_deal_name = parent_deal.deal_name or parent_deal.account_name or str(deal_id_val)
+    # generated_ticket_name = f"{parent_deal_name}/TK{ticket_sequence}"
+    # filtered_body["ticket_name"] = generated_ticket_name
 
     # --- Duplicate ticket check: same deal + lender_name ---
     new_lender_name = body.get("lender_name")
@@ -503,6 +505,12 @@ async def create_ticket(request: Request, db: Session = Depends(get_db)):
     ticket = Ticket(**filtered_body, created_by=user_id)
     db.add(ticket)
     db.flush()
+
+    parent_deal_name = (
+        parent_deal.deal_name
+        or f"{(parent_deal.account_name or 'ACC').strip()}/DL{parent_deal.id}"
+    )
+    ticket.ticket_name = f"{parent_deal_name}/TK{ticket.id}"
 
     now_time = datetime.now(timezone.utc)
     st_val = ticket.ticket_status or "Yet to Lender Login"

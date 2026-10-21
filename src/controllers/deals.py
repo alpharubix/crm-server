@@ -627,18 +627,10 @@ def create_deal(deal, db: Session, user_id, user_role):
                     ),
                 )
 
-        # --- Auto-generate deal_name: {account_name}/{account_id}/D{seq} ---
-        existing_deal_count = (
-            db.query(Deal).filter(Deal.account_id == int(deal.account_id)).count()
-        )
-        existing_deal_count += 1
-        sequence = str(existing_deal_count).zfill(4)
-        generated_deal_name = f"{deal.account_name}/DL/{sequence}"
-
         created_deal = Deal(
             account_id=deal.account_id,
             account_name=deal.account_name,
-            deal_name=generated_deal_name,
+            deal_name=None,
             deal_type=deal.deal_type,
             loan_type=deal.loan_type,
             type_of_login=deal.type_of_login,
@@ -666,6 +658,9 @@ def create_deal(deal, db: Session, user_id, user_role):
         db.add(created_deal)
         db.flush()
 
+        deal_account_name = (deal.account_name or "ACC").strip()
+        created_deal.deal_name = f"{deal_account_name}/DL{created_deal.id}"
+
         now_time = datetime.now(UTC)
         st_val = created_deal.deal_status or "Yet to Lender Login"
         deal_history = DealStatusHistory(
@@ -681,6 +676,7 @@ def create_deal(deal, db: Session, user_id, user_role):
 
         # 1. Audit Logging Serialization
         deal_dict = deal.model_dump()
+        deal_dict["deal_name"] = created_deal.deal_name
         sanitized_payload = jsonable_encoder(deal_dict)
 
         log_action(

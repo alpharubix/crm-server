@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session, selectinload
 from src.controllers.audit_log import log_action
 from src.controllers.auth import MANAGERID
 from src.controllers.notes import get_notes
+from src.models.account import Account
 from src.models.deal import Deal, DealStatusHistory
 
 
@@ -236,7 +237,7 @@ def get_deals(
 
         # 1. Role-Based Access Scoping
         allowed_owner_ids = None
-        if user_id in MANAGERID.BYPASS_USER_IDS:
+        if user_id in MANAGERID.BYPASS_USER_IDS or user_role in ("super_admin", "admin"):
             pass
         elif user_role == "manager":
             allowed_owner_ids = [user_id] + MANAGER_EXECUTIVES_MAP.get(user_id, [])
@@ -244,7 +245,12 @@ def get_deals(
             allowed_owner_ids = [user_id]
 
         if allowed_owner_ids is not None:
-            filters.append(Deal.deal_owner_id.in_(allowed_owner_ids))
+            filters.append(
+                or_(
+                    Deal.deal_owner_id.in_(allowed_owner_ids),
+                    Account.account_owner_id.in_(allowed_owner_ids),
+                )
+            )
 
         # 2. String Match Query Filters
         if deal_id:
@@ -371,7 +377,11 @@ def get_deals(
         # ------------------- KANBAN VIEW PROCESSOR -------------------
         if kanban:
             # 1. First, build the clean query based on the active filters
-            base_query = db.query(Deal).filter(and_(*filters))
+            base_query = (
+                db.query(Deal)
+                .outerjoin(Account, Deal.account_id == Account.id)
+                .filter(and_(*filters))
+            )
 
             # 2. Get the actual total count of ALL matching data in DB (e.g., 220)
             total_count = base_query.count()
@@ -414,7 +424,11 @@ def get_deals(
             # 5. Return matching the exact structure from your tickets controller
             return {"data": grouped, "page_info": {"total": total_count}}
         # ------------------- STANDARD / DRILLDOWN VIEWS -------------------
-        base_query = db.query(Deal).filter(and_(*filters))
+        base_query = (
+            db.query(Deal)
+            .outerjoin(Account, Deal.account_id == Account.id)
+            .filter(and_(*filters))
+        )
 
         # Single Deal Detail View Scenario
         if deal_id:
@@ -605,24 +619,37 @@ def get_deals(
 # --- Ensure this matches the bottom of your src/controllers/deals.py ---
 
 
+def is_closed_deal_stage(stage: str | None) -> bool:
+    if not stage:
+        return False
+    normalized = stage.strip().lower().replace("_", " ")
+    return normalized in {"disbursed", "rejected", "not interested", "not intrested"}
+
+
 def create_deal(deal, db: Session, user_id, user_role):
     try:
         # --- Duplicate deal check: same account + deal_type + loan_type ---
+        # Allow creating new deal if all existing deals with same deal_type and loan_type
+        # are closed/terminal (Disbursed, Rejected, Not Interested).
         if deal.deal_type and deal.loan_type:
-            duplicate = (
+            existing_deals = (
                 db.query(Deal)
                 .filter(
                     Deal.account_id == int(deal.account_id),
                     Deal.deal_type == deal.deal_type,
                     Deal.loan_type == deal.loan_type,
                 )
-                .first()
+                .all()
             )
-            if duplicate:
+            active_duplicate = next(
+                (d for d in existing_deals if not is_closed_deal_stage(d.deal_stage)),
+                None,
+            )
+            if active_duplicate:
                 raise HTTPException(
                     status_code=409,
                     detail=(
-                        'A similar deal with same "Deal Type" and "Type of Loan" already exist, '
+                        'A similar active deal with same "Deal Type" and "Type of Loan" already exist, '
                         'Please try changing the "Deal Type" and "Type of Loan" else refer to the existing deals'
                     ),
                 )
@@ -738,7 +765,7 @@ def update_deal_based_on_id(user_id, user_role, db: Session, deal_id: int, paylo
             "deal_type" in payload and payload["deal_type"] != db_deal.deal_type
         ) or ("loan_type" in payload and payload["loan_type"] != db_deal.loan_type)
         if is_type_changing and new_deal_type and new_loan_type:
-            duplicate = (
+            existing_deals = (
                 db.query(Deal)
                 .filter(
                     Deal.account_id == db_deal.account_id,
@@ -746,13 +773,17 @@ def update_deal_based_on_id(user_id, user_role, db: Session, deal_id: int, paylo
                     Deal.loan_type == new_loan_type,
                     Deal.id != deal_id,  # exclude self
                 )
-                .first()
+                .all()
             )
-            if duplicate:
+            active_duplicate = next(
+                (d for d in existing_deals if not is_closed_deal_stage(d.deal_stage)),
+                None,
+            )
+            if active_duplicate:
                 raise HTTPException(
                     status_code=409,
                     detail=(
-                        'A similar deal with same "Deal Type" and "Type of Loan" already exist, '
+                        'A similar active deal with same "Deal Type" and "Type of Loan" already exist, '
                         'Please try changing the "Deal Type" and "Type of Loan" else refer to the existing deals'
                     ),
                 )
@@ -911,11 +942,20 @@ def get_deal_id(user_id: int, role: str, deal_name: str, db: Session):
             allowed_owner_ids = [user_id]
 
         if allowed_owner_ids is not None:
-            filters.append(Deal.deal_owner_id.in_(allowed_owner_ids))
+            filters.append(
+                or_(
+                    Deal.deal_owner_id.in_(allowed_owner_ids),
+                    Account.account_owner_id.in_(allowed_owner_ids),
+                )
+            )
         # append the query-parameter
         filters.append(Deal.account_name.ilike(f"{deal_name.strip()}%"))
 
-        data = db.query(Deal.id, Deal.account_name).filter(*filters)
+        data = (
+            db.query(Deal.id, Deal.account_name)
+            .outerjoin(Account, Deal.account_id == Account.id)
+            .filter(*filters)
+        )
 
         serialized_deals = []
 

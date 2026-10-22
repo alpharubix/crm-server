@@ -11,7 +11,7 @@ from src.controllers.auth import MANAGERID
 from src.controllers.notes import get_notes
 from src.database import get_db, get_mongodb
 
-# Ensure Deal is imported
+from src.models.account import Account
 from src.models.deal import Deal
 from src.models.ticket import Ticket, TicketStatusHistory
 
@@ -352,7 +352,12 @@ def get_tickets_list(
 
     # Relationships filters
     if allowed_owner_ids is not None:
-        filters.append(Deal.deal_owner_id.in_(allowed_owner_ids))
+        filters.append(
+            or_(
+                Deal.deal_owner_id.in_(allowed_owner_ids),
+                Account.account_owner_id.in_(allowed_owner_ids),
+            )
+        )
     if deal_owner_id:
         filters.append(Deal.deal_owner_id == deal_owner_id)
     if account_name:
@@ -360,7 +365,10 @@ def get_tickets_list(
 
     # Build the final unified query structure
     final_query = (
-        db.query(Ticket).join(Deal, Ticket.deal_id == Deal.id).filter(and_(*filters))
+        db.query(Ticket)
+        .join(Deal, Ticket.deal_id == Deal.id)
+        .outerjoin(Account, Deal.account_id == Account.id)
+        .filter(and_(*filters))
     )
 
     if kanban:

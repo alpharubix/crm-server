@@ -855,7 +855,7 @@ async def get_all_accounts(
     limit = 30
     offset = (page - 1) * limit
     query = db.query(Account)
-    filters = [or_(Account.company_id == 1, Account.company_id.is_(None))]
+    filters = []
     user_id = request.state.user_id
     role = request.state.role
     single_id_request = False

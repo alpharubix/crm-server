@@ -233,7 +233,7 @@ def get_deals(
         page = page or 1
         limit = 30
         offset = (page - 1) * limit
-        filters = [or_(Deal.company_id == 1, Deal.company_id.is_(None))]
+        filters = []
 
         # 1. Role-Based Access Scoping
         allowed_owner_ids = None

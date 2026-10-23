@@ -281,7 +281,6 @@ def bulk_create_deal_tasks(
         db.query(Deal)
         .filter(
             or_(Deal.id.in_(bulk_in.deal_ids), Deal.id.in_(int_deal_ids)),
-            or_(Deal.company_id == 1, Deal.company_id.is_(None)),
         )
         .all()
     )
@@ -411,7 +410,6 @@ def get_deal_tasks(
             joinedload(DealTask.assigned_to),
             joinedload(DealTask.created_by),
         )
-        .filter(or_(DealTask.company_id == 1, DealTask.company_id.is_(None)))
     )
 
     effective_cb_date = cb_date_condition or (
@@ -730,7 +728,6 @@ def get_deal_task_by_id(
         )
         .filter(
             or_(DealTask.id == task_id, DealTask.id == t_int),
-            or_(DealTask.company_id == 1, DealTask.company_id.is_(None)),
         )
         .first()
     )
@@ -778,7 +775,6 @@ def update_deal_task(
         .options(joinedload(DealTask.deal))
         .filter(
             or_(DealTask.id == task_id, DealTask.id == t_int),
-            or_(DealTask.company_id == 1, DealTask.company_id.is_(None)),
         )
         .first()
     )
@@ -952,7 +948,6 @@ def bulk_update_deal_task_status(
         .options(joinedload(DealTask.deal))
         .filter(
             or_(DealTask.id.in_(task_ids), DealTask.id.in_(int_ids)),
-            or_(DealTask.company_id == 1, DealTask.company_id.is_(None)),
         )
         .all()
     )

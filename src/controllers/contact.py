@@ -69,7 +69,7 @@ def get_all_contacts(
     limit = 30
     offset = (page - 1) * limit
     query = db.query(Contact)
-    filters = [or_(Contact.company_id == 1, Contact.company_id.is_(None))]
+    filters = []
 
     user_id = request.state.user_id
     role = request.state.role

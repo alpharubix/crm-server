@@ -85,7 +85,11 @@ class Account(Base):
     owner = relationship(
         "User", foreign_keys=[account_owner_id], backref="account_owner"
     )
-    deals = relationship("Deal", back_populates="account")
+    deals = relationship(
+        "Deal",
+        back_populates="account",
+        order_by="desc(Deal.id)",
+    )
 
     # ========== NEW COLUMNS (Add these at the end) ==========
     source_type = Column(String, nullable=True, index=True)

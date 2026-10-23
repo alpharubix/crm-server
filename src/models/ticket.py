@@ -29,6 +29,7 @@ class Ticket(Base):
     ticket_status = Column(String(50))
     ticket_stage = Column(String(50))
     ticket_name = Column(String, nullable=True, index=True)  # Auto-generated: {deal_name}/T{seq}
+    ticket_call_back_datetime = Column(DateTime(timezone=True), nullable=True)
 
     # Funding & Commercials
     approved_amount = Column(Numeric(15, 2))

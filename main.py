@@ -59,6 +59,16 @@ try:
                 "ALTER TABLE support_tickets_merged ADD COLUMN IF NOT EXISTS updated_by BIGINT;"
             )
         )
+        conn.execute(
+            text(
+                "ALTER TABLE deals_merged ADD COLUMN IF NOT EXISTS deal_call_back_datetime TIMESTAMP WITH TIME ZONE;"
+            )
+        )
+        conn.execute(
+            text(
+                "ALTER TABLE tickets_merged ADD COLUMN IF NOT EXISTS ticket_call_back_datetime TIMESTAMP WITH TIME ZONE;"
+            )
+        )
         conn.commit()
 except Exception:
     pass

@@ -69,6 +69,7 @@ class MANAGERID:
             3899927000000433736,  # "Niteen Bhausaheb Bansode"
             3899927000000631533,  # Sachin Vitthal Jadhav
             3899927000000154963,  # Santosh Yoganand Pawar
+            3899927000000146516, # Vathsala K
         ],
         # Ashwini R
         3899927000000319812: [
@@ -229,6 +230,7 @@ class MANAGERID:
         3899927000000154963,  # "Santosh Yoganand Pawar"
         3899927000000433736,  # "Niteen Bhausaheb Bansode"
         3899927000000580845,  # "Santhosh Kumar S"
+        3899927000000146516, # Vathsala K
     }
 
 
@@ -277,4 +279,5 @@ users = {  # users for fast lookup
     3899927000000650180: "Pranay Kumar",
     3899927000000795843: "Prashanth",
     3899927000000979220: "Nandini",
+    3899927000000146516: "Vathsala K"
 }

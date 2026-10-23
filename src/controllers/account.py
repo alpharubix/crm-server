@@ -1340,6 +1340,19 @@ async def get_all_accounts(
             .all()
         )
 
+        def _deal_sort_key(d):
+            dt = getattr(d, "updated_at", None) or getattr(d, "created_at", None)
+            if dt:
+                if getattr(dt, "tzinfo", None) is None:
+                    dt = dt.replace(tzinfo=UTC)
+            else:
+                dt = datetime.min.replace(tzinfo=UTC)
+            return (dt, getattr(d, "id", 0) or 0)
+
+        for account_item in data:
+            if hasattr(account_item, "deals") and account_item.deals:
+                account_item.deals.sort(key=_deal_sort_key, reverse=True)
+
         if len(data) != 0:
             note_pairs = []
             acc: Account = data[0]

@@ -466,9 +466,32 @@ async def create_ticket(request: Request, db: Session = Depends(get_db)):
         "account_id",
         "customer_rejection_reason",
         "customer_rejection_status_explanation",
+        "ticket_call_back_datetime",
     }
 
+    if "call_back_date_time" in body and "ticket_call_back_datetime" not in body:
+        body["ticket_call_back_datetime"] = body["call_back_date_time"]
+
     filtered_body = {k: v for k, v in body.items() if k in allowed_fields}
+
+    if "ticket_call_back_datetime" in filtered_body and filtered_body["ticket_call_back_datetime"]:
+        val = filtered_body["ticket_call_back_datetime"]
+        if isinstance(val, str):
+            try:
+                val = datetime.fromisoformat(val.replace("Z", "+00:00"))
+            except ValueError:
+                raise HTTPException(
+                    status_code=400,
+                    detail={"message": "Invalid datetime format for ticket_call_back_datetime"},
+                )
+        if hasattr(val, "tzinfo") and val.tzinfo is None:
+            val = val.replace(tzinfo=timezone.utc)
+        if val < datetime.now(timezone.utc):
+            raise HTTPException(
+                status_code=400,
+                detail={"message": "Date should not be in the past"},
+            )
+        filtered_body["ticket_call_back_datetime"] = val
 
     user_id = request.state.user_id
     user_role = request.state.role
@@ -628,10 +651,45 @@ async def update_ticket(
                 ),
             )
 
+    if "call_back_date_time" in body and "ticket_call_back_datetime" not in body:
+        body["ticket_call_back_datetime"] = body["call_back_date_time"]
+
     old_ticket_status = ticket.ticket_status
 
     for key, value in body.items():
-        if hasattr(ticket, key):
+        if key == "ticket_call_back_datetime":
+            if value == "" or value is None:
+                setattr(ticket, key, None)
+            else:
+                if isinstance(value, str):
+                    try:
+                        clean_val = value.replace("Z", "+00:00")
+                        parsed = datetime.fromisoformat(clean_val)
+                        if parsed.tzinfo is None:
+                            parsed = parsed.replace(tzinfo=timezone.utc)
+                        if parsed < datetime.now(timezone.utc):
+                            raise HTTPException(
+                                status_code=400,
+                                detail={"message": "Date should not be in the past"},
+                            )
+                        setattr(ticket, key, parsed)
+                    except ValueError:
+                        raise HTTPException(
+                            status_code=400,
+                            detail={"message": f"Invalid datetime format for {key}"},
+                        )
+                elif isinstance(value, datetime):
+                    if value.tzinfo is None:
+                        value = value.replace(tzinfo=timezone.utc)
+                    if value < datetime.now(timezone.utc):
+                        raise HTTPException(
+                            status_code=400,
+                            detail={"message": "Date should not be in the past"},
+                        )
+                    setattr(ticket, key, value)
+                else:
+                    setattr(ticket, key, value)
+        elif hasattr(ticket, key):
             setattr(ticket, key, value)
 
     user_id = request.state.user_id

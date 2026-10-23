@@ -619,39 +619,36 @@ def get_deals(
 # --- Ensure this matches the bottom of your src/controllers/deals.py ---
 
 
-def is_closed_deal_stage(stage: str | None) -> bool:
-    if not stage:
-        return False
-    normalized = stage.strip().lower().replace("_", " ")
-    return normalized in {"disbursed", "rejected", "not interested", "not intrested"}
-
-
 def create_deal(deal, db: Session, user_id, user_role):
     try:
         # --- Duplicate deal check: same account + deal_type + loan_type ---
-        # Allow creating new deal if all existing deals with same deal_type and loan_type
-        # are closed/terminal (Disbursed, Rejected, Not Interested).
         if deal.deal_type and deal.loan_type:
-            existing_deals = (
+            duplicate = (
                 db.query(Deal)
                 .filter(
                     Deal.account_id == int(deal.account_id),
                     Deal.deal_type == deal.deal_type,
                     Deal.loan_type == deal.loan_type,
                 )
-                .all()
+                .first()
             )
-            active_duplicate = next(
-                (d for d in existing_deals if not is_closed_deal_stage(d.deal_stage)),
-                None,
-            )
-            if active_duplicate:
+            if duplicate:
                 raise HTTPException(
                     status_code=409,
                     detail=(
-                        'A similar active deal with same "Deal Type" and "Type of Loan" already exist, '
+                        'A similar deal with same "Deal Type" and "Type of Loan" already exist, '
                         'Please try changing the "Deal Type" and "Type of Loan" else refer to the existing deals'
                     ),
+                )
+
+        if deal.deal_call_back_datetime:
+            cb_val = deal.deal_call_back_datetime
+            if cb_val.tzinfo is None:
+                cb_val = cb_val.replace(tzinfo=UTC)
+            if cb_val < datetime.now(UTC):
+                raise HTTPException(
+                    status_code=400,
+                    detail={"message": "Date should not be in the past"},
                 )
 
         created_deal = Deal(
@@ -765,7 +762,7 @@ def update_deal_based_on_id(user_id, user_role, db: Session, deal_id: int, paylo
             "deal_type" in payload and payload["deal_type"] != db_deal.deal_type
         ) or ("loan_type" in payload and payload["loan_type"] != db_deal.loan_type)
         if is_type_changing and new_deal_type and new_loan_type:
-            existing_deals = (
+            duplicate = (
                 db.query(Deal)
                 .filter(
                     Deal.account_id == db_deal.account_id,
@@ -773,17 +770,13 @@ def update_deal_based_on_id(user_id, user_role, db: Session, deal_id: int, paylo
                     Deal.loan_type == new_loan_type,
                     Deal.id != deal_id,  # exclude self
                 )
-                .all()
+                .first()
             )
-            active_duplicate = next(
-                (d for d in existing_deals if not is_closed_deal_stage(d.deal_stage)),
-                None,
-            )
-            if active_duplicate:
+            if duplicate:
                 raise HTTPException(
                     status_code=409,
                     detail=(
-                        'A similar active deal with same "Deal Type" and "Type of Loan" already exist, '
+                        'A similar deal with same "Deal Type" and "Type of Loan" already exist, '
                         'Please try changing the "Deal Type" and "Type of Loan" else refer to the existing deals'
                     ),
                 )
@@ -826,12 +819,33 @@ def update_deal_based_on_id(user_id, user_role, db: Session, deal_id: int, paylo
                         try:
                             clean_val = value.replace("Z", "+00:00")
                             parsed = datetime.fromisoformat(clean_val)
+                            if key == "deal_call_back_datetime":
+                                if parsed.tzinfo is None:
+                                    parsed = parsed.replace(tzinfo=UTC)
+                                if parsed < datetime.now(UTC):
+                                    raise HTTPException(
+                                        status_code=400,
+                                        detail={"message": "Date should not be in the past"},
+                                    )
                             setattr(db_deal, key, parsed)
+                        except HTTPException:
+                            raise
                         except ValueError:
                             raise HTTPException(
                                 status_code=400,
                                 detail={"msg": f"Invalid date format for field: {key}"},
                             )
+                    elif isinstance(value, datetime):
+                        if key == "deal_call_back_datetime":
+                            val_dt = value
+                            if val_dt.tzinfo is None:
+                                val_dt = val_dt.replace(tzinfo=UTC)
+                            if val_dt < datetime.now(UTC):
+                                raise HTTPException(
+                                    status_code=400,
+                                    detail={"message": "Date should not be in the past"},
+                                )
+                        setattr(db_deal, key, value)
                     else:
                         setattr(db_deal, key, value)
                 else:

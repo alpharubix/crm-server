@@ -321,7 +321,6 @@ def bulk_create_account_tasks(
         db.query(Account)
         .filter(
             or_(Account.id.in_(bulk_in.account_ids), Account.id.in_(int_account_ids)),
-            or_(Account.company_id == 1, Account.company_id.is_(None)),
         )
         .all()
     )
@@ -421,7 +420,6 @@ def get_account_tasks(
             joinedload(AccountTask.assigned_to),
             joinedload(AccountTask.created_by),
         )
-        .filter(or_(AccountTask.company_id == 1, AccountTask.company_id.is_(None)))
     )
 
     effective_cb_date = cb_date_condition or (
@@ -897,7 +895,6 @@ def get_account_task_by_id(
         )
         .filter(
             or_(AccountTask.id == task_id, AccountTask.id == t_int),
-            or_(AccountTask.company_id == 1, AccountTask.company_id.is_(None)),
         )
         .first()
     )
@@ -945,7 +942,6 @@ def update_account_task(
         .options(joinedload(AccountTask.account))
         .filter(
             or_(AccountTask.id == task_id, AccountTask.id == t_int),
-            or_(AccountTask.company_id == 1, AccountTask.company_id.is_(None)),
         )
         .first()
     )
@@ -1102,7 +1098,6 @@ def bulk_update_task_status(
         .options(joinedload(AccountTask.account))
         .filter(
             AccountTask.id.in_(all_targets),
-            or_(AccountTask.company_id == 1, AccountTask.company_id.is_(None)),
         )
         .all()
     )

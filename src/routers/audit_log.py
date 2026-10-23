@@ -1,5 +1,4 @@
 from fastapi import APIRouter, Depends, HTTPException, Request
-from sqlalchemy import or_
 from sqlalchemy.orm import Session
 from zoneinfo import ZoneInfo
 IST = ZoneInfo("Asia/Kolkata")
@@ -23,12 +22,9 @@ def get_audit_logs(request: Request, page: int = 1, db: Session = Depends(get_db
     limit = 20
     offset = (page - 1) * limit
 
-    company_filter = [or_(AuditLog.company_id == 1, AuditLog.company_id.is_(None))]
-
-    total = db.query(AuditLog).filter(*company_filter).count()
+    total = db.query(AuditLog).count()
     logs = (
         db.query(AuditLog)
-        .filter(*company_filter)
         .order_by(AuditLog.created_at.desc())
         .offset(offset)
         .limit(limit)

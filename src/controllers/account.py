@@ -1028,15 +1028,26 @@ async def get_all_accounts(
         if stage_list:
             filters.append(Account.account_stage.in_(stage_list))
     if source:
-        source_list = [
+        raw_sources = [
             s.strip()
             for s in (source if isinstance(source, list) else [source])
             if s and s.strip()
         ]
-        if source_list:
-            filters.append(
-                or_(*[Account.source.ilike(f"{src}%") for src in source_list])
-            )
+        if raw_sources:
+            include_blank = any(s.lower() == "blank" for s in raw_sources)
+            regular_sources = [s for s in raw_sources if s.lower() != "blank"]
+
+            source_conditions = []
+            if regular_sources:
+                source_conditions.extend(
+                    [Account.source.ilike(f"{src}%") for src in regular_sources]
+                )
+            if include_blank:
+                source_conditions.append(Account.source.is_(None))
+                source_conditions.append(func.trim(Account.source) == "")
+
+            if source_conditions:
+                filters.append(or_(*source_conditions))
     if source_type:
         st_list = [
             s.strip()

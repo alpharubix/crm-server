@@ -216,9 +216,15 @@ def test_response_intent_mappings():
 
     # Positive variations
     assert classify_response_intent("Interested") == "interested"
+    assert classify_response_intent("intrested") == "interested"
     assert classify_response_intent("I am interested") == "interested"
+    assert classify_response_intent("I am intrested") == "interested"
     assert classify_response_intent("I Interested") == "interested"
     assert classify_response_intent("yes, I'm interested") == "interested"
+    assert classify_response_intent("Need 1 on 1 discussion") == "interested"
+    assert classify_response_intent("need 1 on 1 discussion") == "interested"
+    assert classify_response_intent("NEED 1 ON 1 DISCUSSION") == "interested"
+    assert classify_response_intent("1 on 1 discussion") == "interested"
     assert classify_response_intent("please share details") == "interested"
     assert classify_response_intent("ಆಸಕ್ತಿ ಇದೆ") == "interested"
     assert classify_response_intent("ನನಗೆ ಆಸಕ್ತಿ ಇದೆ") == "interested"
@@ -227,12 +233,21 @@ def test_response_intent_mappings():
 
     # Negative variations
     assert classify_response_intent("Not Interested") == "not_interested"
+    assert classify_response_intent("not intrested") == "not_interested"
+    assert classify_response_intent("NOT INTRESTED") == "not_interested"
     assert classify_response_intent("I am not interested") == "not_interested"
+    assert classify_response_intent("I am not intrested") == "not_interested"
     assert classify_response_intent("dont want") == "not_interested"
     assert classify_response_intent("No thanks") == "not_interested"
+    assert classify_response_intent("STOP") == "not_interested"
     assert classify_response_intent("ಆಸಕ್ತಿ ಇಲ್ಲ") == "not_interested"
     assert classify_response_intent("ಬೇಡ") == "not_interested"
     assert classify_response_intent("रुचि नहीं है") == "not_interested"
     assert classify_response_intent("नहीं चाहिए") == "not_interested"
+
+    # Neutral / unclassified variations
+    assert classify_response_intent("hello there") is None
+    assert classify_response_intent("when can we meet?") is None
+    assert classify_response_intent("bzjsjsm") is None
 
 

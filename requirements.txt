@@ -10,18 +10,25 @@ anyio==4.12.0
     # via
     #   httpx
     #   starlette
+    #   watchfiles
 apscheduler==3.11.2
     # via crm-backend
 bcrypt==5.0.0
+    # via crm-backend
+beanie==2.1.0
     # via crm-backend
 certifi==2026.6.17
     # via
     #   httpcore
     #   httpx
 click==8.3.1
-    # via uvicorn
+    # via
+    #   beanie
+    #   uvicorn
 colorama==0.4.6 ; sys_platform == 'win32'
-    # via click
+    # via
+    #   click
+    #   uvicorn
 dnspython==2.8.0
     # via
     #   email-validator
@@ -38,6 +45,8 @@ h11==0.16.0
     #   uvicorn
 httpcore==1.0.9
     # via httpx
+httptools==0.9.0
+    # via uvicorn
 httpx==0.28.1
     # via crm-backend
 idna==3.11
@@ -45,6 +54,8 @@ idna==3.11
     #   anyio
     #   email-validator
     #   httpx
+lazy-model==0.4.0
+    # via beanie
 mako==1.3.10
     # via alembic
 markupsafe==3.0.3
@@ -57,8 +68,10 @@ psycopg2-binary==2.9.11
     # via crm-backend
 pydantic==2.12.5
     # via
+    #   beanie
     #   crm-backend
     #   fastapi
+    #   lazy-model
     #   pydantic-settings
 pydantic-core==2.41.5
     # via pydantic
@@ -67,13 +80,19 @@ pydantic-settings==2.12.0
 pyjwt==2.10.1
     # via crm-backend
 pymongo==4.15.5
-    # via crm-backend
+    # via
+    #   beanie
+    #   crm-backend
 python-dateutil==2.9.0.post0
     # via pandas
 python-dotenv==1.2.1
-    # via pydantic-settings
+    # via
+    #   pydantic-settings
+    #   uvicorn
 python-multipart==0.0.22
     # via crm-backend
+pyyaml==6.0.3
+    # via uvicorn
 six==1.17.0
     # via python-dateutil
 sqlalchemy==2.0.44
@@ -87,6 +106,7 @@ starlette==0.50.0
 typing-extensions==4.15.0
     # via
     #   alembic
+    #   beanie
     #   fastapi
     #   pydantic
     #   pydantic-core
@@ -105,3 +125,11 @@ tzlocal==5.3.1
     # via apscheduler
 uvicorn==0.38.0
     # via crm-backend
+uvloop==0.23.0 ; platform_python_implementation != 'PyPy' and sys_platform != 'cygwin' and sys_platform != 'win32'
+    # via uvicorn
+watchfiles==1.3.0
+    # via uvicorn
+websockets==17.2
+    # via
+    #   crm-backend
+    #   uvicorn

@@ -50,16 +50,28 @@ RESPONSE_INTENT_MAP: dict[str, str] = {
     # Interested payloads and variations
     "INTERESTED": "interested",
     "RESP_INTERESTED": "interested",
+    "INTRESTED": "interested",
+    "RESP_INTRESTED": "interested",
     "YES": "interested",
     "YES_INTERESTED": "interested",
+    "YES_INTRESTED": "interested",
     "I AM INTERESTED": "interested",
     "I'M INTERESTED": "interested",
     "IM INTERESTED": "interested",
     "I INTERESTED": "interested",
-    "Need 1 on 1 discussion": "interested",
+    "I AM INTRESTED": "interested",
+    "I'M INTRESTED": "interested",
+    "IM INTRESTED": "interested",
+    "I INTRESTED": "interested",
+    "NEED 1 ON 1 DISCUSSION": "interested",
+    "NEED 1 ON 1": "interested",
+    "1 ON 1 DISCUSSION": "interested",
+    "1 ON 1": "interested",
     "AM INTERESTED": "interested",
+    "AM INTRESTED": "interested",
     "YES I AM INTERESTED": "interested",
     "YES I'M INTERESTED": "interested",
+    "YES I AM INTRESTED": "interested",
     "PLEASE SHARE DETAILS": "interested",
     "SHARE DETAILS": "interested",
     "NEED DETAILS": "interested",
@@ -77,12 +89,18 @@ RESPONSE_INTENT_MAP: dict[str, str] = {
     # Not Interested payloads and variations
     "NOT_INTERESTED": "not_interested",
     "RESP_NOT_INTERESTED": "not_interested",
+    "NOT_INTRESTED": "not_interested",
+    "RESP_NOT_INTRESTED": "not_interested",
     "NO": "not_interested",
     "NO_NOT_INTERESTED": "not_interested",
     "NOT INTERESTED": "not_interested",
+    "NOT INTRESTED": "not_interested",
     "I AM NOT INTERESTED": "not_interested",
     "I'M NOT INTERESTED": "not_interested",
     "IM NOT INTERESTED": "not_interested",
+    "I AM NOT INTRESTED": "not_interested",
+    "I'M NOT INTRESTED": "not_interested",
+    "IM NOT INTRESTED": "not_interested",
     "DONT WANT": "not_interested",
     "DON'T WANT": "not_interested",
     "DO NOT WANT": "not_interested",
@@ -105,8 +123,8 @@ def classify_response_intent(raw_text: str | None) -> str | None:
     """
     Classifies a customer's button click or typed text into 'interested' or 'not_interested'.
     Supports:
-    1. Exact button payloads (e.g. 'INTERESTED', 'RESP_INTERESTED')
-    2. Case-insensitive variations ('I am interested', 'i interested', 'yes I am interested')
+    1. Exact button payloads (e.g. 'INTERESTED', 'RESP_INTERESTED', 'NEED 1 ON 1 DISCUSSION')
+    2. Case-insensitive variations ('I am interested', 'i intrested', 'Need 1 on 1 discussion')
     3. Substring matching for common positive/negative intent phrases.
     """
     if not raw_text:
@@ -115,16 +133,18 @@ def classify_response_intent(raw_text: str | None) -> str | None:
     cleaned = str(raw_text).strip()
     upper = cleaned.upper()
 
-    # 1. Exact match in predefined map
+    # 1. Exact match in predefined map (check cleaned and uppercase)
     if cleaned in RESPONSE_INTENT_MAP:
         return RESPONSE_INTENT_MAP[cleaned]
     if upper in RESPONSE_INTENT_MAP:
         return RESPONSE_INTENT_MAP[upper]
 
-    # 2. Check for negative intent first (to prevent 'not interested' matching 'interested')
+    # 2. Check for negative intent first (to prevent 'not interested' or 'not intrested' matching 'interested')
     not_interested_keywords = [
         "NOT INTEREST",
+        "NOT INTREST",
         "NO INTEREST",
+        "NO INTREST",
         "DONT WANT",
         "DON'T WANT",
         "DO NOT WANT",
@@ -140,12 +160,15 @@ def classify_response_intent(raw_text: str | None) -> str | None:
         if kw in upper or kw in cleaned:
             return "not_interested"
 
-    # 3. Check for positive intent keywords ('interested', 'share details', etc.)
+    # 3. Check for positive intent keywords ('interested', 'intrested', '1 on 1 discussion', etc.)
     interested_keywords = [
-        "INTEREST",  # Matches "I am interested", "I interested", "interested", "interesting"
+        "INTEREST",  # Matches "interested", "interesting", "I am interested"
+        "INTREST",   # Matches "intrested", "intresting", "I am intrested"
+        "1 ON 1",    # Matches "Need 1 on 1 discussion", "1 on 1", "1 on 1 call"
+        "1-ON-1",
+        "ONE ON ONE",
         "SHARE DETAILS",
         "SEND DETAILS",
-        "Need 1 on 1 discussion",
         "NEED DETAILS",
         "MORE INFO",
         "CALL ME",
@@ -233,6 +256,7 @@ class WhatsAppService:
                         contact.custom_fields = custom_fields
 
                 # If account_id was not on contact, look up directly in accounts_merged by last 10 digits
+                matched_acc = None
                 if not account_id and phone_10:
                     matched_acc = (
                         db.query(Account)
@@ -251,6 +275,14 @@ class WhatsAppService:
                             )
                             if contact and not contact.account_id:
                                 contact.account_id = matched_acc.id
+
+                # Synchronize Account.waba_interested status in PostgreSQL
+                target_acc = matched_acc or (db.query(Account).filter(Account.id == account_id).first() if account_id else None)
+                if target_acc:
+                    if response_status == "interested":
+                        target_acc.waba_interested = True
+                    elif response_status == "not_interested":
+                        target_acc.waba_interested = False
 
                 # Insert granular record in whatsapp_template_responses using clean 10-digit phone
                 new_resp = WhatsAppTemplateResponse(

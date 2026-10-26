@@ -1603,13 +1603,22 @@ def get_broadcast_messages_list(
                     # If this message was the customer's response to a template, enrich with the template name!
                     if not template_name and matched_resp.get("template_name"):
                         template_name = matched_resp.get("template_name")
-                elif p10 and p10 in phone_response_map:
-                    response_intent = phone_response_map[p10].get("response_status")
-                    response_button = phone_response_map[p10].get("button_text")
-                    if not template_name and phone_response_map[p10].get("template_name"):
-                        template_name = phone_response_map[p10].get("template_name")
-                elif acc_info and acc_info.get("waba_interested"):
-                    response_intent = "interested"
+                else:
+                    # Dynamically check message_text/payload for intent
+                    from src.whatsapp.services import classify_response_intent
+                    classified = classify_response_intent(message_text)
+                    if classified:
+                        response_intent = classified
+                        if p10 and p10 in phone_response_map and not template_name:
+                            template_name = phone_response_map[p10].get("template_name")
+                    elif p10 and p10 in phone_response_map and phone_response_map[p10].get("response_status") == "interested":
+                        # If customer is marked interested, show interested context
+                        response_intent = "interested"
+                        response_button = phone_response_map[p10].get("button_text")
+                        if not template_name and phone_response_map[p10].get("template_name"):
+                            template_name = phone_response_map[p10].get("template_name")
+                    elif acc_info and acc_info.get("waba_interested"):
+                        response_intent = "interested"
             else:
                 # Outbound messages are sent by us; they do not carry customer response status
                 response_intent = None

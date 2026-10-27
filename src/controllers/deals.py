@@ -621,25 +621,6 @@ def get_deals(
 
 def create_deal(deal, db: Session, user_id, user_role):
     try:
-        # --- Duplicate deal check: same account + deal_type + loan_type ---
-        if deal.deal_type and deal.loan_type:
-            duplicate = (
-                db.query(Deal)
-                .filter(
-                    Deal.account_id == int(deal.account_id),
-                    Deal.deal_type == deal.deal_type,
-                    Deal.loan_type == deal.loan_type,
-                )
-                .first()
-            )
-            if duplicate:
-                raise HTTPException(
-                    status_code=409,
-                    detail=(
-                        'A similar deal with same "Deal Type" and "Type of Loan" already exist, '
-                        'Please try changing the "Deal Type" and "Type of Loan" else refer to the existing deals'
-                    ),
-                )
 
         if deal.deal_call_back_datetime:
             cb_val = deal.deal_call_back_datetime
@@ -755,31 +736,6 @@ def update_deal_based_on_id(user_id, user_role, db: Session, deal_id: int, paylo
         if not db_deal:
             raise HTTPException(status_code=404, detail={"msg": "Deal not found"})
 
-        # --- Duplicate deal check on UPDATE: only if deal_type or loan_type is changing ---
-        new_deal_type = payload.get("deal_type", db_deal.deal_type)
-        new_loan_type = payload.get("loan_type", db_deal.loan_type)
-        is_type_changing = (
-            "deal_type" in payload and payload["deal_type"] != db_deal.deal_type
-        ) or ("loan_type" in payload and payload["loan_type"] != db_deal.loan_type)
-        if is_type_changing and new_deal_type and new_loan_type:
-            duplicate = (
-                db.query(Deal)
-                .filter(
-                    Deal.account_id == db_deal.account_id,
-                    Deal.deal_type == new_deal_type,
-                    Deal.loan_type == new_loan_type,
-                    Deal.id != deal_id,  # exclude self
-                )
-                .first()
-            )
-            if duplicate:
-                raise HTTPException(
-                    status_code=409,
-                    detail=(
-                        'A similar deal with same "Deal Type" and "Type of Loan" already exist, '
-                        'Please try changing the "Deal Type" and "Type of Loan" else refer to the existing deals'
-                    ),
-                )
 
         DATE_COLS = {
             "disbursement_date",
@@ -996,23 +952,6 @@ def update_and_insert_deals(insertion_deals, updation_deals, db: Session):
 
     for deal_data in insertion_deals:
         try:
-            # Check duplicate deal: same account + deal_type + loan_type
-            dt_type = deal_data.get("deal_type")
-            ln_type = deal_data.get("loan_type")
-            if dt_type and ln_type:
-                duplicate = (
-                    db.query(Deal)
-                    .filter(
-                        Deal.account_id == deal_data["account_id"],
-                        Deal.deal_type == dt_type,
-                        Deal.loan_type == ln_type,
-                    )
-                    .first()
-                )
-                if duplicate:
-                    raise ValueError(
-                        'A similar deal with same "Deal Type" and "Type of Loan" already exist'
-                    )
 
             # Auto-generate deal_name: {account_name}/{account_id}/D{seq}
             account_id = deal_data["account_id"]
@@ -1052,24 +991,6 @@ def update_and_insert_deals(insertion_deals, updation_deals, db: Session):
             if not deal:
                 raise ValueError("Deal ID not found")
 
-            # Check duplicate deal: same account + deal_type + loan_type
-            new_deal_type = deal_data.get("deal_type", deal.deal_type)
-            new_loan_type = deal_data.get("loan_type", deal.loan_type)
-            if new_deal_type and new_loan_type:
-                duplicate = (
-                    db.query(Deal)
-                    .filter(
-                        Deal.account_id == deal.account_id,
-                        Deal.deal_type == new_deal_type,
-                        Deal.loan_type == new_loan_type,
-                        Deal.id != deal.id,
-                    )
-                    .first()
-                )
-                if duplicate:
-                    raise ValueError(
-                        'A similar deal with same "Deal Type" and "Type of Loan" already exist'
-                    )
 
             old_deal_status = deal.deal_status
             for key, value in deal_data.items():

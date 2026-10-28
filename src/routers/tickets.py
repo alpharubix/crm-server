@@ -515,7 +515,7 @@ async def create_ticket(request: Request, db: Session = Depends(get_db)):
 
     # --- Duplicate ticket check: same deal + lender_name ---
     new_lender_name = body.get("lender_name")
-    if new_lender_name:
+    if new_lender_name and new_lender_name != "Not Applicable":
         duplicate_ticket = (
             db.query(Ticket)
             .filter(
@@ -632,24 +632,25 @@ async def update_ticket(
 
     # --- Duplicate ticket check on UPDATE: same deal + lender_name (excluding self) ---
     new_lender_name = body.get("lender_name")
-    if new_lender_name and new_lender_name != ticket.lender_name:
-        duplicate_ticket = (
-            db.query(Ticket)
-            .filter(
-                Ticket.deal_id == ticket.deal_id,
-                Ticket.lender_name == new_lender_name,
-                Ticket.id != ticket_id,  # exclude self
+    if new_lender_name != "Not Applicable":
+        if new_lender_name and new_lender_name != ticket.lender_name:
+            duplicate_ticket = (
+                db.query(Ticket)
+                .filter(
+                    Ticket.deal_id == ticket.deal_id,
+                    Ticket.lender_name == new_lender_name,
+                    Ticket.id != ticket_id,  # exclude self
+                )
+                .first()
             )
-            .first()
-        )
-        if duplicate_ticket:
-            raise HTTPException(
-                status_code=409,
-                detail=(
-                    'A similar ticket with same "Lender Name" already exist, '
-                    'Please try changing the "Lender Name" else refer to the existing tickets'
-                ),
-            )
+            if duplicate_ticket:
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        'A similar ticket with same "Lender Name" already exist, '
+                        'Please try changing the "Lender Name" else refer to the existing tickets'
+                    ),
+                )
 
     if "call_back_date_time" in body and "ticket_call_back_datetime" not in body:
         body["ticket_call_back_datetime"] = body["call_back_date_time"]

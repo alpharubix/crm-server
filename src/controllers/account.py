@@ -37,8 +37,30 @@ from ..schemas.account import AccountBase
 def create_account(
     db: Session, data: AccountBase, user_id: int, user_role: str
 ) -> Account:
-    if db.query(Account).filter(Account.email == data.email).first():
-        raise HTTPException(status_code=400, detail="Email exists")
+    existing_account = db.query(Account).filter(
+        (Account.email == data.email) |
+        (Account.phone == data.phone)
+    ).first()
+
+    if existing_account:
+        email_exists = existing_account.email == data.email
+        phone_exists = existing_account.phone == data.phone
+
+        if email_exists and phone_exists:
+            raise HTTPException(
+                status_code=400,
+                detail="Email and Phone Number already exist"
+            )
+        elif phone_exists:
+            raise HTTPException(
+                status_code=400,
+                detail="Phone Number already exists"
+            )
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail="Email already exists"
+            )
 
     account_data = data.model_dump()
     account_data["created_by_id"] = user_id
@@ -157,6 +179,45 @@ def update_account(
             raise HTTPException(
                 status_code=403,
                 detail="You do not have permission to update this account",
+            )
+    
+    email = payload.get("email")
+    phone = payload.get("phone")
+
+    # Check for duplicate email or phone, excluding the current account
+    query = db.query(Account).filter(Account.id != account_id)
+
+    conditions = []
+    if email:
+        conditions.append(Account.email == email)
+    if phone:
+        conditions.append(Account.phone == phone)
+
+    if conditions:
+        existing_accounts = query.filter(or_(*conditions)).all()
+
+        email_exists = any(
+            account.email == email for account in existing_accounts
+        ) if email else False
+
+        phone_exists = any(
+            account.phone == phone for account in existing_accounts
+        ) if phone else False
+
+        if email_exists and phone_exists:
+            raise HTTPException(
+                status_code=400,
+                detail="Email and Phone Number already exist",
+            )
+        elif email_exists:
+            raise HTTPException(
+                status_code=400,
+                detail="Email already exists",
+            )
+        elif phone_exists:
+            raise HTTPException(
+                status_code=400,
+                detail="Phone Number already exists",
             )
 
     old_status = db_account.account_status

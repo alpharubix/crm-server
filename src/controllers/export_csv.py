@@ -36,8 +36,10 @@ def export_accounts_csv(
     MANAGER_EXECUTIVES_MAP = MANAGERID().MANAGER_EXECUTIVES_MAP
     user_id = request.state.user_id
     role = request.state.role
-
     filters = []
+
+    from src.utility.archive_visibility import active_account_condition
+    filters.append(active_account_condition())
 
     allowed_owner_ids = None
     if role in ("super_admin", "admin"):
@@ -314,6 +316,9 @@ def export_deals_csv(
     role = request.state.role
 
     filters = []
+
+    from src.utility.archive_visibility import active_deal_condition
+    filters.append(active_deal_condition())
 
     allowed_owner_ids = None
     if user_id in MANAGERID.BYPASS_USER_IDS:

@@ -100,6 +100,8 @@ class DealTask(Base):
     assigned_to_id = Column(BIGINT, ForeignKey("users.id"), nullable=True, index=True)
     created_by_id = Column(BIGINT, ForeignKey("users.id"), nullable=True)
     modified_by_id = Column(BIGINT, ForeignKey("users.id"), nullable=True)
+    archived_at = Column(DateTime(timezone=True), nullable=True, index=True)
+    archived_by_id = Column(BIGINT, ForeignKey("users.id"), nullable=True, index=True)
     created_at = Column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
@@ -120,6 +122,9 @@ class DealTask(Base):
     )
     modified_by = relationship(
         "User", foreign_keys=[modified_by_id], backref="modified_deal_tasks"
+    )
+    archived_by = relationship(
+        "User", foreign_keys=[archived_by_id], backref="archived_deal_tasks"
     )
 
     @hybrid_property

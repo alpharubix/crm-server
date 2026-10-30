@@ -63,6 +63,19 @@ class Revenue(Base):
         nullable=True
     )
 
+    archived_at = Column(
+        DateTime(timezone=True),
+        nullable=True,
+        index=True
+    )
+
+    archived_by_id = Column(
+        BIGINT,
+        ForeignKey("users.id"),
+        nullable=True,
+        index=True
+    )
+
     # ---------------- RELATIONSHIPS ---------------- #
 
     deal = relationship(
@@ -84,6 +97,12 @@ class Revenue(Base):
     updater = relationship(
         "User",
         foreign_keys=[updated_by]
+    )
+
+    archived_by = relationship(
+        "User",
+        foreign_keys=[archived_by_id],
+        backref="archived_revenues"
     )
 
 

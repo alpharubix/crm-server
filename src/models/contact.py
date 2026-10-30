@@ -46,6 +46,8 @@ class Contact(Base):
     # System Audit
     created_by_id = Column(BIGINT, ForeignKey("users.id"), nullable=True)
     modified_by_id = Column(BIGINT, ForeignKey("users.id"), nullable=True)
+    archived_at = Column(DateTime(timezone=True), nullable=True, index=True)
+    archived_by_id = Column(BIGINT, ForeignKey("users.id"), nullable=True, index=True)
     created_time = Column(DateTime(timezone=True), server_default=func.now())
     modified_time = Column(
         DateTime(timezone=True), onupdate=func.now(), server_default=func.now()
@@ -63,4 +65,7 @@ class Contact(Base):
     )
     modified_by = relationship(
         "User", foreign_keys=[modified_by_id], backref="contact_modified_by"
+    )
+    archived_by = relationship(
+        "User", foreign_keys=[archived_by_id], backref="contact_archived_by"
     )

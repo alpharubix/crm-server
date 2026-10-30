@@ -14,6 +14,17 @@ from src.models.revenue import Revenue
 
 def insert_revenue(user_id, user_role,data, db: Session):
     try:
+        deal_id = data.get("deal_id")
+        if deal_id:
+            from src.models.deal import Deal
+            deal = db.query(Deal).filter(Deal.id == int(deal_id)).first()
+            if not deal:
+                raise HTTPException(status_code=404, detail="Deal not found")
+            if deal.archived_at is not None:
+                raise HTTPException(status_code=400, detail="Cannot create revenue under an archived deal")
+            if deal.account and deal.account.archived_at is not None:
+                raise HTTPException(status_code=400, detail="Cannot create revenue under an archived account")
+
         revenue = Revenue()
 
         # assign values dynamically
@@ -109,6 +120,10 @@ def fetch_revenue(
 
         # ---------------- FILTERS ---------------- #
 
+        from src.utility.archive_visibility import active_revenue_condition, is_super_admin
+        if not revenue_id:
+            filters.append(active_revenue_condition())
+
         if revenue_id:
             filters.append(Revenue.id == revenue_id)
             single_id_request = True
@@ -175,6 +190,16 @@ def fetch_revenue(
                 .limit(limit)
                 .all()
             )
+
+            if data:
+                rev_item = data[0]
+                is_archived = (
+                    rev_item.archived_at is not None
+                    or (rev_item.deal and rev_item.deal.archived_at is not None)
+                    or (rev_item.deal and rev_item.deal.account and rev_item.deal.account.archived_at is not None)
+                )
+                if is_archived and not is_super_admin(role):
+                    raise HTTPException(status_code=404, detail="Revenue not found")
 
             total_pages = math.ceil(total_data_size / limit)
 
@@ -256,6 +281,19 @@ def update_revenue_controller(
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Revenue not found"
+            )
+
+        if revenue.archived_at is not None:
+            raise HTTPException(
+                status_code=400,
+                detail="Cannot modify an archived revenue. Restore it first.",
+            )
+        if (revenue.deal and revenue.deal.archived_at is not None) or (
+            revenue.deal and revenue.deal.account and revenue.deal.account.archived_at is not None
+        ):
+            raise HTTPException(
+                status_code=400,
+                detail="Cannot modify revenue under an archived deal or account.",
             )
 
         update_data = data.dict(exclude_unset=True)

@@ -91,6 +91,11 @@ class Account(Base):
         order_by="desc(Deal.id)",
     )
 
+    # Archive Status (Independent Archiving)
+    archived_at = Column(DateTime(timezone=True), nullable=True, index=True)
+    archived_by_id = Column(BIGINT, ForeignKey("users.id"), nullable=True, index=True)
+    archived_by = relationship("User", foreign_keys=[archived_by_id], backref="archived_accounts")
+
     # ========== NEW COLUMNS (Add these at the end) ==========
     source_type = Column(String, nullable=True, index=True)
     source_other = Column(Text, nullable=True)

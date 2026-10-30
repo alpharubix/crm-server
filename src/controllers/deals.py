@@ -235,6 +235,10 @@ def get_deals(
         offset = (page - 1) * limit
         filters = []
 
+        from src.utility.archive_visibility import active_deal_condition, is_super_admin
+        if not deal_id:
+            filters.append(active_deal_condition())
+
         # 1. Role-Based Access Scoping
         allowed_owner_ids = None
         if user_id in MANAGERID.BYPASS_USER_IDS or user_role in ("super_admin", "admin"):
@@ -439,6 +443,17 @@ def get_deals(
             )
             if deals:
                 deal = deals[0]
+                # Check archive status: if deal or parent account is archived and user is not super_admin, block
+                is_archived = (
+                    deal.archived_at is not None
+                    or (deal.account and deal.account.archived_at is not None)
+                )
+                if is_archived and not is_super_admin(user_role):
+                    raise HTTPException(
+                        status_code=404,
+                        detail="Deal not found",
+                    )
+
                 ids_list = [str(deal.id)]
                 if getattr(deal, "crm_deal_id", None):
                     ids_list.append(str(deal.crm_deal_id))
@@ -454,9 +469,10 @@ def get_deals(
                 except Exception:
                     pass
 
-                tickets_records = (
-                    db.query(Ticket).filter(Ticket.deal_id == deal.id).all()
-                )
+                ticket_query = db.query(Ticket).filter(Ticket.deal_id == deal.id)
+                if not is_super_admin(user_role) or deal.archived_at is None:
+                    ticket_query = ticket_query.filter(Ticket.archived_at.is_(None))
+                tickets_records = ticket_query.all()
 
                 serialized_tickets = []
                 for ticket in tickets_records:
@@ -621,6 +637,13 @@ def get_deals(
 
 def create_deal(deal, db: Session, user_id, user_role):
     try:
+        if deal.account_id:
+            parent_acc = db.query(Account).filter(Account.id == deal.account_id).first()
+            if parent_acc and parent_acc.archived_at is not None:
+                raise HTTPException(
+                    status_code=400,
+                    detail={"message": "Cannot create deal under an archived account"},
+                )
 
         if deal.deal_call_back_datetime:
             cb_val = deal.deal_call_back_datetime
@@ -735,6 +758,17 @@ def update_deal_based_on_id(user_id, user_role, db: Session, deal_id: int, paylo
         db_deal = db.query(Deal).filter(Deal.id == deal_id).first()
         if not db_deal:
             raise HTTPException(status_code=404, detail={"msg": "Deal not found"})
+
+        if db_deal.archived_at is not None:
+            raise HTTPException(
+                status_code=400,
+                detail={"message": "Cannot modify an archived deal. Restore it first."},
+            )
+        if db_deal.account and db_deal.account.archived_at is not None:
+            raise HTTPException(
+                status_code=400,
+                detail={"message": "Cannot modify deal under an archived account."},
+            )
 
 
         DATE_COLS = {

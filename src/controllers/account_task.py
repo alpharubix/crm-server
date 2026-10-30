@@ -255,6 +255,11 @@ def create_account_task(db: Session, task_in: AccountTaskCreate, current_user_id
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Account with ID {task_in.account_id} not found",
         )
+    if account.archived_at is not None:
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot create task under an archived account",
+        )
 
     task = AccountTask(
         company_id=1,
@@ -421,6 +426,9 @@ def get_account_tasks(
             joinedload(AccountTask.created_by),
         )
     )
+
+    from src.utility.archive_visibility import active_account_task_condition
+    query = query.filter(active_account_task_condition())
 
     effective_cb_date = cb_date_condition or (
         call_back_status if call_back_status != "all" else None

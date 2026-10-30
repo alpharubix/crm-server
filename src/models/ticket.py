@@ -53,6 +53,9 @@ class Ticket(Base):
     # Audit & Tracking
     created_by = Column(BigInteger)
     modified_by = Column(BigInteger)
+    archived_at = Column(DateTime(timezone=True), nullable=True, index=True)
+    archived_by_id = Column(BIGINT, ForeignKey("users.id"), nullable=True, index=True)
+    archived_by = relationship("User", foreign_keys=[archived_by_id], backref="archived_tickets")
     created_at = Column(DateTime, nullable=False, server_default=func.now())
     updated_at = Column(DateTime, nullable=False, server_default=func.now(), onupdate=func.now())
 

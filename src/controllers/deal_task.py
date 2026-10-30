@@ -218,6 +218,16 @@ def create_deal_task(db: Session, task_in: DealTaskCreate, current_user_id: int)
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Deal with ID {task_in.deal_id} not found",
         )
+    if deal.archived_at is not None:
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot create task under an archived deal",
+        )
+    if deal.account and deal.account.archived_at is not None:
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot create task under an archived account",
+        )
 
     task = DealTask(
         company_id=1,
@@ -411,6 +421,9 @@ def get_deal_tasks(
             joinedload(DealTask.created_by),
         )
     )
+
+    from src.utility.archive_visibility import active_deal_task_condition
+    query = query.filter(active_deal_task_condition())
 
     effective_cb_date = cb_date_condition or (
         call_back_status if call_back_status != "all" else None

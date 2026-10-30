@@ -15,6 +15,15 @@ from .auth import MANAGERID
 
 
 def create_contact(db: Session, data: ContactBase, user_id: int, user_role: str):
+    if data.account_id:
+        from src.models.account import Account
+        parent_acc = db.query(Account).filter(Account.id == data.account_id).first()
+        if parent_acc and parent_acc.archived_at is not None:
+            raise HTTPException(
+                status_code=400,
+                detail="Cannot create contact under an archived account",
+            )
+
     new_contact = Contact(
         account_id=data.account_id,
         owner_id=user_id,
@@ -70,6 +79,10 @@ def get_all_contacts(
     offset = (page - 1) * limit
     query = db.query(Contact)
     filters = []
+
+    from src.utility.archive_visibility import active_contact_condition, is_super_admin
+    if not contact_id:
+        filters.append(active_contact_condition())
 
     user_id = request.state.user_id
     role = request.state.role
@@ -129,6 +142,12 @@ def get_all_contacts(
 
         if data:
             contact: Contact = data[0]
+            is_archived = (
+                contact.archived_at is not None
+                or (contact.parent_account and contact.parent_account.archived_at is not None)
+            )
+            if is_archived and not is_super_admin(role):
+                raise HTTPException(status_code=404, detail="Contact not found")
             # Build ids_list from the contact itself (extend here if
             # Contact gains related deals/accounts that also carry notes)
             ids_list = [str(contact.id)]
@@ -187,6 +206,17 @@ def update_contacts(request: Request, contact_id: int, body: dict, db: Session):
         contact = db.query(Contact).filter(Contact.id == contact_id).first()
         if not contact:
             raise HTTPException(status_code=404, detail={"msg": "No Contact found"})
+
+        if contact.archived_at is not None:
+            raise HTTPException(
+                status_code=400,
+                detail={"msg": "Cannot modify an archived contact. Restore it first."},
+            )
+        if contact.parent_account and contact.parent_account.archived_at is not None:
+            raise HTTPException(
+                status_code=400,
+                detail={"msg": "Cannot modify contact under an archived account."},
+            )
 
         for key, value in body.items():
             if value == "" or value is None:

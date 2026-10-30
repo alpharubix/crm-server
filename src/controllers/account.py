@@ -161,6 +161,12 @@ def update_account(
     if not db_account:
         raise HTTPException(status_code=404, detail={"msg": "Account not found"})
 
+    if db_account.archived_at is not None:
+        raise HTTPException(
+            status_code=400,
+            detail={"msg": "Cannot modify an archived account. Restore it first."},
+        )
+
     # Check if user has permission to update this account
     if user_role not in ("super_admin", "admin"):
         if user_role == "manager":
@@ -922,6 +928,11 @@ async def get_all_accounts(
     single_id_request = False
     allowed_owner_ids = None
 
+    from src.utility.archive_visibility import active_account_condition, is_super_admin
+    # In general list views, only show active (non-archived) accounts
+    if not single_id_request:
+        filters.append(active_account_condition())
+
     # Status & Period Subquery Filter
     if status_filter_name:
         sh_query = db.query(AccountStatusHistory.account_id).filter(
@@ -1397,6 +1408,10 @@ async def get_all_accounts(
                 filters.append(Account.account_owner_id.in_(owner_ids))
 
     if single_id_request:
+        # Check if the single account is archived and if the user is authorized to view it
+        if filters:
+            # If active_account_condition was added, remove it for single_id_request so Super Admin can inspect
+            filters = [f for f in filters if f is not active_account_condition()]
         base_query = query.filter(and_(*filters)) if filters else query
         total_data_size = base_query.count()
         data = (
@@ -1411,6 +1426,12 @@ async def get_all_accounts(
             .limit(limit)
             .all()
         )
+
+        if data and data[0].archived_at is not None and not is_super_admin(role):
+            raise HTTPException(
+                status_code=404,
+                detail="Account not found",
+            )
 
         def _deal_sort_key(d):
             dt = getattr(d, "updated_at", None) or getattr(d, "created_at", None)
@@ -1468,6 +1489,13 @@ async def get_all_accounts(
                         {"Parent_Id.id": str(deal.crm_deal_id), "module": "Deals"}
                     )
 
+            # Filter out archived deals and contacts if the viewer is not inspecting in archive mode
+            if not is_super_admin(role) or acc.archived_at is None:
+                acc.deals = [d for d in acc.deals if d.archived_at is None]
+                acc.account_linked_contact = [c for c in acc.account_linked_contact if c.archived_at is None]
+            
+            deal_ids_for_tickets = [d.id for d in acc.deals]
+
             # Step 4: Query tickets, documents, and revenue for deal hierarchy
             tickets_by_deal: dict[int, list] = {}
             tickets_list: list = []
@@ -1483,11 +1511,10 @@ async def get_all_accounts(
                 }
 
                 # 4a. Tickets
-                ticket_records = (
-                    db.query(Ticket)
-                    .filter(Ticket.deal_id.in_(deal_ids_for_tickets))
-                    .all()
-                )
+                ticket_query = db.query(Ticket).filter(Ticket.deal_id.in_(deal_ids_for_tickets))
+                if not is_super_admin(role) or acc.archived_at is None:
+                    ticket_query = ticket_query.filter(Ticket.archived_at.is_(None))
+                ticket_records = ticket_query.all()
                 for ticket in ticket_records:
                     note_pairs.append(
                         {"Parent_Id.id": str(ticket.id), "module": "Tickets"}
@@ -1503,11 +1530,10 @@ async def get_all_accounts(
                     tickets_list.append(t_dict)
 
                 # 4b. Deal Documents
-                doc_records = (
-                    db.query(DealDocument)
-                    .filter(DealDocument.deal_id.in_(deal_ids_for_tickets))
-                    .all()
-                )
+                doc_query = db.query(DealDocument).filter(DealDocument.deal_id.in_(deal_ids_for_tickets))
+                if not is_super_admin(role) or acc.archived_at is None:
+                    doc_query = doc_query.filter(DealDocument.archived_at.is_(None))
+                doc_records = doc_query.all()
                 for doc in doc_records:
                     d_dict = {
                         c.name: getattr(doc, c.name) for c in doc.__table__.columns
@@ -1518,11 +1544,10 @@ async def get_all_accounts(
                     documents_list.append(d_dict)
 
                 # 4c. Revenue
-                rev_records = (
-                    db.query(Revenue)
-                    .filter(Revenue.deal_id.in_(deal_ids_for_tickets))
-                    .all()
-                )
+                rev_query = db.query(Revenue).filter(Revenue.deal_id.in_(deal_ids_for_tickets))
+                if not is_super_admin(role) or acc.archived_at is None:
+                    rev_query = rev_query.filter(Revenue.archived_at.is_(None))
+                rev_records = rev_query.all()
                 for rev in rev_records:
                     r_dict = {
                         c.name: getattr(rev, c.name) for c in rev.__table__.columns
@@ -1637,9 +1662,12 @@ async def get_all_accounts(
         }
 
 
-def get_account_by_id(db: Session, account_id: int) -> Account:
+def get_account_by_id(db: Session, account_id: int, user_role: str | None = None) -> Account:
     account = db.query(Account).filter(Account.id == account_id).first()
     if not account:
+        raise HTTPException(status_code=404, detail="Account not found")
+    from src.utility.archive_visibility import is_super_admin
+    if account.archived_at is not None and not is_super_admin(user_role):
         raise HTTPException(status_code=404, detail="Account not found")
     journeys_map = build_batch_status_journeys(db, [account.id])
     j_list = journeys_map.get(account.id, [])

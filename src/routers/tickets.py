@@ -279,6 +279,9 @@ def get_tickets_list(
 
     filters = []
 
+    from src.utility.archive_visibility import active_ticket_condition
+    filters.append(active_ticket_condition())
+
     if deal_id:
         filters.append(Ticket.deal_id == deal_id)
     if ticket_status:
@@ -435,6 +438,14 @@ async def create_ticket(request: Request, db: Session = Depends(get_db)):
 
     if "deal_id" not in body:
         raise HTTPException(status_code=400, detail="deal_id is required")
+
+    deal_record = db.query(Deal).filter(Deal.id == int(body["deal_id"])).first()
+    if not deal_record:
+        raise HTTPException(status_code=404, detail="Deal not found")
+    if deal_record.archived_at is not None:
+        raise HTTPException(status_code=400, detail="Cannot create ticket under an archived deal")
+    if deal_record.account and deal_record.account.archived_at is not None:
+        raise HTTPException(status_code=400, detail="Cannot create ticket under an archived account")
 
     allowed_fields = {
         "deal_id",
@@ -619,6 +630,19 @@ async def update_ticket(
 
     if not ticket:
         raise HTTPException(status_code=404, detail="Ticket not found")
+
+    if ticket.archived_at is not None:
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot modify an archived ticket. Restore it first.",
+        )
+    if (ticket.deal and ticket.deal.archived_at is not None) or (
+        ticket.account and ticket.account.archived_at is not None
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot modify ticket under an archived deal or account.",
+        )
 
     # Capture the historical login state before the payload write loop modifies memory space
     old_ticket_login = ticket.ticket_login
@@ -848,6 +872,16 @@ def get_ticket(
     if not ticket:
         raise HTTPException(status_code=404, detail="Ticket not found")
 
+    user_role = getattr(request.state, "role", None)
+    from src.utility.archive_visibility import is_super_admin
+    is_archived = (
+        ticket.archived_at is not None
+        or (ticket.deal and ticket.deal.archived_at is not None)
+        or (ticket.account and ticket.account.archived_at is not None)
+    )
+    if is_archived and not is_super_admin(user_role):
+        raise HTTPException(status_code=404, detail="Ticket not found")
+
     result = format_ticket(ticket)
     j_list = build_batch_ticket_status_journeys(db, [ticket_id]).get(ticket_id, [])
     result["status_journey"] = j_list
@@ -866,6 +900,19 @@ def delete_ticket(ticket_id: int, request: Request, db: Session = Depends(get_db
 
     if not ticket:
         raise HTTPException(status_code=404, detail="Ticket not found")
+
+    if ticket.archived_at is not None:
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot delete an archived ticket. Restore it first.",
+        )
+    if (ticket.deal and ticket.deal.archived_at is not None) or (
+        ticket.account and ticket.account.archived_at is not None
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot delete ticket under an archived deal or account.",
+        )
 
     db.delete(ticket)
     db.commit()

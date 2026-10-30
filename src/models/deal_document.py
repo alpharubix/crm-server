@@ -20,7 +20,10 @@ class DealDocument(Base):
 
     created_by = Column(BIGINT, nullable=True)
     modified_by = Column(BIGINT, nullable=True)
+    archived_at = Column(DateTime(timezone=True), nullable=True, index=True)
+    archived_by_id = Column(BIGINT, ForeignKey("users.id"), nullable=True, index=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
     deal = relationship("Deal", back_populates="documents")
+    archived_by = relationship("User", foreign_keys=[archived_by_id], backref="archived_deal_documents")

@@ -118,8 +118,14 @@ def format_doc(d: DealDocument) -> dict:
 
 @deal_docs_router.get("")
 @deal_docs_router.get("/")
-def get_documents(deal_id: int, db: Session = Depends(get_db)):
-    docs = db.query(DealDocument).filter(DealDocument.deal_id == deal_id).all()
+def get_documents(deal_id: int, request: Request, db: Session = Depends(get_db)):
+    user_role = getattr(request.state, "role", None)
+    from src.utility.archive_visibility import is_super_admin
+    query = db.query(DealDocument).filter(DealDocument.deal_id == deal_id)
+    if not is_super_admin(user_role):
+        from src.utility.archive_visibility import active_deal_document_condition
+        query = query.filter(active_deal_document_condition())
+    docs = query.all()
     return {"data": [format_doc(d) for d in docs]}
 
 
@@ -128,6 +134,14 @@ def get_documents(deal_id: int, db: Session = Depends(get_db)):
 async def create_document(
     deal_id: int, request: Request, db: Session = Depends(get_db)
 ):
+    deal = db.query(Deal).filter(Deal.id == deal_id).first()
+    if not deal:
+        raise HTTPException(status_code=404, detail="Deal not found")
+    if deal.archived_at is not None:
+        raise HTTPException(status_code=400, detail="Cannot create document under an archived deal")
+    if deal.account and deal.account.archived_at is not None:
+        raise HTTPException(status_code=400, detail="Cannot create document under an archived account")
+
     body = await request.json()
     sanitized_body = {k: (v if v != "" else None) for k, v in body.items()}
 
@@ -170,6 +184,13 @@ async def update_document(
     )
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
+
+    if doc.archived_at is not None:
+        raise HTTPException(status_code=400, detail="Cannot modify an archived document. Restore it first.")
+    if (doc.deal and doc.deal.archived_at is not None) or (
+        doc.deal and doc.deal.account and doc.deal.account.archived_at is not None
+    ):
+        raise HTTPException(status_code=400, detail="Cannot modify document under an archived deal or account.")
 
     body = await request.json()
 

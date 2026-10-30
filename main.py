@@ -34,6 +34,7 @@ from src.routers.revenue import revenue_router
 from src.routers.support_tickets import support_tickets_router
 from src.routers.tickets import tickets_router
 from src.routers.webhook import webhook_api_router
+from src.routers.archive import router as archive_router
 from src.whatsapp.router import inbox_router, webhook_router
 
 from src.models.whatsapp_response import WhatsAppTemplateResponse  # noqa: F401
@@ -69,6 +70,33 @@ try:
                 "ALTER TABLE tickets_merged ADD COLUMN IF NOT EXISTS ticket_call_back_datetime TIMESTAMP WITH TIME ZONE;"
             )
         )
+        # Archive columns for production tables
+        archive_tables = [
+            "accounts_merged",
+            "deals_merged",
+            "contacts_merged",
+            "tickets_merged",
+            "revenue_merged",
+            "deal_documents_merged",
+            "account_tasks",
+            "deal_tasks",
+        ]
+        for tbl in archive_tables:
+            conn.execute(
+                text(
+                    f"ALTER TABLE {tbl} ADD COLUMN IF NOT EXISTS archived_at TIMESTAMP WITH TIME ZONE;"
+                )
+            )
+            conn.execute(
+                text(
+                    f"ALTER TABLE {tbl} ADD COLUMN IF NOT EXISTS archived_by_id BIGINT;"
+                )
+            )
+            conn.execute(
+                text(
+                    f"CREATE INDEX IF NOT EXISTS ix_{tbl}_archived_at ON {tbl} (archived_at);"
+                )
+            )
         conn.commit()
 except Exception:
     pass
@@ -145,6 +173,7 @@ app.include_router(candidate_router)
 app.include_router(jr_router)
 app.include_router(revenue_router)
 app.include_router(webhook_api_router)
+app.include_router(archive_router)
 app.include_router(support_tickets_router)
 app.include_router(invoice_router)
 app.include_router(tele_crm_router.router, prefix="/tele-crm")

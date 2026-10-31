@@ -889,6 +889,7 @@ async def get_all_accounts(
     is_priority_account: str | None = None,
     is_active: str | None = None,
     business_status: list[str] | str | None = None,
+    phone_status: list[str] | None = None,
     call_back_date_time: datetime | None = None,
     account_owner_id: list[int] | None = None,
     phone_number: str | None = None,
@@ -1157,6 +1158,19 @@ async def get_all_accounts(
         ]
         if bs_list:
             filters.append(Account.business_status.in_(bs_list))
+
+    # Phone Status Filter - supports multiple statuses with OR logic
+    if phone_status:
+        ps_list = [
+            s.strip()
+            for s in (phone_status if isinstance(phone_status, list) else [phone_status])
+            if s and s.strip()
+        ]
+        if ps_list:
+            # Use || (concat) or @> (contains) operator for array matching
+            # For OR logic across multiple statuses in a TEXT[] column:
+            # Use a raw SQL condition with && operator for PostgreSQL array overlap
+            filters.append(Account.phone_status.op('&&')(ps_list))
 
     # Created Date (from_date / to_date) Filter Section
     if not module and (from_date or to_date):
@@ -1584,6 +1598,7 @@ async def get_all_accounts(
                 Account.is_priority_account,
                 Account.source_date,
                 Account.source_type,
+                Account.phone_status,
                 Account.assignment_date,
                 Account.modified_time,
             )
@@ -1616,6 +1631,7 @@ async def get_all_accounts(
                     "is_priority_account",
                     "source_date",
                     "source_type",
+                    "phone_status",
                     "assignment_date",
                     "modified_time",
                 ]

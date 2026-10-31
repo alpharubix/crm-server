@@ -156,6 +156,9 @@ class AccountBase(BaseModel):
     # Customer Salary Details — optional; frontend enforces when profile_type = "Salaried"
     customer_salary_details: Optional[Dict[str, Any]] = Field(default_factory=dict)
 
+    # Phone Status — PostgreSQL TEXT[] array
+    phone_status: Optional[List[str]] = Field(default_factory=list)
+
     @field_validator("pincode", mode="before")
     @classmethod
     def validate_pincode(cls, value):
@@ -249,6 +252,9 @@ class AccountResponse(BaseModel):
 
     # Customer Salary Details — optional; frontend enforces when profile_type = "Salaried"
     customer_salary_details: Optional[Dict[str, Any]] = Field(default_factory=dict)
+
+    # Phone Status — PostgreSQL TEXT[] array
+    phone_status: Optional[List[str]] = Field(default_factory=list)
 
     # Account Status Journey
     status_journey: Optional[List[AccountStatusJourneyItem]] = Field(default_factory=list)

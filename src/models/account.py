@@ -9,7 +9,7 @@ from sqlalchemy import (
     Text,
     Date,
 )
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import JSONB, ARRAY
 
 # models/account.py - Only the changes needed
 from sqlalchemy.ext.hybrid import hybrid_property
@@ -109,6 +109,9 @@ class Account(Base):
 
     # Customer Salary Details — displayed only when profile_type = "Salaried"
     customer_salary_details = Column(JSONB, default={}, nullable=True)
+
+    # Phone Status — PostgreSQL TEXT[] array
+    phone_status = Column(ARRAY(Text), default=[], nullable=False)
 
     # ========== HYBRID PROPERTIES ==========
     @hybrid_property

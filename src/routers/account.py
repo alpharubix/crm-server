@@ -134,6 +134,15 @@ def get_status_history(account_id: int, page: int = 1, db: Session = Depends(get
     return repo.get_account_status_history(db, account_id, page)
 
 
+@router.get("/{account_id}/duplicates")
+def get_account_duplicates(
+    account_id: int,
+    type: str | None = Query(default=None),
+    db: Session = Depends(get_db),
+):
+    return repo.get_duplicate_accounts(db=db, account_id=account_id, status_type=type)
+
+
 @router.post("/accounts-reassignment-csv-upload")
 async def upload_accounts_csv(
     file: UploadFile = File(...), db: Session = Depends(get_db)

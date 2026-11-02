@@ -2,6 +2,7 @@ import csv
 import io
 import logging
 import math
+import re
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -1636,6 +1637,10 @@ async def get_all_accounts(
                     "modified_time",
                 ]
             }
+            if item_dict.get("id") is not None:
+                item_dict["id"] = str(item_dict["id"])
+            if item_dict.get("account_owner_id") is not None:
+                item_dict["account_owner_id"] = str(item_dict["account_owner_id"])
             j_list = journeys_map.get(r.id, [])
             item_dict["status_journey"] = j_list
             item_dict["journey"] = j_list
@@ -1965,3 +1970,89 @@ async def update_accounts_based_on_csv(file, db: Session, user_id: int, user_rol
             status_code=500,
             content={"detail": f"Processing error: {e!s}", "row_errors": error_list},
         )
+
+
+def get_duplicate_accounts(db: Session, account_id: int, status_type: str | None = None):
+    """
+    Fetch corresponding duplicate accounts for an account based on phone / email matching.
+    """
+    account = db.query(Account).filter(Account.id == account_id).first()
+    if not account:
+        raise HTTPException(status_code=404, detail="Account not found")
+
+    phone = (account.phone or "").strip()
+    email = (account.email or "").strip().lower()
+
+    if not phone and not email:
+        return []
+
+    # Clean 10 digits for phone comparison
+    clean_digits = re.sub(r"[^0-9]", "", phone)
+    phone_10 = clean_digits[-10:] if len(clean_digits) >= 10 else None
+
+    # Base query for accounts excluding self
+    query = db.query(Account).filter(Account.id != account_id)
+
+    conditions = []
+    if phone:
+        conditions.append(Account.phone == phone)
+        if phone_10:
+            conditions.append(func.right(func.regexp_replace(Account.phone, r'[^0-9]', '', 'g'), 10) == phone_10)
+
+    if status_type in ("duplicate_phone_email",):
+        # Must match phone and email
+        if not phone or not email:
+            return []
+        phone_cond = or_(*conditions) if conditions else False
+        email_cond = func.lower(func.trim(Account.email)) == email
+        matched_accounts = query.filter(and_(phone_cond, email_cond)).all()
+
+    elif status_type in ("duplicate_phone_different_email",):
+        # Match phone, different email
+        if not phone:
+            return []
+        phone_cond = or_(*conditions) if conditions else False
+        email_cond = or_(
+            Account.email.is_(None),
+            func.trim(Account.email) == "",
+            func.lower(func.trim(Account.email)) != email,
+        )
+        matched_accounts = query.filter(and_(phone_cond, email_cond)).all()
+
+    elif status_type in ("duplicate_email_different_phone",):
+        # Match email, different phone
+        if not email:
+            return []
+        email_cond = func.lower(func.trim(Account.email)) == email
+        if conditions:
+            phone_cond = not_(or_(*conditions))
+            matched_accounts = query.filter(and_(email_cond, phone_cond)).all()
+        else:
+            matched_accounts = query.filter(email_cond).all()
+
+    else:
+        # Default: match phone or email
+        or_conds = []
+        if conditions:
+            or_conds.append(or_(*conditions))
+        if email:
+            or_conds.append(func.lower(func.trim(Account.email)) == email)
+        if not or_conds:
+            return []
+        matched_accounts = query.filter(or_(*or_conds)).all()
+
+    result = []
+    for acc in matched_accounts:
+        owner_name = acc.owner.full_name if acc.owner else "—"
+        result.append({
+            "id": str(acc.id),
+            "account_name": acc.account_name or f"Account #{acc.id}",
+            "phone": acc.phone or "—",
+            "email": acc.email or "—",
+            "account_owner": owner_name,
+            "account_stage": acc.account_stage or "—",
+            "account_status": acc.account_status or "—",
+            "phone_status": acc.phone_status or [],
+            "created_time": acc.created_time.isoformat() if acc.created_time else None,
+        })
+    return result

@@ -27,6 +27,7 @@ KNOWN_USERS = {
     "3899927000000318361": "Namrata Srivastava",
     "3899927000000221552": "Sarada",
     "3899927000000527649": "Ambika",
+    "3899927000000350987": "Anushree GN",
     "1": "Anslem Prathap",
     "2": "Namrata Srivastava",
     "3": "Ravi Kumar",

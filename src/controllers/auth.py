@@ -64,7 +64,6 @@ class MANAGERID:
             3899927000005965050,  # Sahil
             3899927000000221552,  # Sarada
             3899927000000452950,  # Vinod
-            3899927000000527649,  # Ambika
             3899927000000580845,  # Santhosh Kumar S
             3899927000000433736,  # "Niteen Bhausaheb Bansode"
             3899927000000631533,  # Sachin Vitthal Jadhav
@@ -93,27 +92,27 @@ class MANAGERID:
             3899927000000154963,  # Santosh Yoganand Pawar
         ],
         # Anushree
-        3899927000000350987: [
-            3899927000000350987,  # Anushree
-            3899927000000319812,  # Ashwini R
-            3899927000000240595,  # Chiranjeevi B S
-            3899927000000498931,  # Karthik H M
-            3899927000000647914,  # Prajwal G P
-            3899927000000208140,  # Shivaraj P N
-            3899927000000488938,  # Nagaraj
-            3899927000005965018,  # Arjun
-            3899927000004429017,  # Sandeep
-            3899927000004808001,  # Ayush
-            3899927000007673012,  # Honappa
-            3899927000000795843,  # Prashanth
-            3899927000005114004,  # Manjunath
-            3899927000005114020,  # Digamber
-            3899927000005965050,  # Sahil
-            3899927000000452950,  # Vinod
-            3899927000000433736,  # "Niteen Bhausaheb Bansode"
-            3899927000000631533,  # Sachin Vitthal Jadhav
-            3899927000000154963,  # Santosh Yoganand Pawar
-        ],
+        # 3899927000000350987: [
+        #     3899927000000350987,  # Anushree
+        #     3899927000000319812,  # Ashwini R
+        #     3899927000000240595,  # Chiranjeevi B S
+        #     3899927000000498931,  # Karthik H M
+        #     3899927000000647914,  # Prajwal G P
+        #     3899927000000208140,  # Shivaraj P N
+        #     3899927000000488938,  # Nagaraj
+        #     3899927000005965018,  # Arjun
+        #     3899927000004429017,  # Sandeep
+        #     3899927000004808001,  # Ayush
+        #     3899927000007673012,  # Honappa
+        #     3899927000000795843,  # Prashanth
+        #     3899927000005114004,  # Manjunath
+        #     3899927000005114020,  # Digamber
+        #     3899927000005965050,  # Sahil
+        #     3899927000000452950,  # Vinod
+        #     3899927000000433736,  # "Niteen Bhausaheb Bansode"
+        #     3899927000000631533,  # Sachin Vitthal Jadhav
+        #     3899927000000154963,  # Santosh Yoganand Pawar
+        # ],
         # Sutapa Roy
         3899927000005114050: [
             3899927000000240595,  # Chiranjeevi B S

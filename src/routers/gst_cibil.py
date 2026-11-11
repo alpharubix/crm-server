@@ -122,6 +122,109 @@ async def get_gst_cibil_reports(
             status_code=500, detail=f"Failed to fetch reports: {str(e)}"
         )
 
+@router.get("/tracker")
+async def get_gst_reference_tracker(
+    db: Database = Depends(get_leads_gst_cibil_database),
+    search: Optional[str] = Query(None, description="Search by GSTIN or Reference ID"),
+    status: Optional[str] = Query(None, description="Filter by report_status"),
+    limit: int = Query(100, ge=1, le=500),
+    skip: int = Query(0, ge=0),
+):
+    """
+    Get all uploaded GST numbers status from gst_reference_tracker collection
+    """
+    try:
+        query = {}
+        conditions = []
+
+        if search and search.strip():
+            escaped_term = re.escape(search.strip())
+            conditions.append({
+                "$or": [
+                    {"gstin": {"$regex": escaped_term, "$options": "i"}},
+                    {"reference_id": {"$regex": escaped_term, "$options": "i"}},
+                ]
+            })
+
+        if status and status.strip() and status.upper() != "ALL":
+            conditions.append({"report_status": status.strip()})
+
+        if conditions:
+            query = {"$and": conditions} if len(conditions) > 1 else conditions[0]
+
+        cursor = (
+            db["gst_reference_tracker"]
+            .find(query)
+            .sort("_id", -1)
+            .skip(skip)
+            .limit(limit)
+        )
+
+        results = []
+        for doc in cursor:
+            created_at_val = doc.get("created_at")
+            updated_at_val = doc.get("updated_at")
+            completed_at_val = doc.get("completed_at")
+
+            # Extract any human-readable error if present
+            last_err = doc.get("last_error")
+            err_msg = None
+            if isinstance(last_err, dict):
+                err_msg = last_err.get("error") or str(last_err)
+            elif last_err:
+                err_msg = str(last_err)
+
+            # Check if lifecycle events have error
+            if not err_msg and doc.get("lifecycle_events"):
+                events = doc.get("lifecycle_events") or []
+                for ev in reversed(events):
+                    if ev.get("error"):
+                        ev_err = ev.get("error")
+                        if isinstance(ev_err, dict) and ev_err.get("error"):
+                            err_msg = ev_err.get("error")
+                            break
+                        elif isinstance(ev_err, str):
+                            err_msg = ev_err
+                            break
+
+            results.append({
+                "id": str(doc["_id"]),
+                "gstin": doc.get("gstin") or "",
+                "reference_id": doc.get("reference_id") or "",
+                "report_status": doc.get("report_status") or "PENDING",
+                "request_stage": doc.get("request_stage") or "PENDING",
+                "retry_count": doc.get("retry_count", 0),
+                "created_at": created_at_val.isoformat() if hasattr(created_at_val, "isoformat") else str(created_at_val or ""),
+                "updated_at": updated_at_val.isoformat() if hasattr(updated_at_val, "isoformat") else str(updated_at_val or ""),
+                "completed_at": completed_at_val.isoformat() if hasattr(completed_at_val, "isoformat") else str(completed_at_val or ""),
+                "error_message": err_msg,
+                "source_url": doc.get("source_url"),
+                "lifecycle_events": [
+                    {
+                        "stage": ev.get("stage"),
+                        "timestamp": ev.get("timestamp").isoformat() if hasattr(ev.get("timestamp"), "isoformat") else str(ev.get("timestamp") or ""),
+                        "details": ev.get("details"),
+                        "has_error": bool(ev.get("error")),
+                    }
+                    for ev in (doc.get("lifecycle_events") or [])
+                ],
+            })
+
+        total_count = db["gst_reference_tracker"].count_documents(query)
+
+        return {
+            "code": "SUCCESS",
+            "message": "Reference tracker list fetched successfully",
+            "data": results,
+            "total": total_count,
+        }
+    except Exception as e:
+        logger.exception("Error fetching GST reference tracker: %s", e)
+        raise HTTPException(
+            status_code=500, detail=f"Failed to fetch reference tracker: {str(e)}"
+        )
+
+
 @router.get("/{reference_id}")
 async def get_gst_cibil_report_by_reference_id(
     reference_id: str,

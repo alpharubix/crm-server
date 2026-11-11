@@ -27,6 +27,7 @@ from src.routers.authentication import authentication_router
 from src.routers.deal_documents import deal_docs_router
 from src.routers.deals import deals_router
 from src.routers.export_csv import export_csv_router
+from src.routers.gst_cibil import router as gst_cibil_router
 from src.routers.hiring import candidate_router, jr_router
 from src.routers.invoicing_route import invoice_router
 from src.routers.notes import notes_router
@@ -150,6 +151,7 @@ app.include_router(invoice_router)
 app.include_router(tele_crm_router.router, prefix="/tele-crm")
 app.include_router(webhook_router)
 app.include_router(inbox_router)
+app.include_router(gst_cibil_router)
 
 
 @app.get("/")

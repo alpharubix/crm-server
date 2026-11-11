@@ -44,6 +44,14 @@ def get_master_invoice_database():
         raise e
 
 
+def get_leads_gst_cibil_database():
+    db = monogodb["leads_gst_cibil_report"]
+    try:
+        yield db
+    except Exception as e:
+        raise e
+
+
 # --- Asynchronous MongoDB Setup (WhatsApp Module) ---
 _async_client: AsyncMongoClient | None = None
 

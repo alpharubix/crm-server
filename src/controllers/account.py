@@ -883,8 +883,8 @@ async def get_all_accounts(
     source_type: list[str] | None = None,
     type_of_business: str | None = None,
     industry: list[str] | None = None,
-    city: str | None = None,
-    state: str | None = None,
+    city: list[str] | str | None = None,
+    state: list[str] | str | None = None,
     pincode: str | None = None,
     waba_interested: str | bool | None = None,
     is_priority_account: str | None = None,
@@ -1130,9 +1130,19 @@ async def get_all_accounts(
         if industry_list:
             filters.append(or_(*[Account.industry.ilike(ind) for ind in industry_list]))
     if city:
-        filters.append(Account.city.ilike(f"%{city.strip()}%"))
+        if isinstance(city, str):
+            city_list = [c.strip() for c in city.split(",") if c and c.strip()]
+        else:
+            city_list = [c.strip() for c in city if c and c.strip()]
+        if city_list:
+            filters.append(or_(*[Account.city.ilike(f"%{c}%") for c in city_list]))
     if state:
-        filters.append(Account.state.ilike(f"%{state.strip()}%"))
+        if isinstance(state, str):
+            state_list = [s.strip() for s in state.split(",") if s and s.strip()]
+        else:
+            state_list = [s.strip() for s in state if s and s.strip()]
+        if state_list:
+            filters.append(or_(*[Account.state.ilike(f"%{s}%") for s in state_list]))
     if pincode:
         filters.append(Account.pincode == pincode)
     if waba_interested is not None:

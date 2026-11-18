@@ -33,9 +33,9 @@ def create(request: Request, data: AccountBase, db: Session = Depends(get_db)):
 @router.get("", response_model=GetlistAccountResponse)
 async def list_all(
     request: Request,
-    city: str | None = None,
+    city: list[str] | str | None = Query(default=None),
     page: int = 1,
-    state: str | None = None,
+    state: list[str] | str | None = Query(default=None),
     db: Session = Depends(get_db),
     mongodb=Depends(get_mongodb),
     account_stage: list[str] | None = Query(default=None),

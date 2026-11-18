@@ -235,7 +235,7 @@ async def get_gst_cibil_reports(
                     "request_stage": doc.get("tracker_request_stage") or "PENDING",
                     "bureau_rating": bureau.get("rating") or "Not Available",
                     "last_updated": meta.get("generated_at") or "N/A",
-                    "account_id": acc_info["account_id"] if acc_info else None,
+                    "account_id": str(acc_info["account_id"]) if acc_info else None,
                     "account_name": acc_info["account_name"] if acc_info else "No Account",
                 }
             )
@@ -257,7 +257,7 @@ async def get_gst_reference_tracker(
     db: Database = Depends(get_leads_gst_cibil_database),
     search: Optional[str] = Query(None, description="Search by GSTIN or Reference ID"),
     status: Optional[str] = Query(None, description="Filter by report_status"),
-    limit: int = Query(100, ge=1, le=500),
+    limit: int = Query(1000, ge=1, le=5000),
     skip: int = Query(0, ge=0),
 ):
     """
@@ -355,6 +355,20 @@ async def get_gst_reference_tracker(
         )
 
 
+def _stringify_numeric_values(data):
+    """
+    Recursively converts integer and float numbers into strings so the API
+    response returns string values instead of numeric types.
+    """
+    if isinstance(data, dict):
+        return {k: _stringify_numeric_values(v) for k, v in data.items()}
+    elif isinstance(data, list):
+        return [_stringify_numeric_values(item) for item in data]
+    elif isinstance(data, (int, float)) and not isinstance(data, bool):
+        return str(data)
+    return data
+
+
 @router.get("/{reference_id}")
 async def get_gst_cibil_report_by_reference_id(
     reference_id: str,
@@ -407,13 +421,16 @@ async def get_gst_cibil_report_by_reference_id(
             except Exception as acc_err:
                 logger.warning("Error resolving account for phone %s: %s", clean_mobile, acc_err)
 
-        doc["account_id"] = account_info["account_id"] if account_info else None
-        doc["account_name"] = account_info["account_name"] if account_info else "No Account"
+        doc["account_id"] = str(account_info["account_id"]) if account_info else None
+        doc["account_name"] = str(account_info["account_name"]) if account_info else "No Account"
+
+        # Convert all int/float numeric values to string across the document
+        serialized_doc = _stringify_numeric_values(doc)
 
         return {
             "code": "SUCCESS",
             "message": "Report details fetched successfully",
-            "data": doc,
+            "data": serialized_doc,
         }
     except HTTPException:
         raise

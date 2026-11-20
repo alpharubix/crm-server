@@ -107,6 +107,7 @@ def list_candidates(
     location_city: Optional[str] = None,
     industry: Optional[str] = None,
     assignee_id: Optional[int] = None,
+    phone_no: Optional[str] = None,
     db: Session = Depends(get_db),
     mongodb=Depends(get_mongodb),
 ):
@@ -122,6 +123,7 @@ def list_candidates(
         location_city=location_city,
         industry=industry,
         assignee_id=assignee_id,
+        phone_no=phone_no,
     )
 
 

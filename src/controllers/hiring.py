@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
 from fastapi import HTTPException
-from sqlalchemy import and_
+from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session, selectinload
 from starlette.requests import Request
 
@@ -333,6 +333,7 @@ def get_all_candidates(
     industry: Optional[str] = None,
     assignee_id: Optional[int] = None,
     job_requirement_id: Optional[int] = None,
+    phone_no: Optional[str] = None,
 ):
     limit = 30
     offset = (page - 1) * limit
@@ -346,7 +347,17 @@ def get_all_candidates(
     if candidate_name:
         filters.append(Candidate.candidate_name.ilike(f"%{candidate_name.strip()}%"))
     if candidate_status:
-        filters.append(Candidate.candidate_status == candidate_status.strip())
+        if candidate_status.strip() == "Rejected":
+            filters.append(
+                or_(
+                    Candidate.candidate_status == "Rejected",
+                    Candidate.candidate_status == "Fully Rejected",
+                )
+            )
+        else:
+            filters.append(Candidate.candidate_status == candidate_status.strip())
+    if phone_no:
+        filters.append(Candidate.phone_no.ilike(f"%{phone_no.strip()}%"))
     if location_city:
         filters.append(Candidate.location_city.ilike(f"%{location_city.strip()}%"))
     if industry:

@@ -743,6 +743,41 @@ class WhatsAppService:
             ]
             sanitized_components = valid_comps if valid_comps else None
 
+        # Auto-fill header image if template requires an image header and caller didn't provide one
+        has_header = False
+        if sanitized_components:
+            for c in sanitized_components:
+                if isinstance(c, dict) and c.get("type") == "header":
+                    has_header = True
+                    break
+
+        if not has_header:
+            try:
+                # Use uploaded Media ID for full official R1Xchange logo
+                header_media_id = "1522132473058807"
+                tmpl_info = await self.repo.get_template(
+                    waba_id=phone_id,
+                    name=template_name,
+                    language=effective_language,
+                )
+                if tmpl_info:
+                    for comp in tmpl_info.get("components", []):
+                        if comp.get("type") == "HEADER" and comp.get("format") == "IMAGE":
+                            header_comp = {
+                                "type": "header",
+                                "parameters": [
+                                    {
+                                        "type": "image",
+                                        "image": {"id": header_media_id},
+                                    }
+                                ],
+                            }
+                            sanitized_components = sanitized_components or []
+                            sanitized_components.insert(0, header_comp)
+                            break
+            except Exception as e:
+                logger.warning(f"Could not auto-populate template header image: {e}")
+
         # 3. Send via Meta Cloud API
         meta_response = await meta_client.send_template_message(
             to_phone=clean_phone,

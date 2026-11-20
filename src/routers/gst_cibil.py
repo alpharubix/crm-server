@@ -1,7 +1,7 @@
 import logging
 import re
 from typing import Optional
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Body
 from pymongo.database import Database
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
@@ -31,7 +31,7 @@ async def get_gst_cibil_reports(
     search: Optional[str] = Query(None, description="Search by GSTIN or Trade Name"),
     phone: Optional[str] = Query(None, description="Filter by phone number (last 10 digits)"),
     account_id: Optional[int] = Query(None, description="Filter by Account ID"),
-    limit: int = Query(100, ge=1, le=500),
+    limit: int = Query(1000, ge=1, le=5000),
     skip: int = Query(0, ge=0),
 ):
     """
@@ -146,6 +146,7 @@ async def get_gst_cibil_reports(
                     "report.entity.status": 1,
                     "report.bureau.rating": 1,
                     "report.report.generated_at": 1,
+                    "report.facilities": 1,
                     # Pull report_status from the matched tracker document
                     "tracker_report_status": "$tracker_data.report_status",
                     "tracker_request_stage": "$tracker_data.request_stage",
@@ -161,6 +162,8 @@ async def get_gst_cibil_reports(
             single_acc_data = {
                 "account_id": matched_account_obj.id,
                 "account_name": matched_account_obj.account_name,
+                "distributor_code": matched_account_obj.distributor_code,
+                "business_status": matched_account_obj.business_status,
             }
         else:
             single_acc_data = None
@@ -175,13 +178,15 @@ async def get_gst_cibil_reports(
             if report_phones_10:
                 try:
                     acc_conditions = [Account.phone.like(f"%{p}") for p in report_phones_10]
-                    matched_accs = sql_db.query(Account.id, Account.account_name, Account.phone).filter(or_(*acc_conditions)).all()
+                    matched_accs = sql_db.query(Account.id, Account.account_name, Account.distributor_code, Account.business_status, Account.phone).filter(or_(*acc_conditions)).all()
                     for acc in matched_accs:
                         cp = extract_last_10_digits(acc.phone)
                         if cp and cp not in phone_to_account:
                             phone_to_account[cp] = {
                                 "account_id": acc.id,
                                 "account_name": acc.account_name,
+                                "distributor_code": acc.distributor_code,
+                                "business_status": acc.business_status,
                             }
 
                     remaining = report_phones_10 - set(phone_to_account.keys())
@@ -191,7 +196,7 @@ async def get_gst_cibil_reports(
                             ct_conditions.extend([Contact.mobile.like(f"%{p}"), Contact.phone.like(f"%{p}")])
                         if ct_conditions:
                             matched_contacts = (
-                                sql_db.query(Contact.mobile, Contact.phone, Account.id, Account.account_name)
+                                sql_db.query(Contact.mobile, Contact.phone, Account.id, Account.account_name, Account.distributor_code, Account.business_status)
                                 .select_from(Contact)
                                 .join(Account, Contact.account_id == Account.id)
                                 .filter(or_(*ct_conditions))
@@ -204,6 +209,8 @@ async def get_gst_cibil_reports(
                                         phone_to_account[cp] = {
                                             "account_id": ct.id,
                                             "account_name": ct.account_name,
+                                            "distributor_code": ct.distributor_code,
+                                            "business_status": ct.business_status,
                                         }
                 except Exception as acc_e:
                     logger.warning("Error resolving account details for reports batch: %s", acc_e)
@@ -223,11 +230,16 @@ async def get_gst_cibil_reports(
             else:
                 acc_info = phone_to_account.get(clean_m) if clean_m else None
 
+            facilities_list = report_data.get("facilities") or []
+            has_cibil = bool(facilities_list and len(facilities_list) > 0)
+
             results.append(
                 {
                     "id": str(doc["_id"]),
                     "gstin": doc.get("gstin") or entity.get("gstin") or "",
                     "name": entity.get("trade_name") or entity.get("legal_name") or "N/A",
+                    "trade_name": entity.get("trade_name") or "",
+                    "legal_name": entity.get("legal_name") or "",
                     "contact_number": raw_mobile or "N/A",
                     "reference_id": doc.get("reference_id") or "",
                     "entity_status": entity.get("status") or "Active",
@@ -237,6 +249,10 @@ async def get_gst_cibil_reports(
                     "last_updated": meta.get("generated_at") or "N/A",
                     "account_id": str(acc_info["account_id"]) if acc_info else None,
                     "account_name": acc_info["account_name"] if acc_info else "No Account",
+                    "distributor_code": (acc_info.get("distributor_code") or "") if acc_info else "",
+                    "business_status": (acc_info.get("business_status") or "") if acc_info else "",
+                    "facilities_count": len(facilities_list),
+                    "has_cibil_data": has_cibil,
                 }
             )
 
@@ -369,6 +385,141 @@ def _stringify_numeric_values(data):
     return data
 
 
+@router.post("/export-facilities")
+async def get_export_facilities_by_references(
+    payload: dict = Body(...),
+    db: Database = Depends(get_leads_gst_cibil_database),
+    sql_db: Session = Depends(get_db),
+):
+    """
+    Given a list of reference_ids, returns flat facility rows joined with account distributor_code.
+    If a report has no credit facilities, returns a row with 'No Data'.
+    """
+    reference_ids = payload.get("reference_ids") or []
+    if not isinstance(reference_ids, list):
+        raise HTTPException(status_code=400, detail="reference_ids must be a list of strings")
+
+    try:
+        query = {}
+        if reference_ids:
+            query = {"reference_id": {"$in": reference_ids}}
+
+        cursor = db["reports"].find(query)
+        docs = list(cursor)
+
+        # Batch resolve distributor_code for accounts by mobile numbers
+        report_phones_10 = set()
+        for doc in docs:
+            entity = (doc.get("report") or {}).get("entity") or {}
+            cp = extract_last_10_digits(entity.get("mobile"))
+            if cp:
+                report_phones_10.add(cp)
+
+        phone_to_account_data = {}
+        if report_phones_10:
+            try:
+                acc_conditions = [Account.phone.like(f"%{p}") for p in report_phones_10]
+                matched_accs = sql_db.query(Account.phone, Account.distributor_code, Account.business_status).filter(or_(*acc_conditions)).all()
+                for acc in matched_accs:
+                    cp = extract_last_10_digits(acc.phone)
+                    if cp and cp not in phone_to_account_data:
+                        phone_to_account_data[cp] = {
+                            "distributor_code": acc.distributor_code,
+                            "business_status": acc.business_status,
+                        }
+
+                remaining = report_phones_10 - set(phone_to_account_data.keys())
+                if remaining:
+                    ct_conditions = []
+                    for p in remaining:
+                        ct_conditions.extend([Contact.mobile.like(f"%{p}"), Contact.phone.like(f"%{p}")])
+                    if ct_conditions:
+                        matched_contacts = (
+                            sql_db.query(Contact.mobile, Contact.phone, Account.distributor_code, Account.business_status)
+                            .select_from(Contact)
+                            .join(Account, Contact.account_id == Account.id)
+                            .filter(or_(*ct_conditions))
+                            .all()
+                        )
+                        for ct in matched_contacts:
+                            for raw in (ct.mobile, ct.phone):
+                                cp = extract_last_10_digits(raw)
+                                if cp and cp not in phone_to_account_data:
+                                    phone_to_account_data[cp] = {
+                                        "distributor_code": ct.distributor_code,
+                                        "business_status": ct.business_status,
+                                    }
+            except Exception as acc_e:
+                logger.warning("Error resolving distributor codes and business status: %s", acc_e)
+
+        export_rows = []
+        for doc in docs:
+            rep = doc.get("report") or {}
+            entity = rep.get("entity") or {}
+            meta = rep.get("report") or {}
+            facilities = rep.get("facilities") or []
+
+            gstin = doc.get("gstin") or entity.get("gstin") or ""
+            ref_id = doc.get("reference_id") or ""
+            trade_name = entity.get("trade_name") or ""
+            legal_name = entity.get("legal_name") or ""
+            generated_at = meta.get("generated_at") or ""
+
+            clean_m = extract_last_10_digits(entity.get("mobile"))
+            acc_details = phone_to_account_data.get(clean_m) or {}
+            dist_code = acc_details.get("distributor_code") or ""
+            bus_status = acc_details.get("business_status") or ""
+
+            if not facilities:
+                # No cibil data - show 'No Data'
+                export_rows.append({
+                    "gstin": gstin,
+                    "reference_id": ref_id,
+                    "trade_name": trade_name,
+                    "generated_at": generated_at,
+                    "lender": "No Data",
+                    "account_type": "No Data",
+                    "sanctioned": "No Data",
+                    "outstanding": "No Data",
+                    "emi": "No Data",
+                    "roi": "No Data",
+                    "next_emi_date": "No Data",
+                    "dpd_status": "No Data",
+                    "distributor_code": dist_code or "No Data",
+                    "business_status": bus_status or "No Data",
+                    "legal_name": legal_name,
+                })
+            else:
+                for fac in facilities:
+                    export_rows.append({
+                        "gstin": gstin,
+                        "reference_id": ref_id,
+                        "trade_name": trade_name,
+                        "generated_at": generated_at,
+                        "lender": fac.get("lender") if fac.get("lender") is not None else "No Data",
+                        "account_type": fac.get("account_type") if fac.get("account_type") is not None else "No Data",
+                        "sanctioned": fac.get("sanctioned") if fac.get("sanctioned") is not None else "No Data",
+                        "outstanding": fac.get("outstanding") if fac.get("outstanding") is not None else "No Data",
+                        "emi": fac.get("emi") if fac.get("emi") is not None else "No Data",
+                        "roi": fac.get("roi") if fac.get("roi") is not None else "No Data",
+                        "next_emi_date": fac.get("next_emi_date") if fac.get("next_emi_date") is not None else "No Data",
+                        "dpd_status": fac.get("dpd_status") if fac.get("dpd_status") is not None else "No Data",
+                        "distributor_code": dist_code or "No Data",
+                        "business_status": bus_status or "No Data",
+                        "legal_name": legal_name,
+                    })
+
+        return {
+            "code": "SUCCESS",
+            "message": "Export facilities generated successfully",
+            "data": export_rows,
+            "total": len(export_rows),
+        }
+    except Exception as e:
+        logger.exception("Error generating facilities export: %s", e)
+        raise HTTPException(status_code=500, detail=f"Failed to generate export: {str(e)}")
+
+
 @router.get("/{reference_id}")
 async def get_gst_cibil_report_by_reference_id(
     reference_id: str,
@@ -396,7 +547,7 @@ async def get_gst_cibil_report_by_reference_id(
         if clean_mobile:
             try:
                 matched_acc = (
-                    sql_db.query(Account.id, Account.account_name)
+                    sql_db.query(Account.id, Account.account_name, Account.distributor_code, Account.business_status)
                     .filter(Account.phone.like(f"%{clean_mobile}"))
                     .first()
                 )
@@ -404,10 +555,12 @@ async def get_gst_cibil_report_by_reference_id(
                     account_info = {
                         "account_id": matched_acc.id,
                         "account_name": matched_acc.account_name,
+                        "distributor_code": matched_acc.distributor_code,
+                        "business_status": matched_acc.business_status,
                     }
                 else:
                     matched_ct = (
-                        sql_db.query(Account.id, Account.account_name)
+                        sql_db.query(Account.id, Account.account_name, Account.distributor_code, Account.business_status)
                         .select_from(Account)
                         .join(Contact, Contact.account_id == Account.id)
                         .filter(or_(Contact.mobile.like(f"%{clean_mobile}"), Contact.phone.like(f"%{clean_mobile}")))
@@ -417,12 +570,16 @@ async def get_gst_cibil_report_by_reference_id(
                         account_info = {
                             "account_id": matched_ct.id,
                             "account_name": matched_ct.account_name,
+                            "distributor_code": matched_ct.distributor_code,
+                            "business_status": matched_ct.business_status,
                         }
             except Exception as acc_err:
                 logger.warning("Error resolving account for phone %s: %s", clean_mobile, acc_err)
 
         doc["account_id"] = str(account_info["account_id"]) if account_info else None
         doc["account_name"] = str(account_info["account_name"]) if account_info else "No Account"
+        doc["distributor_code"] = str(account_info["distributor_code"] or "") if account_info else ""
+        doc["business_status"] = str(account_info["business_status"] or "") if account_info else ""
 
         # Convert all int/float numeric values to string across the document
         serialized_doc = _stringify_numeric_values(doc)

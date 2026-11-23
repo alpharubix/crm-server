@@ -421,7 +421,12 @@ async def send_broadcast_campaign(body: BroadcastCampaignRequest):
                     business_phone_number_id=body.business_phone_number_id,
                 )
             else:
-                target_lang = r.language_code or body.language_code
+                # Per-recipient override > customer's saved preference > campaign default
+                target_lang = r.language_code or await whatsapp_service.resolve_preferred_template_language(
+                    recipient_phone=phone,
+                    template_name=body.template_name or "",
+                    default_language=body.language_code,
+                )
                 saved_msg = await whatsapp_service.send_template_message(
                     recipient_phone=phone,
                     template_name=body.template_name or "",

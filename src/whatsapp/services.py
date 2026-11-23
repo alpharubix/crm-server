@@ -1,5 +1,7 @@
 import logging
-from datetime import datetime
+import mimetypes
+from datetime import datetime, timedelta
+from pathlib import Path
 from typing import Any
 
 from sqlalchemy import or_
@@ -24,6 +26,9 @@ LANGUAGE_PAYLOAD_MAP: dict[str, str] = {
     "LANG_BN": "bn",
     "LANG_MR": "mr",
     "LANG_GU": "gu",
+    "LANG_ML": "ml",
+    "MALAYALAM": "ml",
+    "മലയാളം": "ml",
     # Exact button texts in English
     "ENGLISH": "en",
     "HINDI": "hi",
@@ -44,6 +49,67 @@ LANGUAGE_PAYLOAD_MAP: dict[str, str] = {
     "ગુજરાતી": "gu",
 }
 DEFAULT_LANGUAGE: str = "en"
+
+# Button texts / payloads that open the language picker
+CHANGE_LANGUAGE_PAYLOADS: set[str] = {
+    "CHANGE LANGUAGE",
+    "CHANGE_LANGUAGE",
+    "LANG_CHANGE",
+    "LANGUAGE",
+}
+
+# Languages offered in the "Change Language" list (row id must exist in LANGUAGE_PAYLOAD_MAP)
+LANGUAGE_MENU_OPTIONS: list[dict[str, str]] = [
+    {"id": "LANG_EN", "title": "English", "description": "English"},
+    {"id": "LANG_HI", "title": "हिंदी", "description": "Hindi"},
+    {"id": "LANG_KN", "title": "ಕನ್ನಡ", "description": "Kannada"},
+    {"id": "LANG_TA", "title": "தமிழ்", "description": "Tamil"},
+    {"id": "LANG_TE", "title": "తెలుగు", "description": "Telugu"},
+    {"id": "LANG_ML", "title": "മലയാളം", "description": "Malayalam"},
+]
+
+# Templates that support the Change Language flow. Their regional versions carry
+# only [I am Interested, STOP], so replies are classified by button position.
+LANGUAGE_FLOW_TEMPLATES: set[str] = {"channel_finance_program_himalaya"}
+
+# Template sent after a language pick when we can't tell which template prompted it
+LANGUAGE_FALLBACK_TEMPLATE = "welcome_message"
+
+# Default header image (R1Xchange logo) for templates with an IMAGE header
+DEFAULT_HEADER_MEDIA_ID = "1522132473058807"
+
+# Per-template header images, uploaded to Meta on first use and cached.
+_ASSETS_DIR = Path(__file__).resolve().parents[2] / "assets" / "whatsapp"
+TEMPLATE_HEADER_IMAGES: dict[str, Path] = {
+    "channel_finance_program": _ASSETS_DIR / "channel_finance_program_header.jpg",
+    "channel_finance_program_himalaya": _ASSETS_DIR / "channel_finance_program_header.jpg",
+}
+# Meta media IDs expire after 30 days; re-upload well before that.
+_HEADER_MEDIA_TTL = timedelta(days=25)
+_header_media_cache: dict[tuple[str, str], tuple[str, datetime]] = {}
+
+
+async def get_template_header_media_id(template_name: str, phone_id: str) -> str:
+    """Return the Meta media_id to use as the image header for a template."""
+    image_path = TEMPLATE_HEADER_IMAGES.get(template_name)
+    if not image_path:
+        return DEFAULT_HEADER_MEDIA_ID
+
+    key = (template_name, phone_id)
+    cached = _header_media_cache.get(key)
+    if cached and datetime.now() - cached[1] < _HEADER_MEDIA_TTL:
+        return cached[0]
+
+    mime_type = mimetypes.guess_type(image_path.name)[0] or "image/jpeg"
+    media_id = await meta_client.upload_media(
+        file_bytes=image_path.read_bytes(),
+        filename=image_path.name,
+        mime_type=mime_type,
+        phone_number_id=phone_id,
+    )
+    _header_media_cache[key] = (media_id, datetime.now())
+    logger.info(f"Uploaded header image for template '{template_name}': media_id={media_id}")
+    return media_id
 
 # Mapping of exact button payloads and phrases
 RESPONSE_INTENT_MAP: dict[str, str] = {
@@ -482,9 +548,36 @@ class WhatsAppService:
         button_payload = str(
             content.get("payload")
             or content.get("button_id")
+            or content.get("item_id")
             or content.get("text")
             or ""
         ).strip()
+        button_text = str(content.get("text") or "").strip()
+
+        # Template this message replies to (quoted context, else last outbound template)
+        (
+            replied_template_name,
+            replied_template_lang,
+            replied_outbound_wamid,
+        ) = await self._resolve_replied_template(reply_to_info, customer_wa_id)
+
+        # 5a. "Change Language" button -> send the language picker list
+        if (
+            button_payload.upper() in CHANGE_LANGUAGE_PAYLOADS
+            or button_text.upper() in CHANGE_LANGUAGE_PAYLOADS
+        ):
+            try:
+                await self.repo.set_conversation_language_change_template(
+                    conversation["_id"], replied_template_name
+                )
+                menu_msg = await self.send_language_menu(
+                    recipient_phone=customer_wa_id,
+                    business_phone_number_id=business_phone_number_id,
+                )
+                saved_msg["auto_reply"] = menu_msg
+            except Exception as e:
+                logger.error(f"Failed to send language menu to {customer_wa_id}: {e}")
+            return saved_msg
 
         # Check exact match or uppercase match
         selected_lang = LANGUAGE_PAYLOAD_MAP.get(
@@ -492,13 +585,23 @@ class WhatsAppService:
         ) or LANGUAGE_PAYLOAD_MAP.get(button_payload.upper())
 
         if selected_lang:
+            # Re-send the template the customer asked to change, in the chosen language
+            resend_template = (
+                conversation.get("language_change_template")
+                or (
+                    replied_template_name
+                    if replied_template_name in LANGUAGE_FLOW_TEMPLATES
+                    else None
+                )
+                or LANGUAGE_FALLBACK_TEMPLATE
+            )
             print("\n" + "#" * 60)
             print(" [LANGUAGE SELECTION DETECTED]")
             print(f" Customer: {customer_wa_id}")
             print(f" Payload:  {button_payload}")
             print(f" Mapped:   {selected_lang}")
             print(
-                f" Action:   Persisting and sending 'welcome_message' ({selected_lang})..."
+                f" Action:   Persisting and sending '{resend_template}' ({selected_lang})..."
             )
             print("#" * 60 + "\n", flush=True)
 
@@ -514,20 +617,40 @@ class WhatsAppService:
             # B. Persist preferred language in PostgreSQL contact custom_fields
             self.update_contact_language(contact_id, selected_lang)
 
-            # C. Send localized welcome/acknowledgment template in selected language
+            # C. Send the template in the selected language, reusing the variable
+            # values (body/button params) from the original send. Header is re-added.
             try:
+                original = await self.repo.db.messages.find_one(
+                    {
+                        "customer_wa_id": customer_wa_id,
+                        "direction": "outbound",
+                        "type": "template",
+                        "content.template_name": resend_template,
+                    },
+                    sort=[("timestamp", -1)],
+                )
+                reuse_components = [
+                    c
+                    for c in ((original or {}).get("content", {}).get("components") or [])
+                    if isinstance(c, dict) and c.get("type") != "header"
+                ] or None
                 auto_reply = await self.send_template_message(
                     recipient_phone=customer_wa_id,
-                    template_name="welcome_message",
+                    template_name=resend_template,
                     language_code=selected_lang,
+                    components=reuse_components,
                     business_phone_number_id=business_phone_number_id,
                 )
                 saved_msg["auto_reply"] = auto_reply
+                await self.repo.set_conversation_language_change_template(
+                    conversation["_id"], None
+                )
             except Exception as e:
                 logger.error(
-                    f"Failed to auto-send localized template 'welcome_message' to {customer_wa_id}: {e}"
+                    f"Failed to auto-send localized template '{resend_template}' to {customer_wa_id}: {e}"
                 )
                 print(f" [ERROR AUTO-SENDING TEMPLATE] {e}", flush=True)
+            return saved_msg
 
         # 6. Process Template Response Flow (Interested / Not Interested on any sent template)
         # Check payload, button text, or direct typed text
@@ -536,57 +659,185 @@ class WhatsAppService:
         )
         response_intent = classify_response_intent(raw_reply_text)
 
+        # Regional versions of language-flow templates have translated button texts:
+        # classify by button position ([I am Interested, STOP]).
+        if (
+            not response_intent
+            and content.get("interaction_type") == "quick_reply"
+            and replied_template_name in LANGUAGE_FLOW_TEMPLATES
+        ):
+            response_intent = await self._classify_by_button_position(
+                replied_template_name, replied_template_lang, button_text
+            )
+
         if response_intent:
-            # Determine which template this button click is replying to
-            target_template_name = None
-            target_outbound_wamid = None
-            target_template_lang = None
-
-            # Check reply_to context (Meta's context.id links directly to the quoted template message)
-            if reply_to_info and reply_to_info.get("message_id"):
-                quoted_wamid = reply_to_info.get("message_id")
-                quoted_doc = await self.repo.get_message_by_wamid(quoted_wamid)
-                if quoted_doc and quoted_doc.get("type") == "template":
-                    target_template_name = quoted_doc.get("content", {}).get(
-                        "template_name"
-                    )
-                    target_template_lang = quoted_doc.get("content", {}).get("language")
-                    target_outbound_wamid = quoted_wamid
-
-            # If customer clicked a Quick Reply button without quoting context, look up the last template sent
-            if not target_template_name:
-                last_tmpl = await self.repo.db.messages.find_one(
-                    {
-                        "customer_wa_id": customer_wa_id,
-                        "direction": "outbound",
-                        "type": "template",
-                    },
-                    sort=[("timestamp", -1)],
-                )
-                if last_tmpl:
-                    target_template_name = last_tmpl.get("content", {}).get(
-                        "template_name"
-                    )
-                    target_template_lang = last_tmpl.get("content", {}).get("language")
-                    target_outbound_wamid = last_tmpl.get("wamid")
-
-            # Fallback if unknown
-            target_template_name = target_template_name or "unknown_template"
-
             # Persist response in PostgreSQL whatsapp_template_responses & Contact.custom_fields
             self.record_template_response(
                 contact_id=contact_id,
                 customer_phone=customer_wa_id,
-                template_name=target_template_name,
+                template_name=replied_template_name or "unknown_template",
                 response_status=response_intent,
                 button_text=content.get("text"),
                 button_payload=button_payload,
-                outbound_wamid=target_outbound_wamid,
+                outbound_wamid=replied_outbound_wamid,
                 inbound_wamid=event.get("wamid"),
-                template_language=target_template_lang,
+                template_language=replied_template_lang,
             )
 
         return saved_msg
+
+    async def _resolve_replied_template(
+        self, reply_to_info: dict | None, customer_wa_id: str
+    ) -> tuple[str | None, str | None, str | None]:
+        """Returns (template_name, language, outbound_wamid) of the template being replied to."""
+        # Meta's context.id links directly to the quoted template message
+        if reply_to_info and reply_to_info.get("message_id"):
+            quoted_wamid = reply_to_info.get("message_id")
+            quoted_doc = await self.repo.get_message_by_wamid(quoted_wamid)
+            if quoted_doc and quoted_doc.get("type") == "template":
+                q_content = quoted_doc.get("content", {})
+                return q_content.get("template_name"), q_content.get("language"), quoted_wamid
+
+        # Quick Reply without quoting context: use the last template sent
+        last_tmpl = await self.repo.db.messages.find_one(
+            {
+                "customer_wa_id": customer_wa_id,
+                "direction": "outbound",
+                "type": "template",
+            },
+            sort=[("timestamp", -1)],
+        )
+        if last_tmpl:
+            l_content = last_tmpl.get("content", {})
+            return l_content.get("template_name"), l_content.get("language"), last_tmpl.get("wamid")
+        return None, None, None
+
+    async def _classify_by_button_position(
+        self, template_name: str, language: str | None, button_text: str
+    ) -> str | None:
+        """First quick-reply button = interested, last = not_interested (STOP)."""
+        tmpl = None
+        if language:
+            tmpl = next(
+                (
+                    t
+                    for t in await self.repo.list_templates()
+                    if t.get("name") == template_name and t.get("language") == language
+                ),
+                None,
+            )
+        if not tmpl:
+            return None
+        buttons = [
+            b.get("text", "").strip()
+            for comp in tmpl.get("components", [])
+            if comp.get("type") == "BUTTONS"
+            for b in comp.get("buttons", [])
+            if b.get("type") == "QUICK_REPLY"
+        ]
+        if len(buttons) < 2 or button_text not in buttons:
+            return None
+        idx = buttons.index(button_text)
+        if idx == 0:
+            return "interested"
+        if idx == len(buttons) - 1:
+            return "not_interested"
+        return None
+
+    def get_contact_language(self, contact_id: int | None) -> str | None:
+        """Reads the customer's saved preferred language from Contact.custom_fields."""
+        if not contact_id:
+            return None
+        try:
+            with SessionLocal() as db:
+                contact = db.query(Contact).filter(Contact.id == contact_id).first()
+                if contact:
+                    return (contact.custom_fields or {}).get("preferred_language")
+        except Exception as e:
+            logger.error(f"Error reading language for contact {contact_id}: {e}")
+        return None
+
+    async def resolve_preferred_template_language(
+        self, recipient_phone: str, template_name: str, default_language: str | None
+    ) -> str | None:
+        """
+        For broadcasts: use the customer's saved language if this template is approved
+        in that language, otherwise the campaign's default language.
+        """
+        contact_id, _ = self.resolve_or_create_contact(recipient_phone)
+        preferred = self.get_contact_language(contact_id)
+        if not preferred:
+            clean_phone = "".join(filter(str.isdigit, str(recipient_phone)))
+            conv = await self.repo.db.conversations.find_one(
+                {"customer_wa_id": clean_phone, "preferred_language": {"$ne": None}},
+                sort=[("updated_at", -1)],
+            )
+            preferred = conv.get("preferred_language") if conv else None
+        if preferred and preferred != default_language:
+            if await self.repo.template_exists(template_name, preferred):
+                return preferred
+        return default_language
+
+    async def send_language_menu(
+        self,
+        recipient_phone: str,
+        business_phone_number_id: str | None = None,
+    ) -> dict:
+        """Sends the language picker list and persists it in the conversation."""
+        clean_phone = "".join(filter(str.isdigit, str(recipient_phone)))
+        phone_id = business_phone_number_id or meta_client.phone_number_id
+        body_text = "Please choose your preferred language:"
+
+        meta_response = await meta_client.send_interactive_list(
+            to_phone=clean_phone,
+            body_text=body_text,
+            button_text="Select Language",
+            rows=LANGUAGE_MENU_OPTIONS,
+            section_title="Languages",
+            phone_number_id=phone_id,
+        )
+        wamid = (meta_response.get("messages") or [{}])[0].get("id")
+        now = utcnow()
+
+        contact_id, resolved_name = self.resolve_or_create_contact(clean_phone)
+        conversation = await self.repo.get_or_create_conversation(
+            customer_wa_id=clean_phone,
+            business_phone_number_id=phone_id,
+            contact_id=contact_id,
+            customer_name=resolved_name,
+        )
+        options_text = "\n".join(
+            f"• {o['title']} ({o['description']})" for o in LANGUAGE_MENU_OPTIONS
+        )
+        msg_doc = {
+            "conversation_id": conversation["_id"],
+            "contact_id": contact_id,
+            "business_phone_number_id": phone_id,
+            "customer_wa_id": clean_phone,
+            "wamid": wamid,
+            "direction": "outbound",
+            "type": "text",
+            "content": {
+                "text": f"{body_text}\n{options_text}",
+                "interactive_type": "list",
+                "options": LANGUAGE_MENU_OPTIONS,
+            },
+            "status": "sent_to_meta",
+            "status_history": [{"status": "sent_to_meta", "timestamp": now}],
+            "timestamp": now,
+            "raw_payload": meta_response,
+        }
+        saved = await self.repo.save_message(msg_doc)
+        await self.repo.update_conversation_last_message(
+            conversation_id=conversation["_id"],
+            message_id=saved["_id"],
+            preview="Language selection menu",
+            direction="outbound",
+            status="sent_to_meta",
+            timestamp=now,
+            increment_unread=False,
+        )
+        return saved
 
     async def process_status_update(self, event: dict[str, Any]) -> dict | None:
         """Processes delivery and read receipt status updates from Meta."""
@@ -742,6 +993,66 @@ class WhatsAppService:
                 and len(c.get("parameters")) > 0
             ]
             sanitized_components = valid_comps if valid_comps else None
+
+        # Auto-fill header image if template requires an image header and caller didn't provide one.
+        # A header carrying the generic default logo is treated as "not provided" for templates
+        # that have their own configured image.
+        has_header = False
+        if sanitized_components:
+            for c in list(sanitized_components):
+                if isinstance(c, dict) and c.get("type") == "header":
+                    params = c.get("parameters") or []
+                    uses_default_logo = any(
+                        isinstance(p, dict)
+                        and p.get("type") == "image"
+                        and (p.get("image") or {}).get("id") == DEFAULT_HEADER_MEDIA_ID
+                        for p in params
+                    )
+                    if uses_default_logo and template_name in TEMPLATE_HEADER_IMAGES:
+                        sanitized_components.remove(c)
+                    else:
+                        has_header = True
+                    break
+
+        if not has_header:
+            try:
+                tmpl_info = await self.repo.get_template(
+                    waba_id=phone_id,
+                    name=template_name,
+                    language=effective_language,
+                )
+                if not tmpl_info:
+                    # Templates may be synced under a different WABA/phone id; match by
+                    # name, preferring the same language
+                    same_name = [
+                        t
+                        for t in await self.repo.list_templates()
+                        if t.get("name") == template_name
+                    ]
+                    tmpl_info = next(
+                        (t for t in same_name if t.get("language") == effective_language),
+                        same_name[0] if same_name else None,
+                    )
+                if tmpl_info:
+                    for comp in tmpl_info.get("components", []):
+                        if comp.get("type") == "HEADER" and comp.get("format") == "IMAGE":
+                            header_media_id = await get_template_header_media_id(
+                                template_name, phone_id
+                            )
+                            header_comp = {
+                                "type": "header",
+                                "parameters": [
+                                    {
+                                        "type": "image",
+                                        "image": {"id": header_media_id},
+                                    }
+                                ],
+                            }
+                            sanitized_components = sanitized_components or []
+                            sanitized_components.insert(0, header_comp)
+                            break
+            except Exception as e:
+                logger.warning(f"Could not auto-populate template header image: {e}")
 
         # 3. Send via Meta Cloud API
         meta_response = await meta_client.send_template_message(

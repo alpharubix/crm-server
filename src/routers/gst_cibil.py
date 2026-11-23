@@ -466,6 +466,7 @@ async def get_export_facilities_by_references(
             generated_at = meta.get("generated_at") or ""
 
             clean_m = extract_last_10_digits(entity.get("mobile"))
+            phone_number = clean_m or entity.get("mobile") or "No Data"
             acc_details = phone_to_account_data.get(clean_m) or {}
             dist_code = acc_details.get("distributor_code") or ""
             bus_status = acc_details.get("business_status") or ""
@@ -488,6 +489,7 @@ async def get_export_facilities_by_references(
                     "distributor_code": dist_code or "No Data",
                     "business_status": bus_status or "No Data",
                     "legal_name": legal_name,
+                    "phone_number": phone_number,
                 })
             else:
                 for fac in facilities:
@@ -507,6 +509,7 @@ async def get_export_facilities_by_references(
                         "distributor_code": dist_code or "No Data",
                         "business_status": bus_status or "No Data",
                         "legal_name": legal_name,
+                        "phone_number": phone_number,
                     })
 
         return {

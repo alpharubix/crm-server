@@ -104,6 +104,51 @@ class MetaWhatsAppClient:
 
             return data
 
+    async def send_interactive_list(
+        self,
+        to_phone: str,
+        body_text: str,
+        button_text: str,
+        rows: list[dict[str, str]],
+        section_title: str = "Options",
+        phone_number_id: str | None = None,
+    ) -> dict[str, Any]:
+        """
+        Send an interactive list message (up to 10 rows). Only allowed inside the
+        24h customer-service window, e.g. right after the customer clicks a button.
+        Each row: {"id": "...", "title": "<=24 chars", "description": "optional"}.
+        """
+        target_phone_id = phone_number_id or self.phone_number_id
+        url = f"{self.base_url}/{target_phone_id}/messages"
+        payload = {
+            "messaging_product": "whatsapp",
+            "recipient_type": "individual",
+            "to": to_phone,
+            "type": "interactive",
+            "interactive": {
+                "type": "list",
+                "body": {"text": body_text},
+                "action": {
+                    "button": button_text,
+                    "sections": [{"title": section_title, "rows": rows}],
+                },
+            },
+        }
+
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.post(url, json=payload, headers=self._headers())
+            data = resp.json()
+
+            if resp.status_code >= 400:
+                logger.error(
+                    f"Meta send_interactive_list error: status={resp.status_code}, data={data}"
+                )
+                raise RuntimeError(
+                    f"Meta Cloud API error ({resp.status_code}): {data.get('error', {}).get('message', 'Unknown error')}"
+                )
+
+            return data
+
     async def mark_message_as_read(self, message_id: str) -> bool:
         """Inform Meta that an incoming message has been read by the business."""
         url = f"{self.base_url}/{self.phone_number_id}/messages"
@@ -147,6 +192,30 @@ class MetaWhatsAppClient:
 
         return templates
 
+
+    async def upload_media(
+        self,
+        file_bytes: bytes,
+        filename: str,
+        mime_type: str,
+        phone_number_id: str | None = None,
+    ) -> str:
+        """Upload a media file to Meta and return its media_id (valid ~30 days)."""
+        target_phone_id = phone_number_id or self.phone_number_id
+        url = f"{self.base_url}/{target_phone_id}/media"
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.post(
+                url,
+                headers={"Authorization": f"Bearer {self.access_token}"},
+                data={"messaging_product": "whatsapp", "type": mime_type},
+                files={"file": (filename, file_bytes, mime_type)},
+            )
+            data = resp.json()
+            if resp.status_code >= 400 or not data.get("id"):
+                raise RuntimeError(
+                    f"Failed to upload media: {data.get('error', {}).get('message', 'Unknown error')}"
+                )
+            return data["id"]
 
     async def get_media_url(self, media_id: str) -> dict[str, Any]:
         """Fetch the temporary download URL and mime_type from Meta for a media_id."""

@@ -174,6 +174,25 @@ class WhatsAppRepository:
             {"$set": {"preferred_language": language_code, "updated_at": utcnow()}},
         )
 
+    async def set_conversation_language_change_template(
+        self, conversation_id: str | ObjectId, template_name: str | None
+    ) -> None:
+        """Remembers which template the customer asked to receive in another language."""
+        oid = (
+            ObjectId(conversation_id)
+            if isinstance(conversation_id, str)
+            else conversation_id
+        )
+        await self.db.conversations.update_one(
+            {"_id": oid},
+            {"$set": {"language_change_template": template_name, "updated_at": utcnow()}},
+        )
+
+    async def template_exists(self, name: str, language: str) -> bool:
+        """True if an approved/synced template with this name exists in this language."""
+        doc = await self.db.templates.find_one({"name": name, "language": language})
+        return doc is not None
+
     async def list_conversations(
         self,
         page: int = 1,

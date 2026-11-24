@@ -9,7 +9,8 @@ from zoneinfo import ZoneInfo
 
 from fastapi import HTTPException, UploadFile
 from pymongo.synchronous.collection import Collection
-from sqlalchemy import and_, not_, or_
+from sqlalchemy import Text, and_, cast, not_, or_
+from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.sql import func
 
 IST = ZoneInfo("Asia/Kolkata")
@@ -161,6 +162,9 @@ def update_account(
     db_account = db.query(Account).filter(Account.id == account_id).first()
     if not db_account:
         raise HTTPException(status_code=404, detail={"msg": "Account not found"})
+
+    # debt_funding is system-managed (derived from deals) — never user-editable
+    payload = {k: v for k, v in payload.items() if k != "debt_funding"}
 
     # Check if user has permission to update this account
     if user_role not in ("super_admin", "admin"):
@@ -891,6 +895,8 @@ async def get_all_accounts(
     is_active: str | None = None,
     business_status: list[str] | str | None = None,
     phone_status: list[str] | None = None,
+    debt_funding: list[str] | None = None,
+    has_deals: str | None = None,
     call_back_date_time: datetime | None = None,
     account_owner_id: list[int] | None = None,
     phone_number: str | None = None,
@@ -1182,6 +1188,33 @@ async def get_all_accounts(
             # For OR logic across multiple statuses in a TEXT[] column:
             # Use a raw SQL condition with && operator for PostgreSQL array overlap
             filters.append(Account.phone_status.op('&&')(ps_list))
+
+    # Has Deals Filter - "yes" = account has at least one deal, "no" = none
+    if has_deals and has_deals.strip().lower() in ("yes", "no"):
+        from src.models.deal import Deal
+
+        deal_exists = (
+            db.query(Deal.id).filter(Deal.account_id == Account.id).exists()
+        )
+        filters.append(
+            deal_exists if has_deals.strip().lower() == "yes" else ~deal_exists
+        )
+
+    # Debt Funding Filter - accounts having ANY of the selected loan types.
+    # debt_funding is stored as "SCF, SCF Renewal"; split it into an array and
+    # check overlap so "SCF" does not match "SCF Renewal" (exact token match).
+    if debt_funding:
+        df_list = [
+            s.strip()
+            for s in (debt_funding if isinstance(debt_funding, list) else [debt_funding])
+            if s and s.strip()
+        ]
+        if df_list:
+            filters.append(
+                func.string_to_array(Account.debt_funding, ", ").op("&&")(
+                    cast(df_list, ARRAY(Text))
+                )
+            )
 
     # Created Date (from_date / to_date) Filter Section
     if not module and (from_date or to_date):
@@ -1610,6 +1643,7 @@ async def get_all_accounts(
                 Account.source_date,
                 Account.source_type,
                 Account.phone_status,
+                Account.debt_funding,
                 Account.assignment_date,
                 Account.modified_time,
             )
@@ -1643,6 +1677,7 @@ async def get_all_accounts(
                     "source_date",
                     "source_type",
                     "phone_status",
+                    "debt_funding",
                     "assignment_date",
                     "modified_time",
                 ]
@@ -1770,7 +1805,7 @@ def update_and_insert_accounts(insertion_accounts, updation_accounts, db: Sessio
 
     for acc in insertion_accounts:
         try:
-            account = Account(**acc)
+            account = Account(**{k: v for k, v in acc.items() if k != "debt_funding"})
             db.add(account)
             db.commit()
             db.refresh(account)
@@ -1786,7 +1821,7 @@ def update_and_insert_accounts(insertion_accounts, updation_accounts, db: Sessio
                 raise ValueError("Account ID not found")
 
             for key, value in acc.items():
-                if key == "id":
+                if key in ("id", "debt_funding"):
                     continue
                 if key in _JSONB_MERGE_KEYS:
                     # Merge CSV-supplied keys into the existing JSONB, preserving

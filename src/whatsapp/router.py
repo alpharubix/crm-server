@@ -30,7 +30,7 @@ logger = logging.getLogger("whatsapp.router")
 
 
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from bson import ObjectId
 
@@ -393,6 +393,9 @@ async def sync_templates(waba_id: str | None = Query(default=None)):
         )
 
 
+DUPLICATE_SEND_WINDOW = timedelta(minutes=30)
+
+
 @inbox_router.post("/broadcasts/send")
 async def send_broadcast_campaign(body: BroadcastCampaignRequest):
     """
@@ -401,16 +404,72 @@ async def send_broadcast_campaign(body: BroadcastCampaignRequest):
     """
     import asyncio
 
+    from pymongo.errors import DuplicateKeyError
+
+    from src.database import utcnow
+
+    db = whatsapp_service.repo.db
+
+    # Idempotency: the same campaign_id is only ever executed once, even if the
+    # HTTP request is retried by the browser/proxy or submitted twice.
+    if body.campaign_id:
+        try:
+            await db.broadcast_campaigns.insert_one(
+                {
+                    "_id": body.campaign_id,
+                    "campaign_name": body.campaign_name,
+                    "status": "running",
+                    "created_at": utcnow(),
+                }
+            )
+        except DuplicateKeyError:
+            existing = await db.broadcast_campaigns.find_one({"_id": body.campaign_id})
+            if existing and existing.get("result"):
+                return existing["result"]
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="This campaign is already being sent. Duplicate request ignored.",
+            )
+
     total = len(body.recipients)
     sent_count = 0
     failed_count = 0
+    skipped_count = 0
     results: list[dict] = []
+    seen_phones: set[str] = set()
 
     for r in body.recipients:
         phone = "".join(filter(str.isdigit, str(r.phone)))
         if not phone or len(phone) < 10:
             failed_count += 1
             results.append({"phone": r.phone, "status": "failed", "error": "Invalid phone number"})
+            continue
+
+        # Same number listed twice in the sheet
+        if phone in seen_phones:
+            skipped_count += 1
+            results.append({"phone": phone, "status": "skipped", "error": "Duplicate number in list"})
+            continue
+        seen_phones.add(phone)
+
+        # Same message already sent to this number recently (e.g. by an overlapping run)
+        is_text = body.send_mode == "text" and r.custom_text
+        recent_filter = {
+            "customer_wa_id": phone,
+            "direction": "outbound",
+            "timestamp": {"$gte": utcnow() - DUPLICATE_SEND_WINDOW},
+        }
+        if is_text:
+            recent_filter.update({"type": "text", "content.text": r.custom_text})
+        else:
+            recent_filter.update(
+                {"type": "template", "content.template_name": body.template_name or ""}
+            )
+        if await db.messages.find_one(recent_filter, {"_id": 1}):
+            skipped_count += 1
+            results.append(
+                {"phone": phone, "status": "skipped", "error": "Already sent this message recently"}
+            )
             continue
 
         try:
@@ -458,14 +517,23 @@ async def send_broadcast_campaign(body: BroadcastCampaignRequest):
 
     overall_status = "success" if failed_count == 0 else ("failed" if sent_count == 0 else "partial")
 
-    return {
+    result = {
         "status": overall_status,
         "campaign_name": body.campaign_name,
         "total": total,
         "sent": sent_count,
         "failed": failed_count,
+        "skipped": skipped_count,
         "details": results,
     }
+
+    if body.campaign_id:
+        await db.broadcast_campaigns.update_one(
+            {"_id": body.campaign_id},
+            {"$set": {"status": "done", "finished_at": utcnow(), "result": result}},
+        )
+
+    return result
 
 
 @inbox_router.get("/accounts/{account_id}/responses")

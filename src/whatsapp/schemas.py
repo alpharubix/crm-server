@@ -157,6 +157,9 @@ class BroadcastRecipient(BaseModel):
 
 class BroadcastCampaignRequest(BaseModel):
     campaign_name: str
+    # Client-generated id, unique per "Send" click. A repeated request with the
+    # same id (retry / double submit) is not executed a second time.
+    campaign_id: str | None = None
     send_mode: Literal["template", "text"] = "template"
     template_name: str | None = None
     language_code: str | None = None

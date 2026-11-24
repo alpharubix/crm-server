@@ -256,6 +256,9 @@ class AccountResponse(BaseModel):
     # Phone Status — PostgreSQL TEXT[] array
     phone_status: Optional[List[str]] = Field(default_factory=list)
 
+    # Debt Funding — read-only, derived from deals' loan_type
+    debt_funding: Optional[str] = None
+
     # Account Status Journey
     status_journey: Optional[List[AccountStatusJourneyItem]] = Field(default_factory=list)
     journey: Optional[List[AccountStatusJourneyItem]] = Field(default_factory=list)

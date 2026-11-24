@@ -113,6 +113,11 @@ class Account(Base):
     # Phone Status — PostgreSQL TEXT[] array
     phone_status = Column(ARRAY(Text), default=[], nullable=False)
 
+    # Debt Funding — system-managed, comma-separated distinct loan_type values of
+    # this account's deals (e.g. "SCF, SCF Renewal"). Never set from user input;
+    # recomputed by refresh_account_debt_funding() whenever a deal is written.
+    debt_funding = Column(Text, nullable=True)
+
     # ========== HYBRID PROPERTIES ==========
     @hybrid_property
     def current_business_type(self):

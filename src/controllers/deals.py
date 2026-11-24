@@ -13,6 +13,39 @@ from src.models.account import Account
 from src.models.deal import Deal, DealStatusHistory
 
 
+def refresh_account_debt_funding(db: Session, *account_ids) -> None:
+    """
+    Recompute accounts_merged.debt_funding for the given account(s) from the
+    loan_type of their deals: distinct values, in the order they first appeared
+    (oldest deal first), joined with ", ".  e.g. SCF, SCF Renewal, SCF, SCF Renewal
+    -> "SCF, SCF Renewal".
+
+    Does NOT commit — call it before the caller's db.commit() so it is atomic
+    with the deal write. Pending deal changes are autoflushed by the query.
+    """
+    for account_id in {a for a in account_ids if a is not None}:
+        rows = (
+            db.query(Deal.loan_type)
+            .filter(Deal.account_id == account_id, Deal.loan_type.isnot(None))
+            .order_by(Deal.id.asc())
+            .all()
+        )
+        seen: list[str] = []
+        for (loan_type,) in rows:
+            lt = loan_type.strip()
+            if lt and lt not in seen:
+                seen.append(lt)
+
+        db.query(Account).filter(Account.id == account_id).update(
+            {
+                Account.debt_funding: ", ".join(seen) or None,
+                # keep modified_time unchanged — a deal change isn't an account edit
+                Account.modified_time: Account.modified_time,
+            },
+            synchronize_session=False,
+        )
+
+
 def format_duration_short(seconds: int) -> str:
     if not seconds or seconds < 0:
         return "0m"
@@ -676,6 +709,7 @@ def create_deal(deal, db: Session, user_id, user_role):
             moved_by_id=user_id,
         )
         db.add(deal_history)
+        refresh_account_debt_funding(db, created_deal.account_id)
         db.commit()
         db.refresh(created_deal)
 
@@ -748,6 +782,7 @@ def update_deal_based_on_id(user_id, user_role, db: Session, deal_id: int, paylo
         }
 
         old_status = db_deal.deal_status
+        old_account_id = db_deal.account_id
 
         for key, value in payload.items():
             if hasattr(db_deal, key):
@@ -867,6 +902,8 @@ def update_deal_based_on_id(user_id, user_role, db: Session, deal_id: int, paylo
             )
             db.add(new_history)
 
+        # loan_type or account_id may have changed — refresh old and new account
+        refresh_account_debt_funding(db, old_account_id, db_deal.account_id)
         db.commit()
         db.refresh(db_deal)
         try:
@@ -976,6 +1013,7 @@ def update_and_insert_deals(insertion_deals, updation_deals, db: Session):
                 moved_by_id=1,
             )
             db.add(deal_history)
+            refresh_account_debt_funding(db, new_deal.account_id)
             db.commit()
             inserted += 1
         except SQLAlchemyError as e:
@@ -993,6 +1031,7 @@ def update_and_insert_deals(insertion_deals, updation_deals, db: Session):
 
 
             old_deal_status = deal.deal_status
+            old_account_id = deal.account_id
             for key, value in deal_data.items():
                 if key == "id":
                     continue
@@ -1055,6 +1094,7 @@ def update_and_insert_deals(insertion_deals, updation_deals, db: Session):
                 )
                 db.add(new_history)
 
+            refresh_account_debt_funding(db, old_account_id, deal.account_id)
             try:
                 db.commit()
                 db.refresh(deal)

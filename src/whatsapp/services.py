@@ -83,6 +83,7 @@ _ASSETS_DIR = Path(__file__).resolve().parents[2] / "assets" / "whatsapp"
 TEMPLATE_HEADER_IMAGES: dict[str, Path] = {
     "channel_finance_program": _ASSETS_DIR / "channel_finance_program_header.jpg",
     "channel_finance_program_himalaya": _ASSETS_DIR / "channel_finance_program_header.jpg",
+    "channel_finance_welcome_template": _ASSETS_DIR / "channel_finance_program_header.jpg",
 }
 # Meta media IDs expire after 30 days; re-upload well before that.
 _HEADER_MEDIA_TTL = timedelta(days=25)

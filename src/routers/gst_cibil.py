@@ -1,5 +1,6 @@
 import logging
 import re
+from difflib import SequenceMatcher
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, Body
 from pymongo.database import Database
@@ -22,6 +23,57 @@ def extract_last_10_digits(phone_str: Optional[str]) -> Optional[str]:
     if len(cleaned) >= 10:
         return cleaned[-10:]
     return None
+
+
+def _has_monthly_purchase(business_details) -> bool:
+    """True when the account's business_details JSON contains the monthly_purchase key."""
+    return isinstance(business_details, dict) and "monthly_purchase" in business_details
+
+
+def _normalize_name(value: Optional[str]) -> str:
+    """Uppercase, keep only letters/digits, collapse whitespace."""
+    return " ".join(re.sub(r"[^A-Z0-9]+", " ", (value or "").upper()).split())
+
+
+def _name_score(report_names, account_name: Optional[str]) -> float:
+    """
+    How well an account name matches the report's trade/legal name (0..1).
+    Exact match = 1.0, one name contained in the other = 0.9, otherwise the
+    better of character similarity and word overlap.
+    """
+    acc = _normalize_name(account_name)
+    if not acc:
+        return 0.0
+    best = 0.0
+    for raw in report_names:
+        name = _normalize_name(raw)
+        if not name:
+            continue
+        if name == acc:
+            return 1.0
+        if name in acc or acc in name:
+            best = max(best, 0.9)
+            continue
+        ratio = SequenceMatcher(None, name, acc).ratio()
+        a, b = set(name.split()), set(acc.split())
+        overlap = len(a & b) / len(a | b) if a | b else 0.0
+        best = max(best, ratio, overlap)
+    return best
+
+
+def _pick_account(candidates, report_names):
+    """
+    Choose among accounts sharing the report's phone: best name match with the
+    report's trade/legal name, then the one with monthly_purchase, then lowest id.
+    """
+    return max(
+        candidates,
+        key=lambda c: (
+            _name_score(report_names, c["account_name"]),
+            c["has_monthly_purchase"],
+            -c["account_id"],
+        ),
+    )
 
 
 @router.get("")
@@ -164,6 +216,7 @@ async def get_gst_cibil_reports(
                 "account_name": matched_account_obj.account_name,
                 "distributor_code": matched_account_obj.distributor_code,
                 "business_status": matched_account_obj.business_status,
+                "has_monthly_purchase": _has_monthly_purchase(matched_account_obj.business_details),
             }
         else:
             single_acc_data = None
@@ -178,15 +231,16 @@ async def get_gst_cibil_reports(
             if report_phones_10:
                 try:
                     acc_conditions = [Account.phone.like(f"%{p}") for p in report_phones_10]
-                    matched_accs = sql_db.query(Account.id, Account.account_name, Account.distributor_code, Account.business_status, Account.phone).filter(or_(*acc_conditions)).all()
+                    matched_accs = sql_db.query(Account.id, Account.account_name, Account.distributor_code, Account.business_status, Account.business_details, Account.phone).filter(or_(*acc_conditions)).all()
                     for acc in matched_accs:
                         cp = extract_last_10_digits(acc.phone)
-                        if cp and cp not in phone_to_account:
-                            phone_to_account[cp] = {
+                        if cp in report_phones_10:
+                            phone_to_account.setdefault(cp, {})[acc.id] = {
                                 "account_id": acc.id,
                                 "account_name": acc.account_name,
                                 "distributor_code": acc.distributor_code,
                                 "business_status": acc.business_status,
+                                "has_monthly_purchase": _has_monthly_purchase(acc.business_details),
                             }
 
                     remaining = report_phones_10 - set(phone_to_account.keys())
@@ -196,7 +250,7 @@ async def get_gst_cibil_reports(
                             ct_conditions.extend([Contact.mobile.like(f"%{p}"), Contact.phone.like(f"%{p}")])
                         if ct_conditions:
                             matched_contacts = (
-                                sql_db.query(Contact.mobile, Contact.phone, Account.id, Account.account_name, Account.distributor_code, Account.business_status)
+                                sql_db.query(Contact.mobile, Contact.phone, Account.id, Account.account_name, Account.distributor_code, Account.business_status, Account.business_details)
                                 .select_from(Contact)
                                 .join(Account, Contact.account_id == Account.id)
                                 .filter(or_(*ct_conditions))
@@ -205,12 +259,13 @@ async def get_gst_cibil_reports(
                             for ct in matched_contacts:
                                 for raw in (ct.mobile, ct.phone):
                                     cp = extract_last_10_digits(raw)
-                                    if cp and cp not in phone_to_account:
-                                        phone_to_account[cp] = {
+                                    if cp in remaining:
+                                        phone_to_account.setdefault(cp, {})[ct.id] = {
                                             "account_id": ct.id,
                                             "account_name": ct.account_name,
                                             "distributor_code": ct.distributor_code,
                                             "business_status": ct.business_status,
+                                            "has_monthly_purchase": _has_monthly_purchase(ct.business_details),
                                         }
                 except Exception as acc_e:
                     logger.warning("Error resolving account details for reports batch: %s", acc_e)
@@ -228,7 +283,15 @@ async def get_gst_cibil_reports(
             if single_acc_data:
                 acc_info = single_acc_data
             else:
-                acc_info = phone_to_account.get(clean_m) if clean_m else None
+                candidates = phone_to_account.get(clean_m) if clean_m else None
+                acc_info = (
+                    _pick_account(
+                        candidates.values(),
+                        (entity.get("trade_name"), entity.get("legal_name")),
+                    )
+                    if candidates
+                    else None
+                )
 
             facilities_list = report_data.get("facilities") or []
             has_cibil = bool(facilities_list and len(facilities_list) > 0)
@@ -253,6 +316,7 @@ async def get_gst_cibil_reports(
                     "business_status": (acc_info.get("business_status") or "") if acc_info else "",
                     "facilities_count": len(facilities_list),
                     "has_cibil_data": has_cibil,
+                    "has_monthly_purchase": bool(acc_info.get("has_monthly_purchase")) if acc_info else False,
                 }
             )
 
@@ -419,14 +483,18 @@ async def get_export_facilities_by_references(
         if report_phones_10:
             try:
                 acc_conditions = [Account.phone.like(f"%{p}") for p in report_phones_10]
-                matched_accs = sql_db.query(Account.phone, Account.distributor_code, Account.business_status).filter(or_(*acc_conditions)).all()
+                matched_accs = sql_db.query(Account.id, Account.account_name, Account.phone, Account.distributor_code, Account.business_status, Account.business_details).filter(or_(*acc_conditions)).all()
                 for acc in matched_accs:
                     cp = extract_last_10_digits(acc.phone)
-                    if cp and cp not in phone_to_account_data:
-                        phone_to_account_data[cp] = {
-                            "distributor_code": acc.distributor_code,
-                            "business_status": acc.business_status,
-                        }
+                    if cp in report_phones_10:
+                        phone_to_account_data.setdefault(cp, {})[acc.id] = {
+                                "account_id": acc.id,
+                                "account_name": acc.account_name,
+                                "distributor_code": acc.distributor_code,
+                                "business_status": acc.business_status,
+                                "has_monthly_purchase": _has_monthly_purchase(acc.business_details),
+                                "monthly_purchase": (acc.business_details or {}).get("monthly_purchase") if isinstance(acc.business_details, dict) else None,
+                            }
 
                 remaining = report_phones_10 - set(phone_to_account_data.keys())
                 if remaining:
@@ -435,7 +503,7 @@ async def get_export_facilities_by_references(
                         ct_conditions.extend([Contact.mobile.like(f"%{p}"), Contact.phone.like(f"%{p}")])
                     if ct_conditions:
                         matched_contacts = (
-                            sql_db.query(Contact.mobile, Contact.phone, Account.distributor_code, Account.business_status)
+                            sql_db.query(Contact.mobile, Contact.phone, Account.id, Account.account_name, Account.distributor_code, Account.business_status, Account.business_details)
                             .select_from(Contact)
                             .join(Account, Contact.account_id == Account.id)
                             .filter(or_(*ct_conditions))
@@ -444,10 +512,14 @@ async def get_export_facilities_by_references(
                         for ct in matched_contacts:
                             for raw in (ct.mobile, ct.phone):
                                 cp = extract_last_10_digits(raw)
-                                if cp and cp not in phone_to_account_data:
-                                    phone_to_account_data[cp] = {
+                                if cp in remaining:
+                                    phone_to_account_data.setdefault(cp, {})[ct.id] = {
+                                        "account_id": ct.id,
+                                        "account_name": ct.account_name,
                                         "distributor_code": ct.distributor_code,
                                         "business_status": ct.business_status,
+                                        "has_monthly_purchase": _has_monthly_purchase(ct.business_details),
+                                        "monthly_purchase": (ct.business_details or {}).get("monthly_purchase") if isinstance(ct.business_details, dict) else None,
                                     }
             except Exception as acc_e:
                 logger.warning("Error resolving distributor codes and business status: %s", acc_e)
@@ -467,9 +539,15 @@ async def get_export_facilities_by_references(
 
             clean_m = extract_last_10_digits(entity.get("mobile"))
             phone_number = clean_m or entity.get("mobile") or "No Data"
-            acc_details = phone_to_account_data.get(clean_m) or {}
+            # Same account choice as the Generated Reports list (best trade/legal name match)
+            candidates = phone_to_account_data.get(clean_m) if clean_m else None
+            acc_details = (
+                _pick_account(candidates.values(), (trade_name, legal_name)) if candidates else {}
+            )
             dist_code = acc_details.get("distributor_code") or ""
             bus_status = acc_details.get("business_status") or ""
+            monthly_purchase = acc_details.get("monthly_purchase")
+            address = entity.get("address") or ""
 
             if not facilities:
                 # No cibil data - show 'No Data'
@@ -490,6 +568,8 @@ async def get_export_facilities_by_references(
                     "business_status": bus_status or "No Data",
                     "legal_name": legal_name,
                     "phone_number": phone_number,
+                    "monthly_purchase": monthly_purchase if monthly_purchase is not None else "No Data",
+                    "address": address or "No Data",
                 })
             else:
                 for fac in facilities:
@@ -510,6 +590,8 @@ async def get_export_facilities_by_references(
                         "business_status": bus_status or "No Data",
                         "legal_name": legal_name,
                         "phone_number": phone_number,
+                        "monthly_purchase": monthly_purchase if monthly_purchase is not None else "No Data",
+                        "address": address or "No Data",
                     })
 
         return {
